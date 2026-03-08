@@ -19,6 +19,7 @@ import HowItWorks from "@/pages/HowItWorks";
 import Pricing from "@/pages/Pricing";
 import Contact from "@/pages/Contact";
 import Features from "@/pages/Features";
+import CompleteProfile from "@/pages/CompleteProfile";
 
 import AdminTestManager from "./pages/AdminTestManager";
 
@@ -73,6 +74,7 @@ export default function AppRoutes() {
           <Route path="/courses" element={<TenantCourses />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route path="/complete-profile" element={<CompleteProfile />} />
 
           {/* --- PROTECTED STUDENT ROUTES --- */}
           {/* We replace 'RequireRole' with 'StudentRoute' here */}
@@ -128,6 +130,7 @@ export default function AppRoutes() {
           <Route path="/signup" element={<Signup />} />
           <Route path="/contact" element={<Contact />} />
           <Route path="/features" element={<Features />} />
+          <Route path="/complete-profile" element={<CompleteProfile />} />
 
 
           {/* ✅ Admin Panel */}

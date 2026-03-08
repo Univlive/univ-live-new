@@ -1,11 +1,24 @@
 import { useMemo, useState, useEffect } from "react";
+import type { FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Eye, EyeOff, Loader2, Home } from "lucide-react";
 import { toast } from "sonner";
 import { useTenant } from "@/contexts/TenantProvider";
 
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { arrayUnion, doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  updateProfile,
+  GoogleAuthProvider,
+  signInWithPopup,
+} from "firebase/auth";
+import {
+  arrayUnion,
+  doc,
+  getDoc,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +35,17 @@ function normSlug(raw: string) {
     .replace(/(^-|-$)/g, "");
 }
 
+function appDomain() {
+  return (import.meta as any).env?.VITE_APP_DOMAIN || "univ.live";
+}
+
+function mainSignupUrlForStudent(tSlug: string) {
+  if (window.location.hostname === "localhost") {
+    return `/signup?role=student&tenant=${encodeURIComponent(tSlug)}`;
+  }
+  return `https://${appDomain()}/signup?role=student&tenant=${encodeURIComponent(tSlug)}`;
+}
+
 export default function Signup() {
   const [searchParams] = useSearchParams();
   const nav = useNavigate();
@@ -30,6 +54,9 @@ export default function Signup() {
   const roleParam = (searchParams.get("role") || "").toLowerCase();
   const [role, setRole] = useState<RoleUI>(roleParam === "educator" ? "educator" : "student");
   const effectiveRole: RoleUI = isTenantDomain ? "student" : role;
+
+  const tenantParam = normSlug(searchParams.get("tenant") || "");
+  const effectiveTenantSlug = isTenantDomain ? (tenantSlug || "") : tenantParam;
 
   // If user didn't provide a role via query param, default to educator on main domain.
   useEffect(() => {
@@ -56,12 +83,11 @@ export default function Signup() {
     return effectiveRole === "educator" ? "Educator Signup" : "Student Signup";
   }, [tenantLoading, isTenantDomain, tenantSlug, effectiveRole]);
 
-  async function callRegisterStudent(token: string) {
-    if (!tenantSlug) return;
+  async function callRegisterStudent(token: string, tSlug: string) {
     await fetch("/api/tenant/register-student", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ tenantSlug }),
+      body: JSON.stringify({ tenantSlug: tSlug }),
     });
   }
 
@@ -70,14 +96,82 @@ export default function Signup() {
     return !s.exists();
   }
 
-  const onSubmit = async (e: React.FormEvent) => {
+  async function onGoogleSignup() {
+    setLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+
+      const cred = await signInWithPopup(auth, provider);
+      const u = cred.user;
+
+      // Always go to onboarding because Google won't provide all required fields
+      await setDoc(
+        doc(db, "users", u.uid),
+        {
+          uid: u.uid,
+          role: effectiveRole === "student" ? "STUDENT" : "EDUCATOR",
+          displayName: u.displayName || "",
+          email: u.email || "",
+          photoURL: u.photoURL || null,
+          onboardingComplete: false,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      if (effectiveRole === "student") {
+        const tSlug = effectiveTenantSlug;
+        if (!tSlug) {
+          toast.error("Students must signup from a coaching URL (or include ?tenant=...).");
+          await auth.signOut().catch(() => {});
+          return;
+        }
+        nav(`/complete-profile?role=student&tenant=${encodeURIComponent(tSlug)}`);
+      } else {
+        nav(`/complete-profile?role=educator`);
+      }
+    } catch (err: any) {
+      console.error(err);
+
+      // Tenant domain may not be authorized -> redirect to main domain signup fallback
+      if (String(err?.code) === "auth/unauthorized-domain" && isTenantDomain && tenantSlug) {
+        window.location.href = mainSignupUrlForStudent(tenantSlug);
+        return;
+      }
+
+      toast.error(err?.message || "Google signup failed");
+      await auth.signOut().catch(() => {});
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
+      // ---------- STUDENT SIGNUP ----------
       if (effectiveRole === "student") {
-        if (!isTenantDomain || !tenantSlug || !tenant?.educatorId) {
+        if (!effectiveTenantSlug) {
           toast.error("Students must signup from a valid coaching URL.");
+          setLoading(false);
+          return;
+        }
+
+        // If we are on tenant domain, tenant data should exist; on main domain, we can resolve via tenants/{slug}
+        let educatorIdResolved = "";
+        if (isTenantDomain) {
+          educatorIdResolved = tenant?.educatorId || "";
+        } else {
+          const tSnap = await getDoc(doc(db, "tenants", effectiveTenantSlug));
+          educatorIdResolved = String(tSnap.data()?.educatorId || "");
+        }
+
+        if (!educatorIdResolved) {
+          toast.error("Invalid coaching slug. Please check the coaching URL.");
           setLoading(false);
           return;
         }
@@ -93,9 +187,10 @@ export default function Signup() {
               role: "STUDENT",
               displayName: name,
               email,
-              educatorId: tenant.educatorId,
-              tenantSlug, // legacy
-              enrolledTenants: arrayUnion(tenantSlug),
+              educatorId: educatorIdResolved,
+              tenantSlug: effectiveTenantSlug, // legacy
+              enrolledTenants: arrayUnion(effectiveTenantSlug),
+              onboardingComplete: true,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             },
@@ -103,7 +198,7 @@ export default function Signup() {
           );
 
           const token = await cred.user.getIdToken();
-          await callRegisterStudent(token).catch(() => {});
+          await callRegisterStudent(token, effectiveTenantSlug).catch(() => {});
           toast.success("Account created!");
           nav("/student");
           return;
@@ -116,15 +211,16 @@ export default function Signup() {
                 doc(db, "users", cred2.user.uid),
                 {
                   role: "STUDENT",
-                  tenantSlug,
-                  enrolledTenants: arrayUnion(tenantSlug),
+                  tenantSlug: effectiveTenantSlug,
+                  enrolledTenants: arrayUnion(effectiveTenantSlug),
+                  onboardingComplete: true,
                   updatedAt: serverTimestamp(),
                 },
                 { merge: true }
               );
 
               const token = await cred2.user.getIdToken();
-              await callRegisterStudent(token).catch(() => {});
+              await callRegisterStudent(token, effectiveTenantSlug).catch(() => {});
               toast.success("Signed in and enrolled!");
               nav("/student");
               return;
@@ -137,7 +233,7 @@ export default function Signup() {
         }
       }
 
-      // Educator signup (main domain only)
+      // ---------- EDUCATOR SIGNUP (main domain only) ----------
       if (isTenantDomain) {
         toast.error("Educators must signup from the main website, not the coaching URL.");
         return;
@@ -160,6 +256,7 @@ export default function Signup() {
           displayName: name,
           email,
           tenantSlug: slug,
+          onboardingComplete: true,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         },
@@ -247,12 +344,13 @@ export default function Signup() {
               </div>
             )}
 
-            {/* Dummy Google Signup */}
+            {/* Google Signup */}
             <Button
               type="button"
               variant="outline"
               className="w-full h-11 bg-background"
-              onClick={() => toast.info("Google signup coming soon!")}
+              onClick={onGoogleSignup}
+              disabled={loading}
             >
               <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
                 <path
@@ -373,7 +471,7 @@ export default function Signup() {
               Already have an account?{" "}
               <Link
                 className="font-medium text-[#4F46E5] hover:underline"
-                to={`/login?role=${effectiveRole}`}
+                to={`/login?role=${effectiveRole}${!isTenantDomain && effectiveRole === "student" && effectiveTenantSlug ? `&tenant=${encodeURIComponent(effectiveTenantSlug)}` : ""}`}
               >
                 Login
               </Link>
@@ -384,10 +482,9 @@ export default function Signup() {
 
       {/* RIGHT COLUMN - IMAGE (Hidden on Mobile) */}
       <div className="hidden lg:flex flex-col bg-[#FFF5EE] p-12 justify-center items-center relative overflow-hidden">
-        {/* Soft blur background blobs */}
         <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-orange-200/50 rounded-full blur-[100px] translate-x-1/3 -translate-y-1/3" />
         <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-pink-200/40 rounded-full blur-[100px] -translate-x-1/3 translate-y-1/3" />
-        
+
         <div className="relative w-full max-w-xl aspect-[4/5] rounded-[2rem] overflow-hidden shadow-2xl border-8 border-white/50">
           <img
             src="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=1000&auto=format&fit=crop"

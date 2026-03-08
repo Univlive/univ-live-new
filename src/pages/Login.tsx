@@ -1,8 +1,19 @@
 import { useMemo, useState, useEffect } from "react";
+import type { FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Eye, EyeOff, Loader2, Home } from "lucide-react";
-import { signInWithEmailAndPassword } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import {
+  signInWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup,
+} from "firebase/auth";
+import {
+  arrayUnion,
+  doc,
+  getDoc,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +23,33 @@ import { useTenant } from "@/contexts/TenantProvider";
 
 type RoleUI = "student" | "educator";
 
+function normSlug(raw: string) {
+  return String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+function appDomain() {
+  return (import.meta as any).env?.VITE_APP_DOMAIN || "univ.live";
+}
+
+function mainLoginUrlForStudent(tSlug: string) {
+  if (window.location.hostname === "localhost") {
+    return `/login?role=student&tenant=${encodeURIComponent(tSlug)}`;
+  }
+  return `https://${appDomain()}/login?role=student&tenant=${encodeURIComponent(tSlug)}`;
+}
+
+function studentRedirectUrl(tSlug: string) {
+  if (window.location.hostname === "localhost") {
+    return `/student?tenant=${encodeURIComponent(tSlug)}`;
+  }
+  return `https://${tSlug}.${appDomain()}/student`;
+}
+
 export default function Login() {
   const [searchParams] = useSearchParams();
   const nav = useNavigate();
@@ -20,13 +58,20 @@ export default function Login() {
   const roleParam = (searchParams.get("role") || "").toLowerCase();
   const initialRole: RoleUI = roleParam === "educator" ? "educator" : "student";
 
+  const tenantParam = normSlug(searchParams.get("tenant") || "");
+  const effectiveTenantSlug = isTenantDomain ? (tenantSlug || "") : tenantParam;
+
   const [role, setRole] = useState<RoleUI>(initialRole);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // On tenant domain: students only
   const effectiveRole: RoleUI = isTenantDomain ? "student" : role;
+
+  // Student context can also happen on main domain if ?role=student&tenant=slug exists
+  const inStudentContext = isTenantDomain || (effectiveRole === "student" && !!effectiveTenantSlug);
 
   // If user didn't provide a role via query param, default to educator on main domain.
   useEffect(() => {
@@ -40,19 +85,144 @@ export default function Login() {
   const title = useMemo(() => {
     if (tenantLoading) return "Loading…";
     if (isTenantDomain) return `Login to ${tenantSlug || "your coaching"}`;
+    if (inStudentContext) return `Student Login`;
     return effectiveRole === "educator" ? "Educator Login" : "Student Login";
-  }, [tenantLoading, isTenantDomain, tenantSlug, effectiveRole]);
+  }, [tenantLoading, isTenantDomain, tenantSlug, effectiveRole, inStudentContext]);
 
-  async function registerStudent(token: string) {
-    if (!tenantSlug) return;
+  async function registerStudent(token: string, tSlug: string) {
     await fetch("/api/tenant/register-student", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ tenantSlug }),
+      body: JSON.stringify({ tenantSlug: tSlug }),
     });
   }
 
-  const onSubmit = async (e: React.FormEvent) => {
+  async function handlePostAuthRouting(userUid: string) {
+    const snap = await getDoc(doc(db, "users", userUid));
+    const data: any = snap.exists() ? snap.data() : {};
+
+    const roleDb = String(data?.role || "STUDENT").toUpperCase();
+    const enrolledTenants: string[] = Array.isArray(data?.enrolledTenants)
+      ? data.enrolledTenants
+      : typeof data?.tenantSlug === "string"
+      ? [data.tenantSlug]
+      : [];
+
+    // ---------- STUDENT FLOW ----------
+    if (inStudentContext) {
+      const tSlug = effectiveTenantSlug;
+      if (!tSlug) {
+        toast.error("Missing coaching slug. Please open your coaching URL.");
+        await auth.signOut().catch(() => {});
+        return;
+      }
+
+      if (roleDb === "EDUCATOR" || roleDb === "ADMIN") {
+        toast.error("Educators must login from the main website, not the coaching login.");
+        await auth.signOut().catch(() => {});
+        return;
+      }
+
+      if (!enrolledTenants.includes(tSlug)) {
+        toast.error("You are not enrolled in this coaching. Please signup on this coaching URL first.");
+        await auth.signOut().catch(() => {});
+        return;
+      }
+
+      const token = await auth.currentUser!.getIdToken();
+      await registerStudent(token, tSlug).catch(() => {});
+
+      toast.success("Welcome back!");
+      if (isTenantDomain) nav("/student");
+      else window.location.href = studentRedirectUrl(tSlug);
+      return;
+    }
+
+    // ---------- MAIN DOMAIN EDUCATOR / ADMIN ----------
+    if (roleDb === "ADMIN") {
+      toast.success("Logged in!");
+      nav("/admin");
+      return;
+    }
+
+    if (roleDb !== "EDUCATOR") {
+      toast.error("This account is not an educator account.");
+      await auth.signOut().catch(() => {});
+      return;
+    }
+
+    const tenantSlugDb = String(data?.tenantSlug || "");
+    if (!tenantSlugDb) {
+      // Missing educator required data -> onboarding
+      nav("/complete-profile?role=educator");
+      return;
+    }
+
+    toast.success("Logged in!");
+    nav("/educator");
+  }
+
+  async function onGoogleLogin() {
+    setLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+
+      const cred = await signInWithPopup(auth, provider);
+      const u = cred.user;
+
+      // Ensure user profile exists
+      const userRef = doc(db, "users", u.uid);
+      const snap = await getDoc(userRef);
+
+      if (!snap.exists()) {
+        await setDoc(
+          userRef,
+          {
+            uid: u.uid,
+            role: inStudentContext ? "STUDENT" : "EDUCATOR",
+            displayName: u.displayName || "",
+            email: u.email || "",
+            photoURL: u.photoURL || null,
+            onboardingComplete: false,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        // Need more data -> go to onboarding
+        if (inStudentContext) {
+          if (!effectiveTenantSlug) {
+            toast.error("Missing coaching slug.");
+            await auth.signOut().catch(() => {});
+            return;
+          }
+          nav(`/complete-profile?role=student&tenant=${encodeURIComponent(effectiveTenantSlug)}`);
+        } else {
+          nav(`/complete-profile?role=educator`);
+        }
+        return;
+      }
+
+      await handlePostAuthRouting(u.uid);
+    } catch (err: any) {
+      console.error(err);
+
+      // Tenant subdomain may not be authorized in Firebase -> redirect to main domain login fallback
+      if (String(err?.code) === "auth/unauthorized-domain" && isTenantDomain && tenantSlug) {
+        window.location.href = mainLoginUrlForStudent(tenantSlug);
+        return;
+      }
+
+      toast.error(err?.message || "Google login failed");
+      await auth.signOut().catch(() => {});
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
@@ -70,56 +240,64 @@ export default function Login() {
         ? [data.tenantSlug]
         : [];
 
-      // ---- tenant domain: students only ----
-      if (isTenantDomain) {
-        if (!tenantSlug) {
-          toast.error("Invalid coaching URL (tenant slug missing).");
-          await auth.signOut();
+      // ---------- STUDENT FLOW ----------
+      if (inStudentContext) {
+        const tSlug = effectiveTenantSlug;
+
+        if (!tSlug) {
+          toast.error("Missing coaching slug. Please open your coaching URL.");
+          await auth.signOut().catch(() => {});
           return;
         }
 
         if (roleDb === "EDUCATOR" || roleDb === "ADMIN") {
-          toast.error("Educators must login from the main website, not the coaching URL.");
-          await auth.signOut();
+          toast.error("Educators must login from the main website, not the coaching login.");
+          await auth.signOut().catch(() => {});
           return;
         }
 
-        if (!enrolledTenants.includes(tenantSlug)) {
+        if (!enrolledTenants.includes(tSlug)) {
           toast.error("You are not enrolled in this coaching. Please signup on this coaching URL first.");
-          await auth.signOut();
+          await auth.signOut().catch(() => {});
           return;
         }
 
         const token = await cred.user.getIdToken();
-        await registerStudent(token).catch(() => {});
+        await registerStudent(token, tSlug).catch(() => {});
         toast.success("Welcome back!");
-        nav("/student");
+
+        if (isTenantDomain) nav("/student");
+        else window.location.href = studentRedirectUrl(tSlug);
         return;
       }
 
-      // ---- main domain: educators only (students must use coaching URL) ----
+      // ---------- MAIN DOMAIN EDUCATOR / ADMIN ----------
+      // Students must not login on main domain without tenant fallback
       if (effectiveRole === "student") {
         toast.error("Students must login from their coaching URL (tenant website).");
-        await auth.signOut();
+        await auth.signOut().catch(() => {});
         return;
       }
 
-      if (!(roleDb === "EDUCATOR" || roleDb === "ADMIN")) {
+      if (roleDb === "ADMIN") {
+        toast.success("Logged in!");
+        nav("/admin");
+        return;
+      }
+
+      if (roleDb !== "EDUCATOR") {
         toast.error("This account is not an educator account.");
-        await auth.signOut();
+        await auth.signOut().catch(() => {});
         return;
       }
 
-      const tenantSlugDb = data?.tenantSlug;
+      const tenantSlugDb = String(data?.tenantSlug || "");
       if (!tenantSlugDb) {
-        toast.error("Educator account misconfigured (missing tenant slug).");
-        await auth.signOut();
+        nav("/complete-profile?role=educator");
         return;
       }
 
       toast.success("Logged in!");
-
-      // ✅ Keep educator on main domain - TenantProvider will use their tenantSlug from profile
       nav("/educator");
     } catch (error: any) {
       console.error(error);
@@ -159,14 +337,13 @@ export default function Login() {
               </p>
             </div>
 
-            {/* role is set via useEffect; avoid state changes during render */}
-
-            {/* Dummy Google Login */}
+            {/* Google Login */}
             <Button
               type="button"
               variant="outline"
               className="w-full h-11 bg-background"
-              onClick={() => toast.info("Google login coming soon!")}
+              onClick={onGoogleLogin}
+              disabled={loading}
             >
               <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
                 <path
@@ -243,7 +420,7 @@ export default function Login() {
               Don’t have an account?{" "}
               <Link
                 className="font-medium text-[#4F46E5] hover:underline"
-                to={`/signup?role=${effectiveRole}`}
+                to={`/signup?role=${effectiveRole}${!isTenantDomain && effectiveRole === "student" && effectiveTenantSlug ? `&tenant=${encodeURIComponent(effectiveTenantSlug)}` : ""}`}
               >
                 Sign up
               </Link>
@@ -254,10 +431,9 @@ export default function Login() {
 
       {/* RIGHT COLUMN - IMAGE (Hidden on Mobile) */}
       <div className="hidden lg:flex flex-col bg-[#FFF5EE] p-12 justify-center items-center relative overflow-hidden">
-        {/* Soft blur background blobs for extra aesthetics */}
         <div className="absolute top-0 left-0 w-[500px] h-[500px] bg-orange-200/50 rounded-full blur-[100px] -translate-x-1/2 -translate-y-1/2" />
         <div className="absolute bottom-0 right-0 w-[500px] h-[500px] bg-pink-200/40 rounded-full blur-[100px] translate-x-1/3 translate-y-1/3" />
-        
+
         <div className="relative w-full max-w-xl aspect-[4/5] rounded-[2rem] overflow-hidden shadow-2xl border-8 border-white/50">
           <img
             src="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=1000&auto=format&fit=crop"
