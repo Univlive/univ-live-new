@@ -54,6 +54,7 @@ export default function Signup() {
   const roleParam = (searchParams.get("role") || "").toLowerCase();
   const [role, setRole] = useState<RoleUI>(roleParam === "educator" ? "educator" : "student");
   const effectiveRole: RoleUI = isTenantDomain ? "student" : role;
+  // const effectiveRole: RoleUI = isTenantDomain ? "student" : role;
 
   const tenantParam = normSlug(searchParams.get("tenant") || "");
   const effectiveTenantSlug = isTenantDomain ? (tenantSlug || "") : tenantParam;
@@ -323,7 +324,7 @@ export default function Signup() {
               </p>
             </div>
 
-            {!isTenantDomain && (
+            {/* {!isTenantDomain && (
               <div className="flex gap-2 p-1 bg-muted rounded-lg">
                 <Button
                   type="button"
@@ -342,10 +343,10 @@ export default function Signup() {
                   Educator
                 </Button>
               </div>
-            )}
+            )} */}
 
             {/* Google Signup */}
-            <Button
+            {/* <Button
               type="button"
               variant="outline"
               className="w-full h-11 bg-background"
@@ -382,7 +383,7 @@ export default function Signup() {
                   Or register with email
                 </span>
               </div>
-            </div>
+            </div> */}
 
             <form onSubmit={onSubmit} className="space-y-4">
               <div className="space-y-2">

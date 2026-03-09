@@ -338,7 +338,7 @@ export default function Login() {
             </div>
 
             {/* Google Login */}
-            <Button
+            {/* <Button
               type="button"
               variant="outline"
               className="w-full h-11 bg-background"
@@ -364,9 +364,9 @@ export default function Login() {
                 />
               </svg>
               Sign in with Google
-            </Button>
+            </Button> */}
 
-            <div className="relative">
+            {/* <div className="relative">
               <div className="absolute inset-0 flex items-center">
                 <span className="w-full border-t" />
               </div>
@@ -375,7 +375,7 @@ export default function Login() {
                   Or continue with email
                 </span>
               </div>
-            </div>
+            </div> */}
 
             <form onSubmit={onSubmit} className="space-y-4">
               <div className="space-y-2">

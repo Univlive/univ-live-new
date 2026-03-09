@@ -40,12 +40,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
-  if (!process.env.IMAGEKIT_PUBLIC_KEY || !process.env.IMAGEKIT_PRIVATE_KEY || !process.env.IMAGEKIT_URL_ENDPOINT) {
+  if (
+    !process.env.IMAGEKIT_PUBLIC_KEY ||
+    !process.env.IMAGEKIT_PRIVATE_KEY ||
+    !process.env.IMAGEKIT_URL_ENDPOINT
+  ) {
     return res.status(500).json({ error: "ImageKit env not configured" });
   }
 
-  // IMPORTANT: protect signatures
-  await requireUser(req, { roles: ["ADMIN"] });
+  // ✅ Use scope to control who can request signature
+  // scope=question-bank  -> ADMIN only (default)
+  // scope=website        -> ADMIN + EDUCATOR
+  // scope=generic        -> any logged-in user (optional)
+  const scope = String((req.query?.scope as string) || "question-bank").toLowerCase();
+
+  if (scope === "question-bank") {
+    await requireUser(req, { roles: ["ADMIN"] });
+  } else if (scope === "website") {
+    await requireUser(req, { roles: ["ADMIN", "EDUCATOR"] });
+  } else {
+    await requireUser(req); // any authenticated user
+  }
 
   const authParams = imagekit.getAuthenticationParameters();
   return res.status(200).json(authParams);

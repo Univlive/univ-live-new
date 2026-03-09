@@ -1,25 +1,29 @@
 // src/lib/imagekitUpload.ts
 import { auth } from "@/lib/firebase";
 
-async function getIdToken(): Promise<string | null> {
-  try {
-    const u = auth.currentUser;
-    if (!u) return null;
-    return await u.getIdToken();
-  } catch {
-    return null;
-  }
+type ImageKitScope = "question-bank" | "website" | "generic";
+
+async function getIdToken(): Promise<string> {
+  const u = auth.currentUser;
+  if (!u) throw new Error("Not logged in");
+  return await u.getIdToken();
 }
 
-export async function uploadToImageKit(file: Blob, fileName: string, folder = "/question-bank") {
+export async function uploadToImageKit(
+  file: Blob,
+  fileName: string,
+  folder = "/question-bank",
+  scope: ImageKitScope = "question-bank"
+) {
   const publicKey = import.meta.env.VITE_IMAGEKIT_PUBLIC_KEY as string;
   if (!publicKey) throw new Error("Missing VITE_IMAGEKIT_PUBLIC_KEY");
 
   // IMPORTANT: do NOT reuse token/signature. Fetch fresh auth params for every upload.
   const idToken = await getIdToken();
-  const authRes = await fetch("/api/imagekit-auth", {
+
+  const authRes = await fetch(`/api/imagekit-auth?scope=${encodeURIComponent(scope)}`, {
     method: "GET",
-    headers: idToken ? { Authorization: `Bearer ${idToken}` } : undefined,
+    headers: { Authorization: `Bearer ${idToken}` },
   });
 
   if (!authRes.ok) {
