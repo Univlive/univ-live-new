@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2, RefreshCw, Search, UserCheck, UserX } from "lucide-react";
-import { collection, doc, onSnapshot, orderBy, query, updateDoc } from "firebase/firestore";
+import { collection, doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,9 +35,13 @@ export default function Learners() {
   useEffect(() => {
     if (!educatorId) return;
 
-    const qLearners = query(collection(db, "educators", educatorId, "students"), orderBy("joinedAt", "desc"));
-    const unsubL = onSnapshot(qLearners, (snap) => {
+    const unsubL = onSnapshot(collection(db, "educators", educatorId, "students"), (snap) => {
       const arr: Learner[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+      arr.sort((a, b) => {
+        const aMs = typeof a?.joinedAt?.toMillis === "function" ? a.joinedAt.toMillis() : 0;
+        const bMs = typeof b?.joinedAt?.toMillis === "function" ? b.joinedAt.toMillis() : 0;
+        return bMs - aMs;
+      });
       setLearners(arr);
     });
 

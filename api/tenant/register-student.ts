@@ -56,16 +56,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       tx.set(userRef, profilePayload, { merge: true });
 
       const learnerSnap = await tx.get(learnerRef);
+      const learnerData = learnerSnap.exists ? learnerSnap.data() || {} : {};
       const learnerPayload: any = {
         uid,
         name: displayName,
         email,
         status: "ACTIVE",
         tenantSlug,
+        educatorId,
         lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
-      if (!learnerSnap.exists) learnerPayload.joinedAt = admin.firestore.FieldValue.serverTimestamp();
+      if (!learnerSnap.exists || !learnerData?.joinedAt) {
+        learnerPayload.joinedAt = admin.firestore.FieldValue.serverTimestamp();
+      }
       tx.set(learnerRef, learnerPayload, { merge: true });
     });
 

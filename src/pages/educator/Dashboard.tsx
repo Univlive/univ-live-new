@@ -168,7 +168,7 @@ export default function EducatorDashboard() {
 
     // Total + active (live)
     const unsubAll = onSnapshot(
-      query(studentsRef, orderBy("createdAt", "desc")),
+      query(studentsRef, orderBy("joinedAt", "desc")),
       (snap) => {
         const rows = snap.docs.map((d) => d.data() as StudentDoc);
         setTotalStudents(rows.length);
@@ -182,12 +182,12 @@ export default function EducatorDashboard() {
     // Growth (last 6 months)
     const start6m = new Date(last6Months[0].getFullYear(), last6Months[0].getMonth(), 1);
     const unsubGrowth = onSnapshot(
-      query(studentsRef, where("createdAt", ">=", Timestamp.fromDate(start6m)), orderBy("createdAt", "asc")),
+      query(studentsRef, where("joinedAt", ">=", Timestamp.fromDate(start6m)), orderBy("joinedAt", "asc")),
       (snap) => {
         const bucket: Record<string, number> = {};
         snap.docs.forEach((d) => {
           const s = d.data() as StudentDoc;
-          const ts = s.createdAt;
+          const ts = s.joinedAt || s.createdAt;
           if (!ts) return;
           const dt = ts.toDate();
           const key = monthKey(dt);
@@ -215,13 +215,13 @@ export default function EducatorDashboard() {
     const prevWeekStart = startOfDay(daysAgo(14));
 
     const unsubWeek = onSnapshot(
-      query(studentsRef, where("createdAt", ">=", Timestamp.fromDate(prevWeekStart)), orderBy("createdAt", "asc")),
+      query(studentsRef, where("joinedAt", ">=", Timestamp.fromDate(prevWeekStart)), orderBy("joinedAt", "asc")),
       (snap) => {
         let current = 0;
         let prev = 0;
         snap.docs.forEach((d) => {
           const s = d.data() as StudentDoc;
-          const ts = s.createdAt;
+          const ts = s.joinedAt || s.createdAt;
           if (!ts) return;
           const t = ts.toDate().getTime();
           if (t >= weekStart.getTime()) current += 1;
