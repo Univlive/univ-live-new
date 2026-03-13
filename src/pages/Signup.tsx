@@ -4,7 +4,6 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Eye, EyeOff, Loader2, Home } from "lucide-react";
 import { toast } from "sonner";
 import { useTenant } from "@/contexts/TenantProvider";
-import { registerStudentForTenant } from "@/lib/studentRegistration";
 
 import {
   createUserWithEmailAndPassword,
@@ -47,13 +46,6 @@ function mainSignupUrlForStudent(tSlug: string) {
   return `https://${appDomain()}/signup?role=student&tenant=${encodeURIComponent(tSlug)}`;
 }
 
-function studentRedirectUrl(tSlug: string) {
-  if (window.location.hostname === "localhost") {
-    return `/student?tenant=${encodeURIComponent(tSlug)}`;
-  }
-  return `https://${tSlug}.${appDomain()}/student`;
-}
-
 export default function Signup() {
   const [searchParams] = useSearchParams();
   const nav = useNavigate();
@@ -91,6 +83,14 @@ export default function Signup() {
     if (isTenantDomain) return `Student Signup for ${tenantSlug || "your coaching"}`;
     return effectiveRole === "educator" ? "Educator Signup" : "Student Signup";
   }, [tenantLoading, isTenantDomain, tenantSlug, effectiveRole]);
+
+  async function callRegisterStudent(token: string, tSlug: string) {
+    await fetch("/api/tenant/register-student", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ tenantSlug: tSlug }),
+    });
+  }
 
   async function checkSlugAvailable(slug: string) {
     const s = await getDoc(doc(db, "tenants", slug));
@@ -138,7 +138,7 @@ export default function Signup() {
 
       // Tenant domain may not be authorized -> redirect to main domain signup fallback
       if (String(err?.code) === "auth/unauthorized-domain" && isTenantDomain && tenantSlug) {
-        window.location.assign(mainSignupUrlForStudent(tenantSlug));
+        window.location.href = mainSignupUrlForStudent(tenantSlug);
         return;
       }
 
@@ -199,10 +199,9 @@ export default function Signup() {
           );
 
           const token = await cred.user.getIdToken();
-          await registerStudentForTenant(token, effectiveTenantSlug);
+          await callRegisterStudent(token, effectiveTenantSlug).catch(() => {});
           toast.success("Account created!");
-          if (isTenantDomain) window.location.assign("/student");
-          else window.location.assign(studentRedirectUrl(effectiveTenantSlug));
+          nav("/student");
           return;
         } catch (err: any) {
           // if email exists, try "join" by signing in
@@ -222,10 +221,9 @@ export default function Signup() {
               );
 
               const token = await cred2.user.getIdToken();
-              await registerStudentForTenant(token, effectiveTenantSlug);
+              await callRegisterStudent(token, effectiveTenantSlug).catch(() => {});
               toast.success("Signed in and enrolled!");
-              if (isTenantDomain) window.location.assign("/student");
-              else window.location.assign(studentRedirectUrl(effectiveTenantSlug));
+              nav("/student");
               return;
             } catch {
               toast.error("Account already exists. Please login instead.");
@@ -291,7 +289,7 @@ export default function Signup() {
       );
 
       toast.success("Educator account created!");
-      window.location.assign("/educator");
+      nav("/educator");
     } catch (error: any) {
       console.error(error);
       toast.error(error?.message || "Signup failed");

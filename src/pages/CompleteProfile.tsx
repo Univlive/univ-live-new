@@ -4,7 +4,6 @@ import { Home, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { auth, db } from "@/lib/firebase";
-import { registerStudentForTenant } from "@/lib/studentRegistration";
 import {
   GoogleAuthProvider,
   onAuthStateChanged,
@@ -76,6 +75,14 @@ export default function CompleteProfile() {
     return "Complete Educator Profile";
   }, [tenantLoading, effectiveRole]);
 
+  async function callRegisterStudent(token: string, tSlug: string) {
+    await fetch("/api/tenant/register-student", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ tenantSlug: tSlug }),
+    });
+  }
+
   async function checkSlugAvailable(slug: string, myUid: string) {
     const s = await getDoc(doc(db, "tenants", slug));
     if (!s.exists()) return true;
@@ -105,7 +112,7 @@ export default function CompleteProfile() {
       // If admin, just go to admin
       const roleDb = String(data?.role || "").toUpperCase();
       if (roleDb === "ADMIN") {
-        window.location.assign("/admin");
+        nav("/admin", { replace: true });
         return;
       }
 
@@ -173,13 +180,13 @@ export default function CompleteProfile() {
         );
 
         const token = await u.getIdToken();
-        await registerStudentForTenant(token, tSlug);
+        await callRegisterStudent(token, tSlug).catch(() => {});
 
         toast.success("Profile completed!");
         if (isTenantDomain) {
-          window.location.assign("/student");
+          nav("/student", { replace: true });
         } else {
-          window.location.assign(studentRedirectUrl(tSlug));
+          window.location.href = studentRedirectUrl(tSlug);
         }
         return;
       }
@@ -252,7 +259,7 @@ export default function CompleteProfile() {
       );
 
       toast.success("Educator profile completed!");
-      window.location.assign("/educator");
+      nav("/educator", { replace: true });
     } catch (err: any) {
       console.error(err);
       toast.error(err?.message || "Failed to save profile");

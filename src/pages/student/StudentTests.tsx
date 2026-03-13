@@ -8,7 +8,6 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthProvider";
 import { useTenant } from "@/contexts/TenantProvider";
 import { db } from "@/lib/firebase";
-import { registerStudentForTenant } from "@/lib/studentRegistration";
 import {
   collection,
   doc,
@@ -44,9 +43,13 @@ export default function StudentTests() {
       if (!firebaseUser || !tenantSlug || !isTenantDomain) return;
       try {
         const token = await firebaseUser.getIdToken();
-        await registerStudentForTenant(token, tenantSlug);
-      } catch (error) {
-        console.error(error);
+        await fetch("/api/tenant/register-student", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ tenantSlug }),
+        });
+      } catch {
+        // ignore
       }
     })();
   }, [firebaseUser, tenantSlug, isTenantDomain]);

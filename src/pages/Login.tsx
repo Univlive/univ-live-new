@@ -7,14 +7,19 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
 } from "firebase/auth";
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import {
+  arrayUnion,
+  doc,
+  getDoc,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useTenant } from "@/contexts/TenantProvider";
-import { registerStudentForTenant } from "@/lib/studentRegistration";
 
 type RoleUI = "student" | "educator";
 
@@ -84,6 +89,14 @@ export default function Login() {
     return effectiveRole === "educator" ? "Educator Login" : "Student Login";
   }, [tenantLoading, isTenantDomain, tenantSlug, effectiveRole, inStudentContext]);
 
+  async function registerStudent(token: string, tSlug: string) {
+    await fetch("/api/tenant/register-student", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ tenantSlug: tSlug }),
+    });
+  }
+
   async function handlePostAuthRouting(userUid: string) {
     const snap = await getDoc(doc(db, "users", userUid));
     const data: any = snap.exists() ? snap.data() : {};
@@ -117,18 +130,18 @@ export default function Login() {
       }
 
       const token = await auth.currentUser!.getIdToken();
-      await registerStudentForTenant(token, tSlug);
+      await registerStudent(token, tSlug).catch(() => {});
 
       toast.success("Welcome back!");
-      if (isTenantDomain) window.location.assign("/student");
-      else window.location.assign(studentRedirectUrl(tSlug));
+      if (isTenantDomain) nav("/student");
+      else window.location.href = studentRedirectUrl(tSlug);
       return;
     }
 
     // ---------- MAIN DOMAIN EDUCATOR / ADMIN ----------
     if (roleDb === "ADMIN") {
       toast.success("Logged in!");
-      window.location.assign("/admin");
+      nav("/admin");
       return;
     }
 
@@ -146,7 +159,7 @@ export default function Login() {
     }
 
     toast.success("Logged in!");
-    window.location.assign("/educator");
+    nav("/educator");
   }
 
   async function onGoogleLogin() {
@@ -198,7 +211,7 @@ export default function Login() {
 
       // Tenant subdomain may not be authorized in Firebase -> redirect to main domain login fallback
       if (String(err?.code) === "auth/unauthorized-domain" && isTenantDomain && tenantSlug) {
-        window.location.assign(mainLoginUrlForStudent(tenantSlug));
+        window.location.href = mainLoginUrlForStudent(tenantSlug);
         return;
       }
 
@@ -250,11 +263,11 @@ export default function Login() {
         }
 
         const token = await cred.user.getIdToken();
-        await registerStudentForTenant(token, tSlug);
+        await registerStudent(token, tSlug).catch(() => {});
         toast.success("Welcome back!");
 
-        if (isTenantDomain) window.location.assign("/student");
-        else window.location.assign(studentRedirectUrl(tSlug));
+        if (isTenantDomain) nav("/student");
+        else window.location.href = studentRedirectUrl(tSlug);
         return;
       }
 
@@ -268,7 +281,7 @@ export default function Login() {
 
       if (roleDb === "ADMIN") {
         toast.success("Logged in!");
-        window.location.assign("/admin");
+        nav("/admin");
         return;
       }
 
@@ -285,7 +298,7 @@ export default function Login() {
       }
 
       toast.success("Logged in!");
-      window.location.assign("/educator");
+      nav("/educator");
     } catch (error: any) {
       console.error(error);
       let msg = "Failed to login";

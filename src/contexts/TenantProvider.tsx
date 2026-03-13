@@ -30,24 +30,33 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [isTenantDomain, setIsTenantDomain] = useState(false);
 
+  // FIX: Run hostname detection ONCE on mount — hostname never changes.
+  // The old single effect had [profile?.tenantSlug] as dependency, which meant
+  // isTenantDomain was false during initial render (before profile loads),
+  // causing StudentRoute / login redirect guards to misfire.
   useEffect(() => {
     const slugFromHostname = getTenantSlugFromHostname(window.location.hostname);
-
     if (slugFromHostname) {
       setTenantSlug(slugFromHostname);
       setIsTenantDomain(true);
-      return;
     }
+    // If not a tenant domain, the profile effect below will handle it.
+    // If it IS a tenant domain, we never need profile to set the slug.
+  }, []); // intentionally empty — hostname is static
+
+  // FIX: Separately track profile-based slug (main domain educator context).
+  // Only runs when not already identified as a tenant domain.
+  useEffect(() => {
+    if (isTenantDomain) return; // hostname already resolved it
 
     if (profile?.tenantSlug) {
       setTenantSlug(profile.tenantSlug);
-      setIsTenantDomain(false);
-      return;
+    } else {
+      setTenantSlug(null);
+      // Not a tenant domain and no profile slug — nothing to load, stop loading.
+      setLoading(false);
     }
-
-    setTenantSlug(null);
-    setIsTenantDomain(false);
-  }, [profile?.tenantSlug]);
+  }, [profile?.tenantSlug, isTenantDomain]);
 
   useEffect(() => {
     let alive = true;
@@ -115,4 +124,3 @@ export function useTenant() {
   if (!ctx) throw new Error("useTenant must be used within TenantProvider");
   return ctx;
 }
-
