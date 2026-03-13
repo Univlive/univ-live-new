@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 
 import { useTenant } from "@/contexts/TenantProvider";
+import { useFavicon } from "@/hooks/useFavicon";
 import { db } from "@/lib/firebase";
 import { collection, documentId, getDocs, limit, orderBy, query, where } from "firebase/firestore";
 
@@ -98,6 +99,10 @@ export default function TenantHomeTheme2() {
 
   const coachingName = config.coachingName || tenant.coachingName || "Your Institute";
   const tagline = config.tagline || tenant.tagline || "Learn smarter. Score higher.";
+  const logoUrl: string | undefined = config.logoUrl;
+
+  // Set dynamic favicon + page title for this educator's subdomain
+  useFavicon(logoUrl, coachingName);
 
   const faculty: FacultyItem[] = Array.isArray(config.faculty) ? config.faculty : [];
   const testimonials: TestimonialItem[] = Array.isArray(config.testimonials) ? config.testimonials : [];
@@ -190,11 +195,17 @@ export default function TenantHomeTheme2() {
       <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[95%] max-w-5xl">
         <nav className="rounded-full border border-neutral-800 bg-[#111111]/90 backdrop-blur-md px-4 py-3 flex items-center justify-between shadow-2xl">
           <Link to="/" className="flex items-center gap-2.5 pl-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-600 text-white shadow-sm">
-              <span className="text-sm font-bold">
-                {coachingName?.trim()?.[0]?.toUpperCase() || "U"}
-              </span>
-            </div>
+            {logoUrl ? (
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg overflow-hidden border border-neutral-700 flex-shrink-0 bg-neutral-900">
+                <img src={logoUrl} alt={`${coachingName} logo`} className="h-full w-full object-contain" />
+              </div>
+            ) : (
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-600 text-white shadow-sm flex-shrink-0">
+                <span className="text-sm font-bold">
+                  {coachingName?.trim()?.[0]?.toUpperCase() || "U"}
+                </span>
+              </div>
+            )}
             <span className="text-base font-semibold text-white hidden sm:block">
               {coachingName}
             </span>
@@ -605,9 +616,15 @@ export default function TenantHomeTheme2() {
           <div className="grid gap-12 md:grid-cols-4 mb-16">
             <div className="md:col-span-1">
               <div className="flex items-center gap-2 mb-4">
-                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-600 text-white">
-                  <span className="text-sm font-bold">{coachingName?.trim()?.[0]?.toUpperCase() || "U"}</span>
-                </div>
+                {logoUrl ? (
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg overflow-hidden border border-neutral-700 bg-neutral-900 flex-shrink-0">
+                    <img src={logoUrl} alt={`${coachingName} logo`} className="h-full w-full object-contain" />
+                  </div>
+                ) : (
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-600 text-white flex-shrink-0">
+                    <span className="text-sm font-bold">{coachingName?.trim()?.[0]?.toUpperCase() || "U"}</span>
+                  </div>
+                )}
                 <div className="font-bold text-xl text-white">{coachingName}</div>
               </div>
               <p className="text-sm text-neutral-500 mb-6 max-w-xs">{tagline}</p>

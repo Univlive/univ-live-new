@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 
 import { useTenant } from "@/contexts/TenantProvider";
+import { useFavicon } from "@/hooks/useFavicon";
 import { Button } from "@/components/ui/button";
 
 interface Theme1LayoutProps {
@@ -30,6 +31,10 @@ export default function Theme1Layout({ children }: Theme1LayoutProps) {
   const coachingName = config.coachingName || tenant?.coachingName || "Your Institute";
   const tagline = config.tagline || tenant?.tagline || "";
   const socials = (config.socials || {}) as Record<string, string>;
+  const logoUrl: string | undefined = config.logoUrl;
+
+  // Set dynamic favicon + page title for this educator's subdomain
+  useFavicon(logoUrl, coachingName);
 
   const phone = tenant?.contact?.phone || "";
   const email = tenant?.contact?.email || "";
@@ -111,9 +116,19 @@ export default function Theme1Layout({ children }: Theme1LayoutProps) {
       <header className="border-b bg-background">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-white">
-              🎓
-            </div>
+            {logoUrl ? (
+              <div className="w-10 h-10 rounded-xl overflow-hidden border bg-muted/30 flex items-center justify-center flex-shrink-0">
+                <img
+                  src={logoUrl}
+                  alt={`${coachingName} logo`}
+                  className="h-full w-full object-contain"
+                />
+              </div>
+            ) : (
+              <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-white flex-shrink-0">
+                🎓
+              </div>
+            )}
             <div>
               <div className="font-bold">{coachingName}</div>
               <div className="text-xs text-muted-foreground">{tagline}</div>
@@ -185,7 +200,14 @@ export default function Theme1Layout({ children }: Theme1LayoutProps) {
       <footer className="bg-muted/30 border-t mt-12">
         <div className="container mx-auto px-4 py-12 grid md:grid-cols-4 gap-8">
           <div>
-            <div className="font-bold mb-2">{coachingName}</div>
+            <div className="flex items-center gap-2 mb-2">
+              {logoUrl ? (
+                <div className="w-8 h-8 rounded-lg overflow-hidden border bg-muted/30 flex items-center justify-center flex-shrink-0">
+                  <img src={logoUrl} alt={`${coachingName} logo`} className="h-full w-full object-contain" />
+                </div>
+              ) : null}
+              <div className="font-bold">{coachingName}</div>
+            </div>
             <p className="text-sm text-muted-foreground">{tagline}</p>
           </div>
 
