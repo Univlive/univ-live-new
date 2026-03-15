@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Eye, EyeOff, Loader2, Home } from "lucide-react";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { Eye, EyeOff, Loader2, Home, Mail } from "lucide-react";
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,14 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useTenant } from "@/contexts/TenantProvider";
 import { useAuth } from "@/contexts/AuthProvider";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 
 type RoleUI = "student" | "educator";
@@ -31,6 +39,10 @@ export default function Login() {
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [pendingRedirect, setPendingRedirect] = useState<"/student" | "/educator" | null>(null);
+
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [sendingReset, setSendingReset] = useState(false);
 
   const effectiveRole: RoleUI = isTenantDomain ? "student" : role;
 
@@ -78,6 +90,33 @@ export default function Login() {
     }
   }, [pendingRedirect, authLoading, firebaseUser, profile, nav]);
 
+
+  async function handleForgotPassword() {
+    const targetEmail = resetEmail.trim();
+
+    if (!targetEmail) {
+      toast.error("Please enter your email address.");
+      return;
+    }
+
+    setSendingReset(true);
+
+    try {
+      await sendPasswordResetEmail(auth, targetEmail);
+      toast.success("Password reset link sent to your email.");
+      setForgotOpen(false);
+    } catch (error: any) {
+      console.error(error);
+
+      let msg = "Failed to send reset email.";
+      if (error?.code === "auth/invalid-email") msg = "Please enter a valid email address.";
+      else if (error?.code === "auth/too-many-requests") msg = "Too many attempts. Please try again later.";
+
+      toast.error(msg);
+    } finally {
+      setSendingReset(false);
+    }
+  }
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -256,6 +295,19 @@ export default function Login() {
                     {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetEmail(email);
+                      setForgotOpen(true);
+                    }}
+                    className="text-sm font-medium text-[#4F46E5] hover:underline"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
               </div>
 
               <Button
@@ -298,6 +350,54 @@ export default function Login() {
           />
         </div>
       </div>
+
+
+
+      <Dialog open={forgotOpen} onOpenChange={setForgotOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-5 w-5 text-[#4F46E5]" />
+              Reset your password
+            </DialogTitle>
+            <DialogDescription>
+              Enter your email address and we’ll send you a password reset link.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            <Label htmlFor="reset-email">Email</Label>
+            <Input
+              id="reset-email"
+              type="email"
+              value={resetEmail}
+              onChange={(e) => setResetEmail(e.target.value)}
+              placeholder="you@email.com"
+              className="h-11"
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setForgotOpen(false)}
+              disabled={sendingReset}
+            >
+              Cancel
+            </Button>
+
+            <Button
+              type="button"
+              onClick={handleForgotPassword}
+              disabled={sendingReset}
+              className="bg-[#4F46E5] hover:bg-[#4338CA] text-white"
+            >
+              {sendingReset ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send reset link"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
