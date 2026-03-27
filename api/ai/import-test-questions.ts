@@ -5,7 +5,7 @@ import {
   parseJsonResponse,
   segmentQuestionCandidates,
   type ImportedQuestionItem,
-} from "../_lib/pdfQuestionImport";
+} from "../_lib/pdfQuestionImport.js";
 
 type ImportRequest = {
   pdfBase64?: string;
