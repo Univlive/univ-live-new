@@ -1,16 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, Flag, ChevronLeft, ChevronRight, Save, Trash2, Maximize2, LayoutGrid } from "lucide-react";
+import { AlertTriangle, Save, LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
 
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TimerChip } from "@/components/student/TimerChip";
-import { CBTQuestionPalette } from "@/components/student/CBTQuestionPalette";
 import { cn } from "@/lib/utils";
 import { HtmlView } from "@/lib/safeHtml";
 
@@ -656,349 +649,507 @@ export default function StudentCBTAttempt() {
 
   const timerKey = isStarted ? `running_${attemptId || "new"}` : `paused_${attemptId || "new"}`;
 
-  return (
-    <div className="fixed inset-0 z-[99999] h-[100dvh] bg-background flex flex-col lg:flex-row gap-2 sm:gap-4 p-2 sm:p-4 overflow-hidden">
-      {/* Instructions Gate (must proceed to start) */}
-      {!isStarted && instructionsOpen && (
-        <div className="fixed inset-0 z-[100000] bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-4">
-          <div className="w-full max-w-3xl rounded-2xl bg-white shadow-2xl overflow-hidden">
-            <div className="px-6 py-4 border-b flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600">CBT Instructions</p>
-                <h2 className="text-lg font-semibold text-gray-900">{testMeta?.title || "Test"}</h2>
-              </div>
-              <div className="text-xs font-medium text-gray-700 bg-gray-100 px-3 py-1 rounded-full">
-                Duration: {testMeta?.durationMinutes ?? 60} minutes
-              </div>
-            </div>
+  // Palette legend counts
+  const notVisitedCount = Object.values(responses).filter((r) => !r?.visited).length;
+  const notAnsweredCount = Object.values(responses).filter((r) => r?.visited && !r?.answered && !r?.markedForReview).length;
+  const markedForReviewCount = Object.values(responses).filter((r) => r?.markedForReview && !r?.answered).length;
+  const answeredAndMarkedCount = Object.values(responses).filter((r) => r?.markedForReview && r?.answered).length;
 
-            <div className="p-6 space-y-4">
-              <ul className="space-y-3 text-sm text-gray-800">
-                <li className="flex gap-3">
-                  <span className="mt-0.5 h-6 w-6 rounded-md bg-gray-200 border border-gray-400" />
-                  <span>This is a computer-based test with a timer; it will auto-submit when time ends.</span>
-                </li>
-                <li className="flex gap-3">
-                  <span className="mt-0.5 h-0 w-0 border-t-[12px] border-b-[12px] border-l-[18px] border-t-transparent border-b-transparent border-l-orange-500" />
-                  <span>The time duration for the test is {testMeta?.durationMinutes ?? 60} minutes.</span>
-                </li>
-                <li className="flex gap-3">
-                  <span className="mt-0.5 h-0 w-0 border-t-[12px] border-b-[12px] border-l-[18px] border-t-transparent border-b-transparent border-l-green-500" />
-                  <span>Use <b>Save &amp; Next</b> to move forward and <b>Previous</b> to go back.</span>
-                </li>
-                <li className="flex gap-3">
-                  <span className="mt-0.5 h-6 w-6 rounded-full bg-purple-600" />
-                  <span>You can change or clear your answer anytime before submission.</span>
-                </li>
-                <li className="flex gap-3">
-                  <span className="mt-0.5 h-6 w-6 rounded-full bg-purple-600 relative">
-                    <span className="absolute -right-1 -bottom-1 h-4 w-4 rounded-full bg-green-500 flex items-center justify-center text-[10px] text-white">✓</span>
-                  </span>
-                  <span>Use <b>Mark for Review &amp; Next</b> to revisit questions later.</span>
-                </li>
-                <li className="flex gap-3">
-                  <span className="mt-0.5 h-6 w-6 rounded-md bg-gray-100 border border-gray-400 flex items-center justify-center text-[11px] font-semibold">
-                    1
-                  </span>
-                  <span>Check question status using the palette on the right.</span>
-                </li>
-              </ul>
+  const getQuestionBtnStyle = (idx: number): React.CSSProperties => {
+    const q = questions[idx];
+    if (!q) return {};
+    const r = responses[q.id];
+    const isCurrent = idx === currentIndex;
 
-              <div className="pt-3 border-t space-y-3">
-                <label className="flex items-center gap-3 text-sm text-gray-800">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={instructionsChecked}
-                    onChange={(e) => setInstructionsChecked(e.target.checked)}
-                  />
-                  <span>I have read and understood the instructions</span>
-                </label>
+    if (isCurrent) {
+      return { background: "#3b82f6", color: "#fff", border: "2px solid #2563eb", fontWeight: 700 };
+    }
+    if (r?.answered && r?.markedForReview) {
+      return { background: "linear-gradient(135deg, #7c3aed 60%, #22c55e 100%)", color: "#fff", border: "2px solid #7c3aed" };
+    }
+    if (r?.answered) {
+      return { background: "#22c55e", color: "#fff", border: "2px solid #16a34a" };
+    }
+    if (r?.markedForReview) {
+      return { background: "#7c3aed", color: "#fff", border: "2px solid #6d28d9" };
+    }
+    if (r?.visited) {
+      return { background: "#ef4444", color: "#fff", border: "2px solid #dc2626" };
+    }
+    return { background: "#e5e7eb", color: "#374151", border: "2px solid #d1d5db" };
+  };
 
-                <div className="flex justify-end">
-                  <Button
-                    className={cn("rounded-xl px-8", !instructionsChecked && "opacity-60")}
-                    disabled={!instructionsChecked}
-                    onClick={async () => {
-                      try {
-                        await handleStart();
-                        setInstructionsOpen(false);
-                      } catch {
-                        // handleStart already toasts
-                      }
-                    }}
-                  >
-                    PROCEED
-                  </Button>
-                </div>
-              </div>
-            </div>
+  const PaletteContent = ({ onClose }: { onClose?: () => void }) => (
+    <div style={{ fontFamily: "Arial, sans-serif" }}>
+      {/* Legend */}
+      <div style={{ padding: "8px 10px", borderBottom: "1px solid #d1d5db" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ minWidth: 28, height: 24, borderRadius: 4, background: "#e5e7eb", border: "2px solid #d1d5db", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12, color: "#374151" }}>{notVisitedCount}</span>
+            <span style={{ color: "#374151" }}>Not Visited</span>
           </div>
-        </div>
-      )}
-
-{/* Main Content */}
-      <div className="flex-1 min-h-0 flex flex-col min-w-0">
-        {/* Header */}
-        <div className="shrink-0 flex flex-col gap-3 p-3 sm:p-4 bg-card rounded-xl mb-3 sm:mb-4">
-          <div className="flex items-start sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-              {isStarted ? (
-                <TimerChip key={timerKey} initialSeconds={timerStartSeconds} onTimeUp={handleTimeUp} />
-              ) : (
-                <div className="px-3 py-1 rounded-full bg-muted text-xs font-semibold whitespace-nowrap">
-                  {`Not started • ${testMeta.durationMinutes}m`}
-                </div>
-              )}
-
-              <div className="min-w-0">
-                <p className="font-semibold text-sm sm:text-base truncate">{testMeta.title}</p>
-                <p className="text-xs text-muted-foreground">
-                  Question {currentIndex + 1} of {questions.length}
-                </p>
-              </div>
-            </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              className="rounded-lg lg:hidden shrink-0"
-              onClick={() => setMobilePaletteOpen(true)}
-            >
-              <LayoutGrid className="h-4 w-4 mr-1" />
-              Palette
-            </Button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ minWidth: 28, height: 24, borderRadius: 4, background: "#ef4444", border: "2px solid #dc2626", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12, color: "#fff" }}>{notAnsweredCount}</span>
+            <span style={{ color: "#374151" }}>Not Answered</span>
           </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <div className={cn("flex items-center gap-1 text-xs mr-auto", saving ? "text-yellow-600" : "text-green-600")}>
-              <Save className="h-3 w-3" />
-              {saving ? "Saving…" : lastSavedAt ? "Saved" : "Ready"}
-            </div>
-
-            {!isStarted && (
-              <Button size="sm" className="rounded-lg gradient-bg w-full sm:w-auto" onClick={handleStart}>
-                {attemptId ? "Resume" : "Start"}
-              </Button>
-            )}
-
-            <Button
-              variant="destructive"
-              size="sm"
-              className="rounded-lg w-full sm:w-auto"
-              onClick={() => setSubmitDialogOpen(true)}
-              disabled={!isStarted}
-            >
-              Submit
-            </Button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ minWidth: 28, height: 24, borderRadius: 4, background: "#22c55e", border: "2px solid #16a34a", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12, color: "#fff" }}>{answeredCount}</span>
+            <span style={{ color: "#374151" }}>Answered</span>
           </div>
-        </div>
-
-        {/* Section Tabs */}
-        {testMeta.sections.length > 1 && (
-          <Tabs value={currentSectionId} onValueChange={setCurrentSectionId} className="mb-4">
-            <TabsList className="w-full justify-start overflow-x-auto rounded-xl">
-              {testMeta.sections.map((section) => (
-                <TabsTrigger key={section.id} value={section.id} className="rounded-lg">
-                  {section.name}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-        )}
-
-        {/* Question Area */}
-        <Card className="flex-1 min-h-0 card-soft border-0 overflow-auto">
-          <CardContent className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-            {!!currentQuestion.passage && (
-              <div className="p-4 bg-pastel-cream rounded-xl">
-                <p className="font-semibold mb-2">{currentQuestion.passage.title}</p>
-                <p className="text-sm text-muted-foreground whitespace-pre-line">{currentQuestion.passage.content}</p>
-              </div>
-            )}
-
-            <div>
-              <div className="font-semibold text-base sm:text-lg flex gap-2">
-                <span className="shrink-0">Q{currentIndex + 1}.</span>
-                <HtmlView html={currentQuestion.stem} className="flex-1" />
-              </div>
-            </div>
-
-            {currentQuestion.type === "mcq" && currentQuestion.options && (
-              <RadioGroup
-                value={responses[currentQuestion.id]?.answer || ""}
-                onValueChange={handleAnswer}
-                className="space-y-3"
-                disabled={!isStarted}
-              >
-                {currentQuestion.options.map((option, i) => (
-                  <div
-                    key={option.id}
-                    className={cn(
-                      "flex items-start space-x-2 sm:space-x-3 p-3 sm:p-4 rounded-xl border-2 transition-colors cursor-pointer",
-                      responses[currentQuestion.id]?.answer === option.id
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/50",
-                      !isStarted && "opacity-60 cursor-not-allowed"
-                    )}
-                  >
-                    <RadioGroupItem value={option.id} id={`${currentQuestion.id}_${option.id}`} />
-                    <Label
-                      htmlFor={`${currentQuestion.id}_${option.id}`}
-                      className="flex-1 cursor-pointer flex gap-2 items-start"
-                    >
-                      <span className="font-medium shrink-0">{String.fromCharCode(65 + i)}.</span>
-                      <HtmlView html={option.text} className="flex-1" />
-                    </Label>
-                  </div>
-                ))}
-              </RadioGroup>
-            )}
-
-            {currentQuestion.type === "integer" && (
-              <Input
-                type="number"
-                placeholder="Enter your answer"
-                value={responses[currentQuestion.id]?.answer || ""}
-                onChange={(e) => handleAnswer(e.target.value)}
-                className="w-full sm:max-w-xs rounded-xl text-base sm:text-lg"
-                disabled={!isStarted}
-              />
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Navigation */}
-        <div className="shrink-0 mt-3 sm:mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="grid grid-cols-2 sm:flex gap-2">
-            <Button
-              variant="outline"
-              className="rounded-xl w-full sm:w-auto"
-              onClick={handleClearResponse}
-              disabled={!isStarted}
-            >
-              <Trash2 className="h-4 w-4 mr-1" />
-              Clear
-            </Button>
-
-            <Button
-              variant={responses[currentQuestion.id]?.markedForReview ? "default" : "outline"}
-              className={cn(
-                "rounded-xl w-full sm:w-auto",
-                responses[currentQuestion.id]?.markedForReview && "bg-purple-500 hover:bg-purple-600"
-              )}
-              onClick={handleMarkForReview}
-              disabled={!isStarted}
-            >
-              <Flag className="h-4 w-4 mr-1" />
-              Mark
-            </Button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ minWidth: 28, height: 24, borderRadius: 50, background: "#7c3aed", border: "2px solid #6d28d9", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12, color: "#fff" }}>{markedForReviewCount}</span>
+            <span style={{ color: "#374151" }}>Marked for Review</span>
           </div>
-
-          <div className="grid grid-cols-2 sm:flex gap-2">
-            <Button
-              variant="outline"
-              className="rounded-xl w-full sm:w-auto"
-              disabled={currentIndex === 0}
-              onClick={() => goToIndex(currentIndex - 1)}
-            >
-              <ChevronLeft className="h-4 w-4 mr-1" />
-              Prev
-            </Button>
-
-            <Button
-              className="rounded-xl gradient-bg w-full sm:w-auto"
-              disabled={currentIndex === questions.length - 1}
-              onClick={() => goToIndex(currentIndex + 1)}
-            >
-              Next <ChevronRight className="h-4 w-4 ml-1" />
-            </Button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, gridColumn: "span 2" }}>
+            <span style={{ position: "relative", minWidth: 28, height: 24, borderRadius: 50, background: "#7c3aed", border: "2px solid #6d28d9", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12, color: "#fff" }}>
+              <span style={{ position: "absolute", bottom: -4, right: -4, width: 13, height: 13, borderRadius: "50%", background: "#22c55e", border: "2px solid #fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, color: "#fff" }}>✓</span>
+              {answeredAndMarkedCount}
+            </span>
+            <span style={{ color: "#374151" }}>Answered &amp; Marked for Review <span style={{ fontSize: 10, color: "#6b7280" }}>(will be considered)</span></span>
           </div>
         </div>
       </div>
 
-      {/* Question Palette (Desktop) */}
-      <Card className="hidden lg:block w-72 card-soft border-0">
-        <CardContent className="p-4">
-          <p className="font-semibold mb-4">Question Palette</p>
-          <CBTQuestionPalette
-            questions={questions.map((q) => ({ id: q.id, sectionId: q.sectionId }))}
-            responses={responses}
-            currentQuestionIndex={currentIndex}
-            onQuestionClick={(idx) => goToIndex(idx)}
-            sections={testMeta.sections}
-            currentSectionId={currentSectionId}
-          />
-        </CardContent>
-      </Card>
-
-      <Sheet open={mobilePaletteOpen} onOpenChange={setMobilePaletteOpen}>
-        <SheetContent side="bottom" className="lg:hidden h-[78dvh] rounded-t-3xl px-0 pb-0">
-          <SheetHeader className="px-4 pt-2 pb-4 border-b text-left">
-            <SheetTitle className="text-base">Question Palette</SheetTitle>
-          </SheetHeader>
-
-          <div className="h-[calc(78dvh-64px)] overflow-y-auto px-4 py-4">
-            <CBTQuestionPalette
-              questions={questions.map((q) => ({ id: q.id, sectionId: q.sectionId }))}
-              responses={responses}
-              currentQuestionIndex={currentIndex}
-              onQuestionClick={(idx) => {
-                goToIndex(idx);
-                setMobilePaletteOpen(false);
+      {/* Section tabs if multiple */}
+      {testMeta.sections.length > 1 && (
+        <div style={{ display: "flex", overflowX: "auto", borderBottom: "1px solid #d1d5db", padding: "0 8px" }}>
+          {testMeta.sections.map((section) => (
+            <button
+              key={section.id}
+              onClick={() => setCurrentSectionId(section.id)}
+              style={{
+                padding: "6px 12px",
+                fontSize: 12,
+                fontWeight: currentSectionId === section.id ? 700 : 400,
+                borderBottom: currentSectionId === section.id ? "3px solid #2563eb" : "3px solid transparent",
+                color: currentSectionId === section.id ? "#2563eb" : "#374151",
+                background: "none",
+                border: "none",
+                borderBottom: currentSectionId === section.id ? "3px solid #2563eb" : "3px solid transparent",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
               }}
-              sections={testMeta.sections}
-              currentSectionId={currentSectionId}
-            />
-          </div>
-        </SheetContent>
-      </Sheet>
+            >
+              {section.name}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {/* Submit Dialog */}
-  
-      {/* Submit Confirmation Overlay (high z-index; not using portal) */}
-      {submitDialogOpen && (
-        <div className="fixed inset-0 z-[100001] bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-2xl bg-background border shadow-2xl overflow-hidden">
-            <div className="p-4 border-b flex items-start gap-3">
-              <div className="mt-0.5">
-                <AlertTriangle className="h-5 w-5 text-yellow-500" />
+      {/* Question grid */}
+      <div style={{ padding: "10px", overflowY: "auto", maxHeight: "calc(100% - 160px)" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 5 }}>
+          {questions.map((q, idx) => (
+            <button
+              key={q.id}
+              onClick={() => { goToIndex(idx); onClose?.(); }}
+              style={{
+                ...getQuestionBtnStyle(idx),
+                width: "100%",
+                aspectRatio: "1",
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+                transition: "transform 0.1s",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minHeight: 30,
+              }}
+            >
+              {String(idx + 1).padStart(2, "0")}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 99999,
+        height: "100dvh",
+        background: "#f3f4f6",
+        fontFamily: "Arial, sans-serif",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
+      {/* ─── INSTRUCTIONS GATE ─── */}
+      {!isStarted && instructionsOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ width: "100%", maxWidth: 680, borderRadius: 12, background: "#fff", boxShadow: "0 8px 40px rgba(0,0,0,0.25)", overflow: "hidden" }}>
+            <div style={{ padding: "14px 20px", borderBottom: "1px solid #e5e7eb", background: "#1e3a8a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontSize: 13, opacity: 0.8 }}>Computer Based Test</div>
+                <div style={{ fontSize: 17, fontWeight: 700 }}>{testMeta?.title || "Test"}</div>
               </div>
-              <div className="min-w-0">
-                <p className="font-semibold">Submit Test?</p>
-                <p className="text-sm text-muted-foreground">
-                  Are you sure you want to submit? You won&apos;t be able to change your answers.
-                </p>
+              <div style={{ fontSize: 12, background: "rgba(255,255,255,0.15)", padding: "4px 12px", borderRadius: 20 }}>
+                Duration: {testMeta?.durationMinutes ?? 60} min
               </div>
             </div>
 
-            <div className="p-4 grid grid-cols-2 gap-3 text-sm">
-              <div className="p-3 rounded-xl bg-green-100 dark:bg-green-900/30">
-                <p className="font-semibold text-green-700 dark:text-green-400">{answeredCount}</p>
-                <p className="text-xs text-muted-foreground">Answered</p>
-              </div>
-              <div className="p-3 rounded-xl bg-red-100 dark:bg-red-900/30">
-                <p className="font-semibold text-red-700 dark:text-red-400">{unansweredVisitedCount}</p>
-                <p className="text-xs text-muted-foreground">Unanswered</p>
-              </div>
-            </div>
+            <div style={{ padding: "20px 24px" }}>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12, color: "#1e3a8a" }}>General Instructions</div>
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 10, fontSize: 13, color: "#374151" }}>
+                {[
+                  { icon: <span style={{ width: 22, height: 22, borderRadius: 3, background: "#e5e7eb", border: "1.5px solid #9ca3af", display: "inline-block", flexShrink: 0 }} />, text: "This is a computer-based test with a timer; it will auto-submit when time ends." },
+                  { icon: <span style={{ width: 0, height: 0, borderTop: "10px solid transparent", borderBottom: "10px solid transparent", borderLeft: "16px solid #f97316", display: "inline-block", flexShrink: 0 }} />, text: `The time duration for the test is ${testMeta?.durationMinutes ?? 60} minutes.` },
+                  { icon: <span style={{ width: 0, height: 0, borderTop: "10px solid transparent", borderBottom: "10px solid transparent", borderLeft: "16px solid #22c55e", display: "inline-block", flexShrink: 0 }} />, text: "Use Save & Next to move forward and Previous to go back." },
+                  { icon: <span style={{ width: 22, height: 22, borderRadius: "50%", background: "#7c3aed", display: "inline-block", flexShrink: 0 }} />, text: "You can change or clear your answer anytime before submission." },
+                  { icon: <span style={{ position: "relative", width: 22, height: 22, borderRadius: "50%", background: "#7c3aed", display: "inline-block", flexShrink: 0 }}><span style={{ position: "absolute", bottom: -3, right: -3, width: 11, height: 11, borderRadius: "50%", background: "#22c55e", border: "1.5px solid #fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, color: "#fff" }}>✓</span></span>, text: "Use Mark for Review & Next to revisit questions later (answered & marked will be evaluated)." },
+                  { icon: <span style={{ width: 22, height: 22, borderRadius: 3, background: "#f3f4f6", border: "1.5px solid #9ca3af", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>1</span>, text: "Check question status using the Question Palette on the right." },
+                ].map((item, i) => (
+                  <li key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                    <span style={{ marginTop: 1 }}>{item.icon}</span>
+                    <span>{item.text}</span>
+                  </li>
+                ))}
+              </ul>
 
-            <div className="p-4 border-t flex items-center justify-end gap-2">
-              <Button variant="outline" onClick={() => setSubmitDialogOpen(false)} className="rounded-xl">
-                Cancel
-              </Button>
-              <Button
-                className="rounded-xl gradient-bg"
-                onClick={() => handleSubmit(false)}
-                disabled={!isStarted || saving}
-              >
-                {saving ? "Submitting..." : "Submit Test"}
-              </Button>
+              <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid #e5e7eb" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#1f2937", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    style={{ width: 16, height: 16, cursor: "pointer" }}
+                    checked={instructionsChecked}
+                    onChange={(e) => setInstructionsChecked(e.target.checked)}
+                  />
+                  I have read and understood all the instructions.
+                </label>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                  <button
+                    disabled={!instructionsChecked}
+                    onClick={async () => {
+                      try { await handleStart(); setInstructionsOpen(false); } catch {}
+                    }}
+                    style={{
+                      padding: "9px 32px",
+                      background: instructionsChecked ? "#1e3a8a" : "#9ca3af",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 6,
+                      fontWeight: 700,
+                      fontSize: 14,
+                      cursor: instructionsChecked ? "pointer" : "not-allowed",
+                      letterSpacing: 1,
+                    }}
+                  >
+                    PROCEED
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       )}
 
+      {/* ─── TOP HEADER BAR ─── */}
+      <div style={{ background: "#1e3a8a", color: "#fff", padding: "0 12px", height: 44, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: 0.5, truncate: true, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {testMeta.title}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ fontSize: 12, background: "rgba(255,255,255,0.15)", padding: "3px 10px", borderRadius: 20, whiteSpace: "nowrap" }}>
+            {isStarted ? (
+              <TimerChip key={timerKey} initialSeconds={timerStartSeconds} onTimeUp={handleTimeUp} />
+            ) : (
+              <span>{testMeta.durationMinutes} min</span>
+            )}
+          </div>
+          {/* Mobile palette button */}
+          <button
+            onClick={() => setMobilePaletteOpen(true)}
+            style={{ display: "none", alignItems: "center", gap: 4, background: "rgba(255,255,255,0.2)", border: "none", borderRadius: 6, color: "#fff", padding: "5px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+            className="mobile-palette-btn"
+          >
+            <LayoutGrid size={14} /> Palette
+          </button>
+        </div>
+      </div>
+
+      {/* ─── MAIN BODY ─── */}
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row", overflow: "hidden" }}>
+
+        {/* LEFT: Question Panel */}
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+
+          {/* Section tabs */}
+          {testMeta.sections.length > 1 && (
+            <div style={{ background: "#e5e7eb", borderBottom: "1px solid #d1d5db", display: "flex", overflowX: "auto", flexShrink: 0 }}>
+              {testMeta.sections.map((section) => (
+                <button
+                  key={section.id}
+                  onClick={() => setCurrentSectionId(section.id)}
+                  style={{
+                    padding: "7px 16px",
+                    fontSize: 13,
+                    fontWeight: currentSectionId === section.id ? 700 : 400,
+                    borderBottom: currentSectionId === section.id ? "3px solid #1e3a8a" : "3px solid transparent",
+                    color: currentSectionId === section.id ? "#1e3a8a" : "#374151",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {section.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Question number + scroll area */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "0" }}>
+            {/* Question header bar */}
+            <div style={{ background: "#dbeafe", borderBottom: "1px solid #bfdbfe", padding: "6px 14px", fontSize: 13, fontWeight: 700, color: "#1e3a8a", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+              <span>Question {currentIndex + 1}:</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 400, color: "#3b82f6" }}>
+                  {saving ? "⬆ Saving…" : lastSavedAt ? "✓ Saved" : "Ready"}
+                </span>
+                {!isStarted && (
+                  <button
+                    onClick={handleStart}
+                    style={{ background: "#1e3a8a", color: "#fff", border: "none", borderRadius: 5, padding: "4px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                  >
+                    {attemptId ? "Resume" : "Start Test"}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div style={{ padding: "12px 16px" }}>
+              {/* Passage */}
+              {!!currentQuestion.passage && (
+                <div style={{ padding: 12, background: "#fef9c3", border: "1px solid #fde68a", borderRadius: 6, marginBottom: 12, fontSize: 13 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>{currentQuestion.passage.title}</div>
+                  <div style={{ whiteSpace: "pre-line", color: "#374151" }}>{currentQuestion.passage.content}</div>
+                </div>
+              )}
+
+              {/* Question stem */}
+              <div style={{ fontSize: 13, color: "#1f2937", lineHeight: 1.7, marginBottom: 16 }}>
+                <HtmlView html={currentQuestion.stem} className="flex-1" />
+              </div>
+
+              {/* Options – MCQ */}
+              {currentQuestion.type === "mcq" && currentQuestion.options && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#6b7280", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Options :</div>
+                  {currentQuestion.options.map((option, i) => {
+                    const isSelected = responses[currentQuestion.id]?.answer === option.id;
+                    return (
+                      <label
+                        key={option.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: 10,
+                          padding: "8px 10px",
+                          borderRadius: 5,
+                          cursor: isStarted ? "pointer" : "not-allowed",
+                          background: isSelected ? "#dbeafe" : "transparent",
+                          border: isSelected ? "1px solid #93c5fd" : "1px solid transparent",
+                          marginBottom: 4,
+                          transition: "background 0.15s",
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name={`q_${currentQuestion.id}`}
+                          value={option.id}
+                          checked={isSelected}
+                          disabled={!isStarted}
+                          onChange={() => handleAnswer(option.id)}
+                          style={{ marginTop: 2, accentColor: "#1e3a8a", cursor: isStarted ? "pointer" : "not-allowed" }}
+                        />
+                        <span style={{ fontSize: 13, color: "#1f2937", lineHeight: 1.6 }}>
+                          <span style={{ fontWeight: 700, marginRight: 4 }}>{String.fromCharCode(65 + i)}.</span>
+                          <HtmlView html={option.text} className="inline" />
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Integer type */}
+              {currentQuestion.type === "integer" && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Your Answer :</div>
+                  <input
+                    type="number"
+                    placeholder="Enter integer answer"
+                    value={responses[currentQuestion.id]?.answer || ""}
+                    onChange={(e) => handleAnswer(e.target.value)}
+                    disabled={!isStarted}
+                    style={{ padding: "8px 12px", border: "1.5px solid #d1d5db", borderRadius: 5, fontSize: 14, width: 200, outline: "none" }}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ─── ACTION BUTTONS ROW ─── */}
+          <div style={{ flexShrink: 0, borderTop: "1px solid #e5e7eb", background: "#f9fafb", padding: "8px 12px", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+            {/* Save & Next */}
+            <button
+              onClick={() => { if (responses[currentQuestion.id]?.answer) goToIndex(currentIndex + 1); else goToIndex(currentIndex + 1); }}
+              disabled={!isStarted}
+              style={{ background: isStarted ? "#22c55e" : "#9ca3af", color: "#fff", border: "none", borderRadius: 4, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
+            >
+              SAVE &amp; NEXT
+            </button>
+
+            {/* Clear */}
+            <button
+              onClick={handleClearResponse}
+              disabled={!isStarted}
+              style={{ background: "#fff", color: "#374151", border: "1.5px solid #d1d5db", borderRadius: 4, padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
+            >
+              CLEAR
+            </button>
+
+            {/* Save & Mark for Review */}
+            <button
+              onClick={() => { handleMarkForReview(); goToIndex(currentIndex + 1); }}
+              disabled={!isStarted}
+              style={{ background: isStarted ? "#7c3aed" : "#9ca3af", color: "#fff", border: "none", borderRadius: 4, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
+            >
+              SAVE &amp; MARK FOR REVIEW
+            </button>
+
+            {/* Mark for Review & Next */}
+            <button
+              onClick={() => { handleMarkForReview(); goToIndex(currentIndex + 1); }}
+              disabled={!isStarted}
+              style={{ background: isStarted ? "#2563eb" : "#9ca3af", color: "#fff", border: "none", borderRadius: 4, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
+            >
+              MARK FOR REVIEW &amp; NEXT
+            </button>
+          </div>
+
+          {/* ─── NAVIGATION ROW ─── */}
+          <div style={{ flexShrink: 0, borderTop: "1px solid #e5e7eb", background: "#fff", padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                onClick={() => goToIndex(currentIndex - 1)}
+                disabled={currentIndex === 0}
+                style={{ background: currentIndex === 0 ? "#e5e7eb" : "#fff", color: currentIndex === 0 ? "#9ca3af" : "#374151", border: "1.5px solid #d1d5db", borderRadius: 4, padding: "6px 16px", fontSize: 12, fontWeight: 700, cursor: currentIndex === 0 ? "not-allowed" : "pointer" }}
+              >
+                &lt;&lt; BACK
+              </button>
+              <button
+                onClick={() => goToIndex(currentIndex + 1)}
+                disabled={currentIndex === questions.length - 1}
+                style={{ background: currentIndex === questions.length - 1 ? "#e5e7eb" : "#fff", color: currentIndex === questions.length - 1 ? "#9ca3af" : "#374151", border: "1.5px solid #d1d5db", borderRadius: 4, padding: "6px 16px", fontSize: 12, fontWeight: 700, cursor: currentIndex === questions.length - 1 ? "not-allowed" : "pointer" }}
+              >
+                NEXT &gt;&gt;
+              </button>
+            </div>
+
+            <button
+              onClick={() => setSubmitDialogOpen(true)}
+              disabled={!isStarted}
+              style={{ background: isStarted ? "#22c55e" : "#9ca3af", color: "#fff", border: "none", borderRadius: 4, padding: "7px 22px", fontSize: 13, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed" }}
+            >
+              SUBMIT
+            </button>
+          </div>
+        </div>
+
+        {/* ─── RIGHT: Question Palette (desktop) ─── */}
+        <div
+          className="desktop-palette"
+          style={{
+            width: 260,
+            flexShrink: 0,
+            background: "#fff",
+            borderLeft: "1px solid #d1d5db",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          <div style={{ padding: "8px 12px", borderBottom: "1px solid #e5e7eb", background: "#f9fafb", fontWeight: 700, fontSize: 13, color: "#1e3a8a" }}>
+            Question Palette
+          </div>
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            <PaletteContent />
+          </div>
+        </div>
+      </div>
+
+      {/* ─── MOBILE PALETTE SHEET ─── */}
+      <Sheet open={mobilePaletteOpen} onOpenChange={setMobilePaletteOpen}>
+        <SheetContent side="bottom" className="lg:hidden h-[80dvh] rounded-t-2xl px-0 pb-0">
+          <SheetHeader className="px-4 pt-3 pb-3 border-b text-left" style={{ background: "#1e3a8a" }}>
+            <SheetTitle style={{ color: "#fff", fontSize: 14 }}>Question Palette</SheetTitle>
+          </SheetHeader>
+          <div style={{ overflowY: "auto", height: "calc(80dvh - 56px)" }}>
+            <PaletteContent onClose={() => setMobilePaletteOpen(false)} />
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* ─── SUBMIT DIALOG ─── */}
+      {submitDialogOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 100001, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ width: "100%", maxWidth: 420, borderRadius: 10, background: "#fff", boxShadow: "0 8px 40px rgba(0,0,0,0.25)", overflow: "hidden" }}>
+            <div style={{ padding: "14px 18px", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <AlertTriangle size={20} style={{ color: "#f59e0b", flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#1f2937" }}>Submit Test?</div>
+                <div style={{ fontSize: 13, color: "#6b7280", marginTop: 2 }}>Are you sure? You won't be able to change your answers after submission.</div>
+              </div>
+            </div>
+
+            <div style={{ padding: "14px 18px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div style={{ padding: 12, borderRadius: 8, background: "#dcfce7", textAlign: "center" }}>
+                <div style={{ fontWeight: 700, fontSize: 22, color: "#16a34a" }}>{answeredCount}</div>
+                <div style={{ fontSize: 12, color: "#374151" }}>Answered</div>
+              </div>
+              <div style={{ padding: 12, borderRadius: 8, background: "#fee2e2", textAlign: "center" }}>
+                <div style={{ fontWeight: 700, fontSize: 22, color: "#dc2626" }}>{unansweredVisitedCount}</div>
+                <div style={{ fontSize: 12, color: "#374151" }}>Not Answered</div>
+              </div>
+            </div>
+
+            <div style={{ padding: "12px 18px", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button
+                onClick={() => setSubmitDialogOpen(false)}
+                style={{ background: "#fff", color: "#374151", border: "1.5px solid #d1d5db", borderRadius: 6, padding: "7px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleSubmit(false)}
+                disabled={!isStarted || saving}
+                style={{ background: isStarted ? "#22c55e" : "#9ca3af", color: "#fff", border: "none", borderRadius: 6, padding: "7px 20px", fontSize: 13, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed" }}
+              >
+                {saving ? "Submitting..." : "Submit Test"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── RESPONSIVE STYLES ─── */}
+      <style>{`
+        @media (max-width: 768px) {
+          .desktop-palette { display: none !important; }
+          .mobile-palette-btn { display: flex !important; }
+        }
+        @media (min-width: 769px) {
+          .mobile-palette-btn { display: none !important; }
+        }
+      `}</style>
     </div>
   );
 }
