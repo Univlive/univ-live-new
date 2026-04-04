@@ -712,6 +712,7 @@ export default function Analytics() {
         hint: `${completed.length} completed in this period`,
       },
       {
+        //Error Here: The "Avg Score" card is showing the change vs class average instead of the actual average score. The hint should indicate how the student's average compares to the class average, while the value should show the student's average score.
         label: "Avg Score",
         value: `${avgStudentScore}%`,
         hint: `${avgStudentScore - classAvgScore >= 0 ? "+" : ""}${avgStudentScore - classAvgScore}% vs class avg`,

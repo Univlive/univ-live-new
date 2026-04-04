@@ -58,9 +58,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const refreshProfile = async () => {
-    if (!firebaseUser) return;
-    const p = await loadProfile(firebaseUser.uid);
+    // Use auth.currentUser directly — the React state (firebaseUser)
+    // may still be null right after signIn if onAuthStateChanged hasn't
+    // triggered a re-render yet.
+    const user = firebaseUser || auth.currentUser;
+    if (!user) return;
+    setFirebaseUser(user);
+    const p = await loadProfile(user.uid);
     setProfile(p);
+    setLoading(false);
   };
 
   useEffect(() => {

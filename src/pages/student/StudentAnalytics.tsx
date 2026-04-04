@@ -174,8 +174,6 @@ export default function StudentAnalytics() {
           })
           .reverse();
         
-
-
         /*****************************/
         // Subject Performance: avg % by subject (top 8 subjects)
         const bySub: Record<string, { total: number; count: number }> = {};

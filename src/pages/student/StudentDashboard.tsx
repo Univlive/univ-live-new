@@ -363,7 +363,7 @@ export default function StudentDashboard() {
         />
         <StudentMetricCard
           title="Avg Score"
-          value={`${avgScore}%`}
+          value={`${avgScore}`}
           icon={Target}
           color="yellow"
         />
