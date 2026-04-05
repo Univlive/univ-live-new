@@ -293,7 +293,13 @@ export default function StudentDashboard() {
   // Metrics
   const avgScore = useMemo(() => {
     if (completedAttempts.length === 0) return 0;
-    const sum = completedAttempts.reduce((acc, a) => acc + a.accuracy, 0);
+    const sum = completedAttempts.reduce((acc, a) => acc + a.score, 0);
+    return Math.round(sum / completedAttempts.length);
+  }, [completedAttempts]);
+
+  const avgMaxScore = useMemo(() => {
+    if (completedAttempts.length === 0) return 0;
+    const sum = completedAttempts.reduce((acc, a) => acc + a.maxScore, 0);
     return Math.round(sum / completedAttempts.length);
   }, [completedAttempts]);
 
@@ -302,7 +308,7 @@ export default function StudentDashboard() {
     for (const a of completedAttempts) {
       const key = a.subject || "General Test";
       map[key] = map[key] || { total: 0, count: 0 };
-      map[key].total += a.accuracy;
+      map[key].total += a.score;
       map[key].count += 1;
     }
 
@@ -327,7 +333,7 @@ export default function StudentDashboard() {
 
     return list.map((a) => ({
       date: formatDateLabel(new Date(a.createdAt).getTime()),
-      score: a.accuracy,
+      score: a.score,
     }));
   }, [completedAttempts]);
 
@@ -363,14 +369,14 @@ export default function StudentDashboard() {
         />
         <StudentMetricCard
           title="Avg Score"
-          value={`${avgScore}`}
+          value={`${avgScore}/${avgMaxScore}`}
           icon={Target}
           color="yellow"
         />
         <StudentMetricCard
           title="Best Subject"
           value={bestSubject.subject}
-          subtitle={`${bestSubject.score}% avg`}
+          subtitle={`${bestSubject.score} avg`}
           icon={Trophy}
           color="lavender"
         />
@@ -409,7 +415,7 @@ export default function StudentDashboard() {
               <LineChart data={scoreTrend}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                 <XAxis dataKey="date" className="text-xs" />
-                <YAxis domain={[0, 100]} className="text-xs" />
+                <YAxis className="text-xs" />
                 <Tooltip contentStyle={{ borderRadius: "12px" }} />
                 <Line type="monotone" dataKey="score" stroke="hsl(var(--primary))" strokeWidth={2} dot />
               </LineChart>
@@ -426,7 +432,7 @@ export default function StudentDashboard() {
               <BarChart data={subjectPerformance}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                 <XAxis dataKey="subject" className="text-xs" tick={{ fontSize: 10 }} />
-                <YAxis domain={[0, 100]} className="text-xs" />
+                <YAxis className="text-xs" />
                 <Tooltip contentStyle={{ borderRadius: "12px" }} />
                 <Bar dataKey="score" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
               </BarChart>

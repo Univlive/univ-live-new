@@ -106,7 +106,7 @@ function computeFromQuestionsAndResponses(
   for (const q of questions) {
     const d = q.data;
     const sectionId = d.sectionId || "main";
-    const pos = safeNumber((d as any).marks ?? d.positiveMarks, 4);
+    const pos = safeNumber((d as any).marks ?? d.positiveMarks, 5);
     const neg = Math.abs(safeNumber(d.negativeMarks, 1));
 
 
@@ -199,7 +199,7 @@ export default function StudentResults() {
           questionId: q.id,
           userAnswer: userAnswer ? String(userAnswer) : null,
           isCorrect,
-          marks: safeNumber((q.data as any).marks ?? q.data.positiveMarks, 4),
+          marks: safeNumber((q.data as any).marks ?? q.data.positiveMarks, 5),
         };
       });
 
@@ -213,7 +213,7 @@ export default function StudentResults() {
           correctAnswer: q.data.correctAnswer,
           explanation: q.data.explanation,
           section: q.data.sectionId || "General",
-          marks: safeNumber((q.data as any).marks ?? q.data.positiveMarks, 4),
+          marks: safeNumber((q.data as any).marks ?? q.data.positiveMarks, 5),
         })),
         responses: userResponses,
         testTitle,

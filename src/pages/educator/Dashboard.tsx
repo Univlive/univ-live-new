@@ -448,7 +448,7 @@ export default function EducatorDashboard() {
   const totalAttempts = attempts.length;
   const completedAttempts = attempts.filter((attempt) => isAttemptCompleted(attempt.status));
   const completionRate = totalAttempts > 0 ? Math.round((completedAttempts.length / totalAttempts) * 100) : 0;
-  const avgScore = Math.round(average(completedAttempts.map(normalizeAccuracy)));
+  const avgScore = Math.round(average(completedAttempts.map((a) => safeNum(a.score, 0))));
   const avgTimeSec = Math.round(average(completedAttempts.map((attempt) => safeNum(attempt.timeTakenSec, 0)).filter(Boolean)));
   const pendingReviews = completedAttempts.filter((attempt) => {
     const status = String(attempt.aiReviewStatus || "queued").toLowerCase();
@@ -481,14 +481,14 @@ export default function EducatorDashboard() {
     meanInWindow(
       completedAttempts,
       (attempt) => toMillis(attempt.submittedAt || attempt.updatedAt || attempt.createdAt),
-      (attempt) => normalizeAccuracy(attempt),
+      (attempt) => safeNum(attempt.score, 0),
       currentPeriodStart,
       currentPeriodEnd
     ),
     meanInWindow(
       completedAttempts,
       (attempt) => toMillis(attempt.submittedAt || attempt.updatedAt || attempt.createdAt),
-      (attempt) => normalizeAccuracy(attempt),
+      (attempt) => safeNum(attempt.score, 0),
       previousPeriodStart,
       previousPeriodEnd
     )
@@ -545,7 +545,7 @@ export default function EducatorDashboard() {
       const key = startOfDay(new Date(ms)).toISOString();
       if (!bucket[key]) return;
       bucket[key].attempts += 1;
-      if (isAttemptCompleted(attempt.status)) bucket[key].scores.push(normalizeAccuracy(attempt));
+      if (isAttemptCompleted(attempt.status)) bucket[key].scores.push(safeNum(attempt.score, 0));
     });
 
     return last7Days.map((date) => {
@@ -564,10 +564,12 @@ export default function EducatorDashboard() {
 
     completedAttempts.forEach((attempt) => {
       const subject = String(attempt.subject || "General");
-      const score = normalizeAccuracy(attempt);
+      const sc = safeNum(attempt.score, 0);
+      const mx = safeNum(attempt.maxScore, 0);
+      const pct = mx > 0 ? Math.round((sc / mx) * 100) : 0;
       if (!bucket[subject]) bucket[subject] = { weak: 0, moderate: 0, strong: 0 };
-      if (score < 40) bucket[subject].weak += 1;
-      else if (score < 70) bucket[subject].moderate += 1;
+      if (pct < 40) bucket[subject].weak += 1;
+      else if (pct < 70) bucket[subject].moderate += 1;
       else bucket[subject].strong += 1;
     });
 
@@ -592,7 +594,7 @@ export default function EducatorDashboard() {
       const label = String(attempt.testTitle || attempt.subject || "Untitled Test");
       if (!bucket[label]) bucket[label] = { attempts: 0, scores: [] };
       bucket[label].attempts += 1;
-      bucket[label].scores.push(normalizeAccuracy(attempt));
+      bucket[label].scores.push(safeNum(attempt.score, 0));
     });
 
     return Object.entries(bucket)
@@ -610,7 +612,7 @@ export default function EducatorDashboard() {
     completedAttempts.forEach((attempt) => {
       const subject = String(attempt.subject || "General");
       if (!bucket[subject]) bucket[subject] = [];
-      bucket[subject].push(normalizeAccuracy(attempt));
+      bucket[subject].push(safeNum(attempt.score, 0));
     });
     return Object.entries(bucket)
       .map(([subject, values]) => ({ subject, avg: Math.round(average(values)), attempts: values.length }))
@@ -652,7 +654,7 @@ export default function EducatorDashboard() {
         type: "test_attempted",
         title: completed ? "Test submitted" : "Attempt started",
         description: completed
-          ? `${learner} ${attempt.testTitle ? `submitted ${attempt.testTitle}` : "submitted a test"} with ${normalizeAccuracy(attempt)}% score.`
+          ? `${learner} ${attempt.testTitle ? `submitted ${attempt.testTitle}` : "submitted a test"} with score ${safeNum(attempt.score, 0)}.`
           : `${learner} started ${attempt.testTitle || "a test"}.`,
         time: relativeTime(ms),
         sortMs: ms,
@@ -815,7 +817,7 @@ export default function EducatorDashboard() {
         />
         <MetricCard
           title="Avg Score"
-          value={`${avgScore}%`}
+          value={`${avgScore}`}
           change={{ value: Math.abs(deltaAvgScore), type: deltaAvgScore >= 0 ? "increase" : "decrease" }}
           icon={TrendingUp}
           iconColor="text-cyan-500"
@@ -927,14 +929,14 @@ export default function EducatorDashboard() {
                 <p className="text-sm font-medium">Best subject</p>
                 <p className="text-xs text-muted-foreground">Highest average score across completed attempts</p>
               </div>
-              <Badge variant="secondary">{bestSubject ? `${bestSubject.subject} · ${bestSubject.avg}%` : "No data"}</Badge>
+              <Badge variant="secondary">{bestSubject ? `${bestSubject.subject} · ${bestSubject.avg}` : "No data"}</Badge>
             </div>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-sm font-medium">Needs attention</p>
                 <p className="text-xs text-muted-foreground">Lowest average scoring subject right now</p>
               </div>
-              <Badge variant="outline">{weakestSubject ? `${weakestSubject.subject} · ${weakestSubject.avg}%` : "No data"}</Badge>
+              <Badge variant="outline">{weakestSubject ? `${weakestSubject.subject} · ${weakestSubject.avg}` : "No data"}</Badge>
             </div>
             <div className="flex items-start justify-between gap-3">
               <div>

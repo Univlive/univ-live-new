@@ -265,7 +265,7 @@ function QuestionsManager({ testId, collectionPath, onClose }: { testId: string,
                    </div>
                    <div className="space-y-1.5">
                       <Label className="text-green-600">Positive Marks</Label>
-                      <Input type="number" name="pos" defaultValue={editingQ?.positiveMarks || 4} min={0} />
+                      <Input type="number" name="pos" defaultValue={editingQ?.positiveMarks || 5} min={0} />
                    </div>
                    <div className="space-y-1.5">
                       <Label className="text-red-600">Negative Marks</Label>

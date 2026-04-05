@@ -436,7 +436,7 @@ export default function Analytics() {
 
       const completed = attempts.filter((a) => isCompletedStatus(a.data.status));
       const completedCount = completed.length;
-      const avgAcc = completedCount > 0 ? average(completed.map((a) => normalizeAccuracy(a.data))) : 0;
+      const avgAcc = completedCount > 0 ? average(completed.map((a) => safeNum(a.data.score, 0))) : 0;
       const avgTimeSec = completedCount > 0 ? average(completed.map((a) => getAttemptTimeSeconds(a.data))) : 0;
 
       setAvgScore(avgAcc);
@@ -445,7 +445,7 @@ export default function Analytics() {
 
       const prevDocs = prevAttemptsSnap.docs.map((d) => d.data() as AttemptDoc);
       const prevCompleted = prevDocs.filter((a) => isCompletedStatus(a.status));
-      const prevAvgAcc = prevCompleted.length > 0 ? average(prevCompleted.map((a) => normalizeAccuracy(a))) : 0;
+      const prevAvgAcc = prevCompleted.length > 0 ? average(prevCompleted.map((a) => safeNum(a.score, 0))) : 0;
       const prevAvgTime = prevCompleted.length > 0 ? average(prevCompleted.map((a) => getAttemptTimeSeconds(a))) : 0;
 
       setAvgScoreChange(pctChange(avgAcc, prevAvgAcc));
@@ -507,13 +507,13 @@ export default function Analytics() {
       for (const a of completed) {
         const sid = String(a.data.studentId || "");
         if (!sid) continue;
-        const acc = normalizeAccuracy(a.data);
+        const sc = safeNum(a.data.score, 0);
         const subject = String(a.data.subject || "General").trim() || "General";
         const existing = perStudent.get(sid) || { attempts: 0, sumAcc: 0, subject: new Map() };
         existing.attempts += 1;
-        existing.sumAcc += acc;
+        existing.sumAcc += sc;
         const subjAgg = existing.subject.get(subject) || { sum: 0, cnt: 0 };
-        subjAgg.sum += acc;
+        subjAgg.sum += sc;
         subjAgg.cnt += 1;
         existing.subject.set(subject, subjAgg);
         perStudent.set(sid, existing);
@@ -569,10 +569,10 @@ export default function Analytics() {
       const testMap = new Map<string, { cnt: number; sumAcc: number }>();
       for (const a of completed) {
         const title = String(a.data.testTitle || a.data.testId || "Test").trim() || "Test";
-        const acc = normalizeAccuracy(a.data);
+        const sc = safeNum(a.data.score, 0);
         const t = testMap.get(title) || { cnt: 0, sumAcc: 0 };
         t.cnt += 1;
-        t.sumAcc += acc;
+        t.sumAcc += sc;
         testMap.set(title, t);
       }
       const most: TestAgg[] = Array.from(testMap.entries())
@@ -591,10 +591,10 @@ export default function Analytics() {
         if (!sid) continue;
         const learner = nextLearners.find((row) => row.id === sid) || null;
         const batch = learner?.profile?.batchName || learner?.profile?.batch || learner?.data.tenantSlug || "Main";
-        const acc = normalizeAccuracy(a.data);
+        const sc = safeNum(a.data.score, 0);
         const existing = batchMap.get(batch) || { students: new Set<string>(), sumAcc: 0, cnt: 0 };
         existing.students.add(sid);
-        existing.sumAcc += acc;
+        existing.sumAcc += sc;
         existing.cnt += 1;
         batchMap.set(batch, existing);
       }
@@ -651,28 +651,29 @@ export default function Analytics() {
     const completed = attempts.filter((row) => isCompletedStatus(row.data.status));
     const classCompleted = periodAttempts.filter((row) => isCompletedStatus(row.data.status));
 
-    const completedScores = completed.map((row) => normalizeAccuracy(row.data));
+    const completedScores = completed.map((row) => safeNum(row.data.score, 0));
+    // Svg Score calculator.....
     const avgStudentScore = completedScores.length ? average(completedScores) : 0;
     const bestScore = completedScores.length ? Math.max(...completedScores) : 0;
     const avgStudentTime = completed.length ? average(completed.map((row) => getAttemptTimeSeconds(row.data))) : 0;
-    const classAvgScore = classCompleted.length ? average(classCompleted.map((row) => normalizeAccuracy(row.data))) : 0;
+    const classAvgScore = classCompleted.length ? average(classCompleted.map((row) => safeNum(row.data.score, 0))) : 0;
 
     const sortedCompleted = [...completed].sort(
       (a, b) => toMillis(a.data.submittedAt || a.data.createdAt) - toMillis(b.data.submittedAt || b.data.createdAt)
     );
-    const firstScore = sortedCompleted.length ? normalizeAccuracy(sortedCompleted[0].data) : 0;
-    const lastScore = sortedCompleted.length ? normalizeAccuracy(sortedCompleted[sortedCompleted.length - 1].data) : 0;
+    const firstScore = sortedCompleted.length ? safeNum(sortedCompleted[0].data.score, 0) : 0;
+    const lastScore = sortedCompleted.length ? safeNum(sortedCompleted[sortedCompleted.length - 1].data.score, 0) : 0;
 
     const scoreTrend = sortedCompleted.slice(-12).map((row) => ({
       date: formatShortDate(toMillis(row.data.submittedAt || row.data.createdAt)),
-      score: normalizeAccuracy(row.data),
+      score: safeNum(row.data.score, 0),
     }));
 
     const subjectAgg = new Map<string, { sum: number; count: number }>();
     for (const row of completed) {
       const subject = String(row.data.subject || "General").trim() || "General";
       const existing = subjectAgg.get(subject) || { sum: 0, count: 0 };
-      existing.sum += normalizeAccuracy(row.data);
+      existing.sum += safeNum(row.data.score, 0);
       existing.count += 1;
       subjectAgg.set(subject, existing);
     }
@@ -696,7 +697,7 @@ export default function Analytics() {
         title: String(row.data.testTitle || row.data.testId || "Test"),
         subject: String(row.data.subject || "General"),
         status: String(row.data.status || "unknown"),
-        scoreLabel: isCompletedStatus(row.data.status) ? `${normalizeAccuracy(row.data)}%` : "In progress",
+        scoreLabel: isCompletedStatus(row.data.status) ? `${safeNum(row.data.score, 0)}/${safeNum(row.data.maxScore, 0)}` : "In progress",
         timeLabel: isCompletedStatus(row.data.status) ? formatMinutes(getAttemptTimeSeconds(row.data)) : "—",
         dateLabel: formatShortDateTime(toMillis(row.data.submittedAt || row.data.createdAt)),
       }));
@@ -714,12 +715,12 @@ export default function Analytics() {
       {
         //Error Here: The "Avg Score" card is showing the change vs class average instead of the actual average score. The hint should indicate how the student's average compares to the class average, while the value should show the student's average score.
         label: "Avg Score",
-        value: `${avgStudentScore}%`,
-        hint: `${avgStudentScore - classAvgScore >= 0 ? "+" : ""}${avgStudentScore - classAvgScore}% vs class avg`,
+        value: `${avgStudentScore}`,
+        hint: `${avgStudentScore - classAvgScore >= 0 ? "+" : ""}${avgStudentScore - classAvgScore} vs class avg`,
       },
       {
         label: "Best Score",
-        value: `${bestScore}%`,
+        value: `${bestScore}`,
         hint: strongestSubject !== "—" ? `Best subject: ${strongestSubject}` : "Awaiting subject data",
       },
       {
@@ -734,7 +735,7 @@ export default function Analytics() {
       },
       {
         label: "Progress",
-        value: `${lastScore - firstScore >= 0 ? "+" : ""}${lastScore - firstScore}%`,
+        value: `${lastScore - firstScore >= 0 ? "+" : ""}${lastScore - firstScore}`,
         hint: weakestSubject !== "—" ? `Needs work: ${weakestSubject}` : "Need more attempts to compare",
       },
     ];
@@ -777,7 +778,7 @@ export default function Analytics() {
       {
         icon: TrendingUp,
         label: "Avg Score",
-        value: `${avgScore}%`,
+        value: `${avgScore}`,
         change: `${avgScoreChange >= 0 ? "+" : ""}${avgScoreChange}%`,
         positive: avgScoreChange >= 0,
       },
@@ -969,7 +970,7 @@ export default function Analytics() {
                       <p className="text-sm font-medium truncate">{student.name}</p>
                       <p className="text-xs text-muted-foreground">{student.tests} completed attempts</p>
                     </div>
-                    <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">{student.score}%</Badge>
+                    <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">{student.score}</Badge>
                   </button>
                 ))}
                 {topPerformers.length === 0 && <p className="text-sm text-muted-foreground">No completed attempts yet.</p>}
@@ -1001,7 +1002,7 @@ export default function Analytics() {
                       <p className="text-sm font-medium truncate">{student.name}</p>
                       <p className="text-xs text-amber-600 dark:text-amber-400">Weak in {student.weakness}</p>
                     </div>
-                    <Badge variant="outline" className="border-amber-500 text-amber-600">{student.score}%</Badge>
+                    <Badge variant="outline" className="border-amber-500 text-amber-600">{student.score}</Badge>
                   </button>
                 ))}
                 {strugglingStudents.length === 0 && <p className="text-sm text-muted-foreground">No struggling pattern detected yet.</p>}
@@ -1056,7 +1057,7 @@ export default function Analytics() {
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Avg Score</span>
-                      <span className="font-medium text-green-600">{batch.avgScore}%</span>
+                      <span className="font-medium text-green-600">{batch.avgScore}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Growth</span>
@@ -1102,9 +1103,8 @@ export default function Analytics() {
                     <button
                       type="button"
                       onClick={() => setSelectedStudentId("__all__")}
-                      className={`w-full text-left rounded-lg border px-3 py-2 transition-colors ${
-                        selectedStudentId === "__all__" ? "border-primary bg-primary/5" : "hover:bg-muted/50"
-                      }`}
+                      className={`w-full text-left rounded-lg border px-3 py-2 transition-colors ${selectedStudentId === "__all__" ? "border-primary bg-primary/5" : "hover:bg-muted/50"
+                        }`}
                     >
                       <p className="font-medium text-sm">All students overview</p>
                       <p className="text-xs text-muted-foreground">Keep the current class-level analytics view</p>
@@ -1117,9 +1117,8 @@ export default function Analytics() {
                           key={student.id}
                           type="button"
                           onClick={() => setSelectedStudentId(student.id)}
-                          className={`w-full text-left rounded-lg border px-3 py-2 transition-colors ${
-                            selectedStudentId === student.id ? "border-primary bg-primary/5" : "hover:bg-muted/50"
-                          }`}
+                          className={`w-full text-left rounded-lg border px-3 py-2 transition-colors ${selectedStudentId === student.id ? "border-primary bg-primary/5" : "hover:bg-muted/50"
+                            }`}
                         >
                           <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">
@@ -1168,7 +1167,7 @@ export default function Analytics() {
                         <div className="grid grid-cols-2 gap-3 text-sm min-w-[240px]">
                           <div className="rounded-lg bg-muted/40 p-3">
                             <p className="text-muted-foreground">Avg Score</p>
-                            <p className="font-semibold text-lg">{selectedStudentDive.avgScore}%</p>
+                            <p className="font-semibold text-lg">{selectedStudentDive.avgScore}</p>
                           </div>
                           <div className="rounded-lg bg-muted/40 p-3">
                             <p className="text-muted-foreground">Completed</p>
@@ -1221,7 +1220,7 @@ export default function Analytics() {
                           <LineChart data={selectedStudentDive.scoreTrend}>
                             <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                             <XAxis dataKey="date" className="text-xs fill-muted-foreground" />
-                            <YAxis className="text-xs fill-muted-foreground" domain={[0, 100]} />
+                            <YAxis className="text-xs fill-muted-foreground" />
                             <Tooltip
                               contentStyle={{
                                 backgroundColor: "hsl(var(--card))",
@@ -1248,7 +1247,7 @@ export default function Analytics() {
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={selectedStudentDive.subjectPerformance} layout="vertical">
                             <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                            <XAxis type="number" domain={[0, 100]} className="text-xs fill-muted-foreground" />
+                            <XAxis type="number" className="text-xs fill-muted-foreground" />
                             <YAxis dataKey="subject" type="category" width={110} className="text-xs fill-muted-foreground" />
                             <Tooltip
                               contentStyle={{
@@ -1301,13 +1300,13 @@ export default function Analytics() {
                       <div className="rounded-lg bg-muted/40 p-4">
                         <p className="text-xs text-muted-foreground">Score vs class average</p>
                         <p className={`text-2xl font-bold mt-1 ${selectedStudentDive.classAvgDelta >= 0 ? "text-green-600" : "text-amber-600"}`}>
-                          {selectedStudentDive.classAvgDelta >= 0 ? "+" : ""}{selectedStudentDive.classAvgDelta}%
+                          {selectedStudentDive.classAvgDelta >= 0 ? "+" : ""}{selectedStudentDive.classAvgDelta}
                         </p>
                       </div>
                       <div className="rounded-lg bg-muted/40 p-4">
                         <p className="text-xs text-muted-foreground">Improvement from first to latest</p>
                         <p className={`text-2xl font-bold mt-1 ${selectedStudentDive.firstLastDelta >= 0 ? "text-green-600" : "text-red-600"}`}>
-                          {selectedStudentDive.firstLastDelta >= 0 ? "+" : ""}{selectedStudentDive.firstLastDelta}%
+                          {selectedStudentDive.firstLastDelta >= 0 ? "+" : ""}{selectedStudentDive.firstLastDelta}
                         </p>
                       </div>
                       <div className="rounded-lg bg-muted/40 p-4">

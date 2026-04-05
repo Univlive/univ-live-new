@@ -1555,7 +1555,7 @@ export default function Questions() {
                 <Input
                   value={formMarks}
                   onChange={(e) => setFormMarks(e.target.value)}
-                  placeholder={selectedTest?.positiveMarks != null ? String(selectedTest.positiveMarks) : "e.g. 4"}
+                  placeholder={selectedTest?.positiveMarks != null ? String(selectedTest.positiveMarks) : "e.g. 5"}
                   className="rounded-xl mt-1.5"
                 />
               </div>

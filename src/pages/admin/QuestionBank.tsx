@@ -364,7 +364,7 @@ export default function QuestionBank() {
   const [correctOption, setCorrectOption] = useState<number>(0);
   const [explanation, setExplanation] = useState<string>("");
 
-  const [marks, setMarks] = useState<number>(4);
+  const [marks, setMarks] = useState<number>(5);
   const [negativeMarks, setNegativeMarks] = useState<number>(-1);
 
   const [importOpen, setImportOpen] = useState(false);
@@ -429,7 +429,7 @@ export default function QuestionBank() {
     setOptions(["", "", "", ""]);
     setCorrectOption(0);
     setExplanation("");
-    setMarks(4);
+    setMarks(5);
     setNegativeMarks(-1);
   };
 
@@ -448,7 +448,7 @@ export default function QuestionBank() {
     setOptions((x.options?.length ? x.options : ["", "", "", ""]).slice(0, 4).concat(["", "", "", ""]).slice(0, 4));
     setCorrectOption(Number.isFinite(x.correctOption) ? x.correctOption : 0);
     setExplanation(x.explanation || "");
-    setMarks(typeof x.marks === "number" ? x.marks : 4);
+    setMarks(typeof x.marks === "number" ? x.marks : 5);
     setNegativeMarks(typeof x.negativeMarks === "number" ? x.negativeMarks : -1);
     setEditorOpen(true);
   };
@@ -492,7 +492,7 @@ export default function QuestionBank() {
         options: options.map((o) => sanitizeHtml(o)),
         correctOption,
         explanation: sanitizeHtml(explanation || ""),
-        marks: Number.isFinite(marks) ? marks : 4,
+        marks: Number.isFinite(marks) ? marks : 5,
         negativeMarks: Number.isFinite(negativeMarks) ? negativeMarks : -1,
         source: "manual",
         searchText: (
@@ -565,42 +565,42 @@ export default function QuestionBank() {
   };
 
   const replaceImagesInHtml = async (
-	  html: string,
-	  imageMap: Map<string, Blob>,
-	  uploadedCache: Map<string, string>
-	) => {
-	  if (!html) return "";
-	  const imgSrcRe = /<img[^>]*\ssrc=["']([^"']+)["'][^>]*>/gi;
+    html: string,
+    imageMap: Map<string, Blob>,
+    uploadedCache: Map<string, string>
+  ) => {
+    if (!html) return "";
+    const imgSrcRe = /<img[^>]*\ssrc=["']([^"']+)["'][^>]*>/gi;
 
-	  let out = html;
-	  const matches = Array.from(html.matchAll(imgSrcRe));
-	  for (const m of matches) {
-	    const src = m[1] || "";
+    let out = html;
+    const matches = Array.from(html.matchAll(imgSrcRe));
+    for (const m of matches) {
+      const src = m[1] || "";
 
-	    // already hosted / already embedded — keep it
-	    if (src.startsWith("http") || src.startsWith("data:")) continue;
+      // already hosted / already embedded — keep it
+      if (src.startsWith("http") || src.startsWith("data:")) continue;
 
-	    const base = safeBaseNameFromSrc(src);
-	    if (!base) continue;
+      const base = safeBaseNameFromSrc(src);
+      if (!base) continue;
 
-	    // reuse already-uploaded URL for same file name
-	    const cached = uploadedCache.get(base);
-	    if (cached) {
-	      out = out.replaceAll(src, cached);
-	      continue;
-	    }
+      // reuse already-uploaded URL for same file name
+      const cached = uploadedCache.get(base);
+      if (cached) {
+        out = out.replaceAll(src, cached);
+        continue;
+      }
 
-	    const blob = imageMap.get(base);
-	    if (!blob) continue;
+      const blob = imageMap.get(base);
+      if (!blob) continue;
 
-	    const file = new File([blob], base, { type: blob.type || "image/png" });
-	    const url = await uploadQuestionImageToImageKit(file);
+      const file = new File([blob], base, { type: blob.type || "image/png" });
+      const url = await uploadQuestionImageToImageKit(file);
 
-	    uploadedCache.set(base, url);
-	    out = out.replaceAll(src, url);
-	  }
-	  return out;
-	};
+      uploadedCache.set(base, url);
+      out = out.replaceAll(src, url);
+    }
+    return out;
+  };
 
   const handleImport = async () => {
     if (!importFile) {
@@ -630,7 +630,7 @@ export default function QuestionBank() {
         const subject = String(q.subject || "").trim() || "General";
         const topic = String((q as any)["spayee:objective"] || "").trim() || "General";
         const tags = normalizeTags(q.tag || []);
-        const marks = typeof q.mark === "number" ? q.mark : 4;
+        const marks = typeof q.mark === "number" ? q.mark : 5;
         const negativeMarks = typeof q.penalty === "number" ? q.penalty : -1;
 
         const questionHtml = await replaceImagesInHtml(String(q.text || ""), imageMap, uploadedCache);
@@ -872,7 +872,7 @@ export default function QuestionBank() {
                           dangerouslySetInnerHTML={{ __html: sanitizeHtml(q.question || "") }}
                         />
                         <div className="mt-2 text-xs text-muted-foreground">
-                          {q.marks ?? 4} marks • {q.negativeMarks ?? -1} negative • {q.options?.length ?? 0} options
+                          {q.marks ?? 5} marks • {q.negativeMarks ?? -1} negative • {q.options?.length ?? 0} options
                         </div>
                       </div>
 

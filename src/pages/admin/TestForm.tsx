@@ -108,7 +108,7 @@ const testId = params.testId || params.id;
   const [isPublished, setIsPublished] = useState(false);
 
   const [markingScheme, setMarkingScheme] = useState<MarkingScheme>({
-    correct: 4,
+    correct: 5,
     incorrect: -1,
     unanswered: 0,
   });
@@ -169,13 +169,13 @@ const testId = params.testId || params.id;
 
         if (d?.markingScheme) {
           setMarkingScheme({
-            correct: safeNum(d.markingScheme.correct, 4),
+            correct: safeNum(d.markingScheme.correct, 5),
             incorrect: safeNum(d.markingScheme.incorrect, -1),
             unanswered: safeNum(d.markingScheme.unanswered, 0),
           });
         } else {
           setMarkingScheme({
-            correct: safeNum(d?.positiveMarks, 4),
+            correct: safeNum(d?.positiveMarks, 5),
             incorrect: safeNum(d?.negativeMarks, -1),
             unanswered: 0,
           });
@@ -275,7 +275,7 @@ const testId = params.testId || params.id;
       price: p,
 
       markingScheme: {
-        correct: safeNum(markingScheme.correct, 4),
+        correct: safeNum(markingScheme.correct, 5),
         incorrect: safeNum(markingScheme.incorrect, -1),
         unanswered: safeNum(markingScheme.unanswered, 0),
       },
@@ -525,7 +525,7 @@ const testId = params.testId || params.id;
               type="number"
               value={String(markingScheme.correct)}
               onChange={(e) =>
-                setMarkingScheme((p) => ({ ...p, correct: safeNum(e.target.value, 4) }))
+                setMarkingScheme((p) => ({ ...p, correct: safeNum(e.target.value, 5) }))
               }
               className="rounded-xl"
             />
