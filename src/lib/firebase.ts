@@ -5,7 +5,7 @@ import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 // Analytics is optional (and should only run in browser)
-import { getAnalytics, isSupported } from "firebase/analytics";
+// import { getAnalytics, isSupported } from "firebase/analytics";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string,
@@ -24,7 +24,8 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 
-// Optional analytics (safe)
+// Optional analytics (disabled due to loading issues)
+/*
 export async function initAnalytics() {
   try {
     const ok = await isSupported();
@@ -34,4 +35,5 @@ export async function initAnalytics() {
     return null;
   }
 }
+*/
 
