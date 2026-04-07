@@ -1,4 +1,13 @@
 import { VercelRequest, VercelResponse } from "@vercel/node";
+import {
+  GoogleGenerativeAI,
+  SchemaType,
+  type GenerationConfig,
+} from "@google/generative-ai";
+
+// ---------------------------------------------------------------------------
+// Request type (from frontend WebsiteSettings.tsx)
+// ---------------------------------------------------------------------------
 
 interface WebsiteContentRequest {
   coachingName: string;
@@ -9,123 +18,151 @@ interface WebsiteContentRequest {
   studentCount?: number;
 }
 
-interface WebsiteContentResponse {
-  stats: Array<{ label: string; value: string; icon: string }>;
-  achievements: Array<{ title: string; description: string; icon: string }>;
-  testimonials: Array<{ name: string; course: string; rating: number; text: string; avatar: string }>;
-  faculty: Array<{ name: string; subject: string; designation: string; experience: string; bio: string; image: string }>;
-}
+// ---------------------------------------------------------------------------
+// Gemini response schema – enforces strict JSON output
+// ---------------------------------------------------------------------------
 
-export default async function handler(
-  req: VercelRequest,
-  res: VercelResponse
-) {
-  // Only accept POST
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
-  try {
-    const { coachingName, educatorName, subjects, description, yearEstablished, studentCount } = req.body as WebsiteContentRequest;
-
-    if (!coachingName || !educatorName || !subjects || !description) {
-      return res.status(400).json({ error: "Missing required fields: coachingName, educatorName, subjects, description" });
-    }
-
-    const groqApiKey = process.env.GROQ_API_KEY;
-    const isDev = process.env.NODE_ENV !== "production";
-    if (!groqApiKey) {
-      console.error("GROQ_API_KEY not configured");
-      const msg = isDev ? "GROQ_API_KEY not configured on server. Add it to Vercel environment variables or .env.local for local dev." : "API configuration error";
-      return res.status(500).json({ error: msg });
-    }
-
-    // Build the prompt for Groq
-    const prompt = buildWebsiteContentPrompt(
-      coachingName,
-      educatorName,
-      subjects,
-      description,
-      yearEstablished,
-      studentCount
-    );
-
-    // Call Groq API
-    const groqResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${groqApiKey}`,
+const websiteContentSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    heroTagline: {
+      type: SchemaType.STRING,
+      description: "A catchy, short one-liner for the top of the website.",
+    },
+    aboutUs: {
+      type: SchemaType.STRING,
+      description:
+        "A professional 2-3 paragraph description of the coaching center.",
+    },
+    stats: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          label: {
+            type: SchemaType.STRING,
+            description:
+              "e.g., 'Students Selected', 'Years Experience', 'Success Rate'",
+          },
+          value: {
+            type: SchemaType.STRING,
+            description: "e.g., '10,000+', '15+', '95%'",
+          },
+          icon: {
+            type: SchemaType.STRING,
+            description:
+              "A Lucide icon name: 'Users', 'Trophy', 'Star', 'BookOpen', 'Target', 'Award', 'TrendingUp'",
+          },
+        },
+        required: ["label", "value", "icon"],
       },
-      body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
-        messages: [
-          {
-            role: "system",
-            content: `You are an expert website content creator for educational coaching centers. Generate engaging and professional content for their website based on the information provided.
-
-Respond ONLY with valid JSON in this exact format (no markdown, no extra text):
-{
-  "stats": [{"label": "string", "value": "string", "icon": "string"}],
-  "achievements": [{"title": "string", "description": "string", "icon": "string"}],
-  "testimonials": [{"name": "string", "course": "string", "rating": number (1-5), "text": "string", "avatar": "string (initials)"}],
-  "faculty": [{"name": "string", "subject": "string", "designation": "string", "experience": "string", "bio": "string", "image": "string (placeholder like initials or color)"}]
-}
-
-Guidelines:
-- Stats should showcase key achievements (e.g., "1000+ Students", "95% Success Rate", "10+ Years", "50+ Tests")
-- Achievements should list awards, recognitions, certifications (3-5 items)
-- Testimonials should be realistic student reviews (3-4 items with ratings 4-5)
-- Faculty should include the educator and if mentioned any other faculty (2-3 items)
-- Use placeholder values for images (like "JD" for "John Doe" or URLs like "https://avatar.placeholder.com/JD")
-- Icons can be simple names: "Users", "Trophy", "Star", "BookOpen", "Target", "Award", etc.`,
+    },
+    achievements: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          title: { type: SchemaType.STRING },
+          description: { type: SchemaType.STRING },
+          icon: {
+            type: SchemaType.STRING,
+            description: "A Lucide icon name: 'Trophy', 'Award', 'Star', 'Medal'",
           },
-          {
-            role: "user",
-            content: prompt,
+        },
+        required: ["title", "description", "icon"],
+      },
+    },
+    testimonials: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          name: { type: SchemaType.STRING },
+          course: {
+            type: SchemaType.STRING,
+            description: "The course/subject the student studied.",
           },
-        ],
-        temperature: 0.8,
-        max_tokens: 2000,
-      }),
-    });
+          rating: {
+            type: SchemaType.NUMBER,
+            description: "Rating from 1 to 5.",
+          },
+          text: { type: SchemaType.STRING },
+          avatar: {
+            type: SchemaType.STRING,
+            description:
+              "The student's initials as a placeholder, e.g. 'RK' for 'Rahul Kumar'.",
+          },
+        },
+        required: ["name", "course", "rating", "text", "avatar"],
+      },
+    },
+    faculty: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          name: { type: SchemaType.STRING },
+          subject: { type: SchemaType.STRING },
+          designation: {
+            type: SchemaType.STRING,
+            description: "e.g., 'Senior Faculty', 'Head of Department'",
+          },
+          experience: {
+            type: SchemaType.STRING,
+            description: "e.g., '10+ Years'",
+          },
+          bio: {
+            type: SchemaType.STRING,
+            description: "A short, 2-sentence professional bio.",
+          },
+          image: {
+            type: SchemaType.STRING,
+            description:
+              "Placeholder initials, e.g. 'RK' for 'Rajesh Kumar'.",
+          },
+        },
+        required: ["name", "subject", "designation", "experience", "bio", "image"],
+      },
+    },
+  },
+  required: [
+    "heroTagline",
+    "aboutUs",
+    "stats",
+    "achievements",
+    "testimonials",
+    "faculty",
+  ],
+} as const;
 
-    if (!groqResponse.ok) {
-      const error = await groqResponse.text();
-      console.error("Groq API error:", error);
-      const msg = isDev ? `Groq API error: ${error}` : "Failed to generate website content";
-      return res.status(500).json({ error: msg });
-    }
+// ---------------------------------------------------------------------------
+// System instruction for Gemini
+// ---------------------------------------------------------------------------
 
-    const data = await groqResponse.json();
-    const content = data.choices?.[0]?.message?.content;
+const SYSTEM_INSTRUCTION = [
+  "You are an expert website content creator for educational coaching centers in India.",
+  "Generate engaging, professional, and realistic marketing content based on the educator's input.",
+  "",
+  "Guidelines:",
+  "- heroTagline: A catchy, motivational one-liner (max 10 words).",
+  "- aboutUs: Professional 2-3 paragraphs describing the coaching center's mission, methodology, and USP.",
+  "- stats: 4-5 key achievement stats (e.g., '1000+ Students', '95% Success Rate', '10+ Years').",
+  "  Use icon names from Lucide: 'Users', 'Trophy', 'Star', 'BookOpen', 'Target', 'Award', 'TrendingUp'.",
+  "- achievements: 3-5 awards, recognitions, or certifications. Include icon names.",
+  "- testimonials: 3-4 realistic student reviews with ratings 4-5. Use initials as avatar placeholders.",
+  "  Make them specific to the subjects offered.",
+  "- faculty: Include the main educator plus 1-2 additional faculty. Use initials as image placeholders.",
+  "  Each bio should be exactly 2 sentences.",
+  "",
+  "Be specific to the subjects mentioned. Do NOT use generic placeholder text.",
+  "Make the content sound authentic and professional — suitable for a real coaching website.",
+].join("\n");
 
-    if (!content) {
-      return res.status(500).json({ error: "No response from AI" });
-    }
+// ---------------------------------------------------------------------------
+// Build the content generation prompt
+// ---------------------------------------------------------------------------
 
-    // Parse the JSON response - handle potential markdown wrapping
-    let generatedContent: WebsiteContentResponse;
-    try {
-      // Try to extract JSON if it's wrapped in markdown code blocks
-      const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/```\s*([\s\S]*?)\s*```/) || [null, content];
-      const jsonString = jsonMatch[1] || content;
-      generatedContent = JSON.parse(jsonString.trim());
-    } catch (parseError) {
-      console.error("Failed to parse AI response:", content, parseError);
-      const msg = isDev ? `Failed to parse AI response: ${String(parseError)} -- content: ${String(content).slice(0, 200)}` : "Failed to parse AI response";
-      return res.status(500).json({ error: msg });
-    }
-
-    return res.status(200).json(generatedContent);
-  } catch (error) {
-    console.error("Error in generate-website-content:", error);
-    const isDev = process.env.NODE_ENV !== "production";
-    return res.status(500).json({ error: isDev ? String(error) : "Internal server error" });
-  }
-}
-
-function buildWebsiteContentPrompt(
+function buildPrompt(
   coachingName: string,
   educatorName: string,
   subjects: string[],
@@ -134,18 +171,155 @@ function buildWebsiteContentPrompt(
   studentCount?: number
 ): string {
   const subjectsText = subjects.join(", ");
-  const yearsActive = yearEstablished ? new Date().getFullYear() - yearEstablished : 5;
-  const studentInfo = studentCount ? `with approximately ${studentCount} students enrolled` : "";
+  const yearsActive = yearEstablished
+    ? new Date().getFullYear() - yearEstablished
+    : null;
+  const studentInfo = studentCount
+    ? `with approximately ${studentCount} students enrolled`
+    : "";
 
-  return `Generate professional and engaging website content for an educational coaching center with the following information:
+  return [
+    "Generate professional website content for this coaching center:",
+    "",
+    `Coaching Center Name: ${coachingName}`,
+    `Founder/Educator: ${educatorName}`,
+    `Subjects: ${subjectsText}`,
+    yearsActive !== null ? `Years Active: ${yearsActive} years` : "",
+    studentInfo ? `Student Info: ${studentInfo}` : "",
+    "",
+    `Description: ${description}`,
+    "",
+    "Create realistic, professional content that would appeal to students looking to join.",
+    "The content should reflect the subjects offered and the coaching center's mission.",
+    "Make testimonials specific to the subjects and align achievements with common educational milestones.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
 
-Coaching Center Name: ${coachingName}
-Founder/Educator: ${educatorName}
-Subjects: ${subjectsText}
-Years Active: ${yearsActive} years
-Student Info: ${studentInfo}
+// ---------------------------------------------------------------------------
+// Call Gemini 1.5 Flash with structured output
+// ---------------------------------------------------------------------------
 
-Description/About: ${description}
+async function generateWithGemini(prompt: string): Promise<Record<string, any>> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not configured");
+  }
 
-Create realistic and professional content that would appeal to students looking to join this coaching center. The content should reflect the subjects offered and the coaching center's mission. Make the testimonials specific to the subjects mentioned and align achievements with common educational milestones.`;
+  const genAI = new GoogleGenerativeAI(apiKey);
+
+  const generationConfig: GenerationConfig = {
+    temperature: 0.8,
+    maxOutputTokens: 4096,
+    responseMimeType: "application/json",
+    responseSchema: websiteContentSchema as any, // SDK typing requires cast
+  };
+
+  const model = genAI.getGenerativeModel({
+    model: "gemini-1.5-flash",
+    generationConfig,
+    systemInstruction: SYSTEM_INSTRUCTION,
+  });
+
+  const result = await model.generateContent(prompt);
+
+  const text = result.response.text();
+  if (!text) {
+    throw new Error("Gemini returned an empty response");
+  }
+
+  // With responseSchema, Gemini guarantees valid JSON — no regex needed
+  const parsed = JSON.parse(text);
+
+  // Sanity-check
+  if (!parsed || typeof parsed.heroTagline !== "string") {
+    throw new Error(
+      "Gemini response did not match expected schema (missing 'heroTagline')"
+    );
+  }
+
+  return parsed;
+}
+
+// ---------------------------------------------------------------------------
+// Main Vercel handler
+// ---------------------------------------------------------------------------
+
+export default async function handler(
+  req: VercelRequest,
+  res: VercelResponse
+) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const isDev = process.env.NODE_ENV !== "production";
+
+  try {
+    const {
+      coachingName,
+      educatorName,
+      subjects,
+      description,
+      yearEstablished,
+      studentCount,
+    } = req.body as WebsiteContentRequest;
+
+    // ---- Input Validation ----
+    if (!coachingName || !educatorName || !subjects || !description) {
+      return res.status(400).json({
+        error:
+          "Missing required fields: coachingName, educatorName, subjects, description",
+      });
+    }
+
+    if (!Array.isArray(subjects) || subjects.length === 0) {
+      return res.status(400).json({
+        error: "subjects must be a non-empty array of strings",
+      });
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(500).json({
+        error: isDev
+          ? "GEMINI_API_KEY not configured. Add it to Vercel environment variables."
+          : "API configuration error",
+      });
+    }
+
+    // ---- Build prompt ----
+    const prompt = buildPrompt(
+      coachingName,
+      educatorName,
+      subjects,
+      description,
+      yearEstablished,
+      studentCount
+    );
+
+    console.log(
+      `[generate-website-content] Generating content for "${coachingName}" — subjects: ${subjects.join(", ")}`
+    );
+
+    // ---- Call Gemini ----
+    const content = await generateWithGemini(prompt);
+
+    console.log(
+      `[generate-website-content] Generated: ${content.stats?.length || 0} stats, ` +
+        `${content.achievements?.length || 0} achievements, ` +
+        `${content.testimonials?.length || 0} testimonials, ` +
+        `${content.faculty?.length || 0} faculty`
+    );
+
+    // Return the full response — frontend reads stats, achievements,
+    // testimonials, faculty directly. heroTagline and aboutUs are bonus
+    // fields that can be used for tagline / about sections.
+    return res.status(200).json(content);
+  } catch (error) {
+    console.error("[generate-website-content] Unhandled error:", error);
+    return res.status(500).json({
+      error: isDev ? String(error) : "Failed to generate website content",
+    });
+  }
 }

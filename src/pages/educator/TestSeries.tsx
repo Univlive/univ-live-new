@@ -822,8 +822,8 @@ function QuestionsManager({
       toast.error("Please upload a PDF file only");
       return;
     }
-    if (file.size > 3 * 1024 * 1024) {
-      toast.error("Please upload a PDF up to 3 MB for AI import");
+    if (file.size > 15 * 1024 * 1024) {
+      toast.error("Please upload a PDF up to 15 MB for AI import");
       return;
     }
 
@@ -834,7 +834,13 @@ function QuestionsManager({
     setImportSummary(null);
 
     try {
-      const result = await importQuestionsFromPdf(file, { testTitle, subject: testSubject });
+      const result = await importQuestionsFromPdf(
+        file,
+        { testTitle, subject: testSubject, educatorId: educatorUid },
+        (completed, total) => {
+          toast.info(`Processing page ${completed} of ${total}...`, { id: "pdf-progress" });
+        }
+      );
       const previewItems: AiImportPreviewItem[] = (result.items || []).map((item) => ({
         ...item,
         include: item.status === "ready",
@@ -928,8 +934,8 @@ function QuestionsManager({
           </Button>
         </div>
 
-        <div className="flex-1 flex overflow-hidden">
-          <div className="w-[380px] border-r flex flex-col bg-muted/10">
+        <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+          <div className="w-full md:w-[380px] h-1/3 md:h-auto border-b md:border-b-0 md:border-r flex flex-col bg-muted/10 shrink-0">
             <div className="p-4 border-b space-y-3">
               <Button className="w-full rounded-xl" onClick={openNew}>
                 <Plus className="mr-2 h-4 w-4" /> Add Question
