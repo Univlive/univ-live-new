@@ -185,7 +185,7 @@ async function processWithGemini(
   };
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
+    model: "gemini-1.5-flash-latest",
     generationConfig,
     systemInstruction: buildSystemInstruction(context),
   });
@@ -200,9 +200,9 @@ async function processWithGemini(
 
   const result = await model.generateContent([
     "Extract all MCQs from this exam page image. " +
-      "For any question that has an associated diagram, figure, or graph, " +
-      "return its bounding box in questionImageBox. " +
-      "Return the results as structured JSON.",
+    "For any question that has an associated diagram, figure, or graph, " +
+    "return its bounding box in questionImageBox. " +
+    "Return the results as structured JSON.",
     imagePart,
   ]);
 

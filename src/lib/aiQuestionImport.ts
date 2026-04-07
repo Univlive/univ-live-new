@@ -151,25 +151,35 @@ export async function importQuestionsFromPdf(
     try {
       const { base64, mimeType } = await renderPageToImage(pdfDoc, pageNum);
 
-      const res = await fetch("/api/ai/import-test-questions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageBase64: base64,
-          imageMimeType: mimeType,
-          fileName: file.name,
-          pageNumber: pageNum,
-          testTitle: context?.testTitle || "",
-          subject: context?.subject || "",
-          educatorId: context?.educatorId || "",
-        }),
-      });
+      // 60-second timeout per page so the UI never hangs indefinitely
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60_000);
+
+      let res: Response;
+      try {
+        res = await fetch("/api/ai/import-test-questions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            imageBase64: base64,
+            imageMimeType: mimeType,
+            fileName: file.name,
+            pageNumber: pageNum,
+            testTitle: context?.testTitle || "",
+            subject: context?.subject || "",
+            educatorId: context?.educatorId || "",
+          }),
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       const pageData = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         allDiagnostics.push(
-          `Page ${pageNum}: ${pageData?.error || "API error"}`
+          `Page ${pageNum}: ${pageData?.error || `API error (${res.status})`}`
         );
         continue;
       }
@@ -190,11 +200,15 @@ export async function importQuestionsFromPdf(
           ...pageResult.meta.diagnostics.map((d) => `Page ${pageNum}: ${d}`)
         );
       }
-    } catch (pageErr) {
+    } catch (pageErr: any) {
+      const isTimeout = pageErr?.name === "AbortError";
+      const msg = isTimeout
+        ? "Request timed out (60s)"
+        : pageErr instanceof Error
+          ? pageErr.message
+          : "Unknown error";
       console.error(`Failed to process page ${pageNum}:`, pageErr);
-      allDiagnostics.push(
-        `Page ${pageNum}: ${pageErr instanceof Error ? pageErr.message : "Unknown error"}`
-      );
+      allDiagnostics.push(`Page ${pageNum}: ${msg}`);
     }
 
     // Report progress

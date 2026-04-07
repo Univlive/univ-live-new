@@ -261,6 +261,12 @@ export default function TestSeries() {
         sections: bankTest.sections ?? [],
         instructions: bankTest.instructions ?? "",
 
+        // attempts & marking
+        attemptsAllowed: bankTest.attemptsAllowed != null
+          ? Math.max(1, Number(bankTest.attemptsAllowed))
+          : 3,
+        markingScheme: bankTest.markingScheme ?? undefined,
+
         // marks config (omit if missing - Firestore rejects undefined)
         positiveMarks:
           bankTest.positiveMarks != null ? Number(bankTest.positiveMarks) : undefined,
@@ -322,6 +328,7 @@ export default function TestSeries() {
       subject: String(fd.get("subject") || ""),
       level: String(fd.get("level") || "General"),
       durationMinutes: Number(fd.get("duration") || 0),
+      attemptsAllowed: 3,
 
       // educator ownership
       source: "custom",
