@@ -239,13 +239,13 @@ export default function StudentLayout() {
         <div className="flex flex-col h-full overflow-hidden">
           {/* Logo */}
           <div className="h-16 flex items-center justify-between px-4 border-b border-border shrink-0">
-            <Link to="/" className="flex items-center gap-2">
+            {/* <Link to="/" className="flex items-center gap-2">
               <img src={univLogo} alt="UNIV.LIVE" className="h-8 w-auto" />
               <span className="font-display font-bold text-lg">
                 <span className="gradient-text">UNIV</span>
                 <span className="text-foreground">.LIVE</span>
               </span>
-            </Link>
+            </Link> */}
 
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(false)}>
               <X className="h-5 w-5" />
