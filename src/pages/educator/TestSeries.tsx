@@ -934,8 +934,8 @@ function QuestionsManager({
           </Button>
         </div>
 
-        <div className="flex-1 flex overflow-hidden">
-          <div className="w-[380px] border-r flex flex-col bg-muted/10">
+        <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+          <div className="w-full md:w-[380px] h-1/3 md:h-auto border-b md:border-b-0 md:border-r flex flex-col bg-muted/10 shrink-0">
             <div className="p-4 border-b space-y-3">
               <Button className="w-full rounded-xl" onClick={openNew}>
                 <Plus className="mr-2 h-4 w-4" /> Add Question
