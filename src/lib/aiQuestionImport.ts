@@ -60,9 +60,17 @@ async function loadPdfJs(): Promise<PdfJsModule> {
   return pdfjs;
 }
 
+/** Max base64 character count before we fall back to a lower scale (~2.6 MB decoded) */
+const MAX_BASE64_CHARS = 3_500_000;
+
+/** JPEG quality used for canvas export (0.8 = 80%, sharp enough for OCR) */
+const JPEG_QUALITY = 0.8;
+
 /**
- * Render a single PDF page to a PNG base64 string using an off-screen canvas.
- * Returns { base64, mimeType } for the rendered image.
+ * Render a single PDF page to a compressed JPEG base64 string using an
+ * off-screen canvas.  Starts at the requested `scale` (default 2.0) and
+ * automatically falls back to 1.5 if the resulting payload is still too
+ * large for Vercel's 4.5 MB request limit.
  */
 async function renderPageToImage(
   pdfDoc: any,
@@ -70,24 +78,40 @@ async function renderPageToImage(
   scale = 2.0
 ): Promise<{ base64: string; mimeType: string }> {
   const page = await pdfDoc.getPage(pageNumber);
-  const viewport = page.getViewport({ scale });
 
-  const canvas = document.createElement("canvas");
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
+  /** Render the page at the given scale and return the raw base64 JPEG. */
+  async function renderAtScale(s: number): Promise<string> {
+    const viewport = page.getViewport({ scale: s });
 
-  const ctx = canvas.getContext("2d")!;
-  await page.render({ canvasContext: ctx, viewport }).promise;
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
 
-  // Convert to PNG data URL, then strip the prefix to get raw base64
-  const dataUrl = canvas.toDataURL("image/png");
-  const base64 = dataUrl.replace(/^data:image\/png;base64,/, "");
+    const ctx = canvas.getContext("2d")!;
+    await page.render({ canvasContext: ctx, viewport }).promise;
 
-  // Clean up
-  canvas.width = 0;
-  canvas.height = 0;
+    // Export as JPEG at 80% quality — dramatically smaller than lossless PNG
+    const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+    const b64 = dataUrl.replace(/^data:image\/jpeg;base64,/, "");
 
-  return { base64, mimeType: "image/png" };
+    // Clean up canvas memory
+    canvas.width = 0;
+    canvas.height = 0;
+
+    return b64;
+  }
+
+  let base64 = await renderAtScale(scale);
+
+  // Safety net: if payload is still exceptionally large, re-render at lower scale
+  if (base64.length > MAX_BASE64_CHARS && scale > 1.5) {
+    console.warn(
+      `[aiQuestionImport] Page ${pageNumber} base64 is ${(base64.length / 1_000_000).toFixed(1)}M chars at scale ${scale} — falling back to 1.5`
+    );
+    base64 = await renderAtScale(1.5);
+  }
+
+  return { base64, mimeType: "image/jpeg" };
 }
 
 // ---------------------------------------------------------------------------
