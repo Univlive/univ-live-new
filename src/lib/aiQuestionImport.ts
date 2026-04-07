@@ -60,56 +60,50 @@ async function loadPdfJs(): Promise<PdfJsModule> {
   return pdfjs;
 }
 
-/** Max base64 character count before we fall back to a lower scale (~2.6 MB decoded) */
-const MAX_BASE64_CHARS = 3_500_000;
+/** Hard cap on rendered canvas width (px). Keeps JPEG payloads small. */
+const MAX_CANVAS_WIDTH = 1500;
 
-/** JPEG quality used for canvas export (0.8 = 80%, sharp enough for OCR) */
-const JPEG_QUALITY = 0.8;
+/** JPEG quality used for canvas export (0.7 = 70%, sharp enough for OCR) */
+const JPEG_QUALITY = 0.7;
 
 /**
- * Render a single PDF page to a compressed JPEG base64 string using an
- * off-screen canvas.  Starts at the requested `scale` (default 2.0) and
- * automatically falls back to 1.5 if the resulting payload is still too
- * large for Vercel's 4.5 MB request limit.
+ * Render a single PDF page to a compressed JPEG base64 string.
+ *
+ * Instead of a fixed scale, we compute the scale dynamically so the canvas
+ * width never exceeds MAX_CANVAS_WIDTH (1500 px). This guarantees the
+ * resulting base64 string stays well under Vercel's body-parser limit.
  */
 async function renderPageToImage(
   pdfDoc: any,
-  pageNumber: number,
-  scale = 2.0
+  pageNumber: number
 ): Promise<{ base64: string; mimeType: string }> {
   const page = await pdfDoc.getPage(pageNumber);
 
-  /** Render the page at the given scale and return the raw base64 JPEG. */
-  async function renderAtScale(s: number): Promise<string> {
-    const viewport = page.getViewport({ scale: s });
+  // Get the page's native viewport at scale=1 to measure its dimensions
+  const nativeViewport = page.getViewport({ scale: 1.0 });
+  const nativeWidth = nativeViewport.width;
 
-    const canvas = document.createElement("canvas");
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
+  // Compute scale: if native width > MAX_CANVAS_WIDTH, shrink it down;
+  // otherwise use scale=2 for crisp text, but still cap at MAX_CANVAS_WIDTH
+  const desiredWidth = Math.min(nativeWidth * 2, MAX_CANVAS_WIDTH);
+  const scale = desiredWidth / nativeWidth;
 
-    const ctx = canvas.getContext("2d")!;
-    await page.render({ canvasContext: ctx, viewport }).promise;
+  const viewport = page.getViewport({ scale });
 
-    // Export as JPEG at 80% quality — dramatically smaller than lossless PNG
-    const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
-    const b64 = dataUrl.replace(/^data:image\/jpeg;base64,/, "");
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
 
-    // Clean up canvas memory
-    canvas.width = 0;
-    canvas.height = 0;
+  const ctx = canvas.getContext("2d")!;
+  await page.render({ canvasContext: ctx, viewport }).promise;
 
-    return b64;
-  }
+  // Export as JPEG at 70% quality — keeps payload under ~500 KB per page
+  const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
+  const base64 = dataUrl.replace(/^data:image\/jpeg;base64,/, "");
 
-  let base64 = await renderAtScale(scale);
-
-  // Safety net: if payload is still exceptionally large, re-render at lower scale
-  if (base64.length > MAX_BASE64_CHARS && scale > 1.5) {
-    console.warn(
-      `[aiQuestionImport] Page ${pageNumber} base64 is ${(base64.length / 1_000_000).toFixed(1)}M chars at scale ${scale} — falling back to 1.5`
-    );
-    base64 = await renderAtScale(1.5);
-  }
+  // Clean up canvas memory immediately
+  canvas.width = 0;
+  canvas.height = 0;
 
   return { base64, mimeType: "image/jpeg" };
 }
