@@ -164,7 +164,7 @@ export default function StudentCBTAttempt() {
 
   // Proctoring state
   const [exitCount, setExitCount] = useState(0);
-  const [warningModalOpen, setWarningModalOpen] = useState(false);
+  const [violationModalOpen, setViolationModalOpen] = useState(false);
 
   const attemptIdStorageKey = useMemo(
     () => `${LS_ATTEMPT_ID_PREFIX}${tenantSlug || "main"}__${testId || ""}`,
@@ -662,15 +662,7 @@ export default function StudentCBTAttempt() {
     if (!isStarted) return;
 
     const handleViolation = () => {
-      setExitCount((prev) => {
-        const next = prev + 1;
-        if (next >= 3) {
-          handleSubmit(true);
-          return next;
-        }
-        setWarningModalOpen(true);
-        return next;
-      });
+      setViolationModalOpen(true);
     };
 
     const handleVisibilityChange = () => {
@@ -681,7 +673,7 @@ export default function StudentCBTAttempt() {
 
     const handleFullscreenChange = () => {
       // If user exits fullscreen AND they are not currently in instructions or submitting or already warned
-      if (!document.fullscreenElement && isStarted && !submitDialogOpen && !warningModalOpen && !instructionsOpen) {
+      if (!document.fullscreenElement && isStarted && !submitDialogOpen && !violationModalOpen && !instructionsOpen) {
         handleViolation();
       }
     };
@@ -693,7 +685,7 @@ export default function StudentCBTAttempt() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
-  }, [isStarted, submitDialogOpen, warningModalOpen, instructionsOpen, handleSubmit]);
+  }, [isStarted, submitDialogOpen, violationModalOpen, instructionsOpen, handleSubmit]);
 
   // Warn on reload/close while started
   useEffect(() => {
@@ -1168,33 +1160,27 @@ export default function StudentCBTAttempt() {
         </SheetContent>
       </Sheet>
 
-      {/* ─── PROCTORING WARNING MODAL ─── */}
-      {warningModalOpen && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-          <div style={{ width: "100%", maxWidth: 450, borderRadius: 12, background: "#fff", boxShadow: "0 10px 50px rgba(0,0,0,0.3)", overflow: "hidden", textAlign: "center", padding: "30px 20px" }}>
-            <div style={{ color: "#dc2626", marginBottom: 16 }}>
-              <AlertTriangle size={60} style={{ margin: "0 auto" }} />
+      {/* ─── PROCTORING VIOLATION MODAL ─── */}
+      {violationModalOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, backdropFilter: "blur(4px)" }}>
+          <div style={{ width: "100%", maxWidth: 450, borderRadius: 12, background: "#fff", boxShadow: "0 10px 50px rgba(0,0,0,0.3)", overflow: "hidden", textAlign: "center", padding: "40px 30px" }}>
+            <div style={{ color: "#dc2626", marginBottom: 20 }}>
+              <AlertTriangle size={70} style={{ margin: "0 auto" }} />
             </div>
-            <h2 style={{ fontSize: 20, fontWeight: 700, color: "#111827", marginBottom: 10 }}>Proctoring Violation</h2>
-            <p style={{ fontSize: 15, color: "#4b5563", marginBottom: 24, lineHeight: 1.5 }}>
-              Warning! You have left the test environment.<br />
-              <strong>Violation {exitCount}/3.</strong>
+            <h2 style={{ fontSize: 24, fontWeight: 800, color: "#111827", marginBottom: 12 }}>Test Terminated!</h2>
+            <p style={{ fontSize: 16, color: "#4b5563", marginBottom: 30, lineHeight: 1.6 }}>
+              A proctoring violation was detected (Tab Switch or Full-screen Exit). <br />
+              <strong>As per the rules, your test is being automatically submitted.</strong>
             </p>
-            <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+            <div style={{ display: "flex", justifyContent: "center" }}>
               <button
-                onClick={() => setWarningModalOpen(false)}
-                style={{ padding: "10px 20px", background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}
-              >
-                Okay
-              </button>
-              <button
-                onClick={async () => {
-                  await requestFullscreenSafe();
-                  setWarningModalOpen(false);
+                onClick={() => {
+                  handleSubmit(true);
+                  setViolationModalOpen(false);
                 }}
-                style={{ padding: "10px 20px", background: "#1e3a8a", color: "#fff", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}
+                style={{ padding: "12px 40px", background: "#1e3a8a", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 16, cursor: "pointer", boxShadow: "0 4px 10px rgba(30,58,138,0.3)" }}
               >
-                Return to Test
+                OK
               </button>
             </div>
           </div>
