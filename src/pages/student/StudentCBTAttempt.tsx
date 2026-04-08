@@ -911,29 +911,34 @@ export default function StudentCBTAttempt() {
         </div>
       )}
 
-      {/* ─── TOP HEADER BAR ─── */}
-      <div style={{ background: "#1e3a8a", color: "#fff", padding: "0 12px", height: 44, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: 0.5, truncate: true, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {testMeta.title}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{  fontSize: 12, background: "rgba(255,255,255,0.15)", padding: "3px 10px", borderRadius: 20, whiteSpace: "nowrap" }}>
-            {isStarted ? (
-              <TimerChip key={timerKey} initialSeconds={timerStartSeconds} onTimeUp={handleTimeUp} />
-            ) : (
-              <span>{testMeta.durationMinutes} min</span>
-            )}
-          </div>
-          {/* Mobile palette button */}
-          <button
-            onClick={(e) => { e.stopPropagation(); setMobilePaletteOpen(true); }}
-            style={{ display: "none", alignItems: "center", gap: 4, background: "rgba(255,255,255,0.2)", border: "none", borderRadius: 6, color: "#fff", padding: "5px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", pointerEvents: "auto" }}
-            className="mobile-palette-btn"
-          >
-            <LayoutGrid size={14} /> Palette
-          </button>
-        </div>
-      </div>
+            {/* ─── TOP HEADER BAR ─── */}
+            <div style={{ background: "#1e3a8a", color: "#fff", padding: "0 12px", height: 44, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: 0.5, truncate: true, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {testMeta.title}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ fontSize: 12, padding: "0", borderRadius: 20, whiteSpace: "nowrap" }}>
+                  {isStarted ? (
+                    <TimerChip 
+                      key={timerKey} 
+                      initialSeconds={timerStartSeconds} 
+                      onTimeUp={handleTimeUp} 
+                      className="bg-white/20 text-white border border-white/30 h-8 py-0 px-3 text-sm font-bold"
+                    />
+                  ) : (
+                    <span style={{ background: "rgba(255,255,255,0.15)", padding: "3px 10px", borderRadius: 20 }}>{testMeta.durationMinutes} min</span>
+                  )}
+                </div>
+                {/* Mobile palette button */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setMobilePaletteOpen(true); }}
+                  style={{ display: "none", alignItems: "center", gap: 4, background: "rgba(255,255,255,0.2)", border: "none", borderRadius: 6, color: "#fff", padding: "5px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", pointerEvents: "auto" }}
+                  className="mobile-palette-btn"
+                >
+                  <LayoutGrid size={14} /> Palette
+                </button>
+              </div>
+            </div>
 
       {/* ─── MAIN BODY ─── */}
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row", overflow: "hidden" }}>
@@ -1150,8 +1155,8 @@ export default function StudentCBTAttempt() {
 
       {/* ─── MOBILE PALETTE SHEET ─── */}
       <Sheet open={mobilePaletteOpen} onOpenChange={setMobilePaletteOpen}>
-        <SheetContent side="bottom" className="lg:hidden h-[80dvh] rounded-t-2xl px-0 pb-0 z-[200]">
-          <SheetHeader className="px-4 pt-3 pb-3 border-b text-left" style={{ background: "#1e3a8a" }}>
+        <SheetContent side="bottom" className="lg:hidden h-[80dvh] rounded-t-2xl px-0 pb-0 z-[200] mobile-palette-sheet">
+          <SheetHeader className="px-4 pt-6 pb-4 border-b text-left relative" style={{ background: "#1e3a8a" }}>
             <SheetTitle style={{ color: "#fff", fontSize: 14 }}>Question Palette</SheetTitle>
             <SheetDescription className="sr-only">
               Quickly navigate between questions and view your attempt status.
@@ -1253,8 +1258,23 @@ export default function StudentCBTAttempt() {
           z-index: 200 !important;
           position: relative;
         }
-        [data-radix-portal] > div {
-          z-index: 200 !important;
+        /* Ensure mobile palette sheet close button is visible */
+        .mobile-palette-sheet button {
+          color: white !important;
+          opacity: 1 !important;
+          background: rgba(255,255,255,0.1) !important;
+          border-radius: 50% !important;
+          width: 32px !important;
+          height: 32px !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          top: 24px !important;
+          right: 12px !important;
+        }
+        .mobile-palette-sheet button svg {
+          width: 20px !important;
+          height: 20px !important;
         }
       `}</style>
     </div>
