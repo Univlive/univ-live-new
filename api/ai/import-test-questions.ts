@@ -16,8 +16,6 @@ import {
   SchemaType,
   type GenerationConfig,
 } from "@google/generative-ai";
-import sharp from "sharp";
-import { getAdmin } from "../_lib/firebaseAdmin.js";
 import {
   normalizeImportedItem,
   type ImportedQuestionItem,
@@ -73,6 +71,21 @@ const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
 /** Padding percentage applied to each side of a bounding box crop */
 const BBOX_PAD_PERCENT = 0.05;
+
+let sharpLoader: Promise<any> | null = null;
+
+async function getSharp() {
+  if (!sharpLoader) {
+    sharpLoader = import("sharp") as Promise<any>;
+  }
+  const mod = await sharpLoader;
+  return mod?.default ?? mod;
+}
+
+async function getFirebaseAdmin() {
+  const mod = await import("../_lib/firebaseAdmin.js");
+  return mod.getAdmin();
+}
 
 // ---------------------------------------------------------------------------
 // Gemini response schema – forces strict JSON output
@@ -253,6 +266,7 @@ async function extractAndCropImage(
       throw new Error("Original image buffer is empty");
     }
 
+    const sharp = await getSharp();
     const metadata = await sharp(originalImageBuffer).metadata();
     const imgWidth = metadata.width ?? 1;
     const imgHeight = metadata.height ?? 1;
@@ -303,7 +317,7 @@ async function uploadToFirebase(
   educatorId?: string
 ): Promise<string> {
   try {
-    const admin = getAdmin();
+    const admin = await getFirebaseAdmin();
     const bucket = admin.storage().bucket();
 
     if (!bucket) {
