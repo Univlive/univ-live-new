@@ -162,6 +162,10 @@ export default function StudentCBTAttempt() {
 
   const [mobilePaletteOpen, setMobilePaletteOpen] = useState(false);
 
+  // Proctoring state
+  const [exitCount, setExitCount] = useState(0);
+  const [violationModalOpen, setViolationModalOpen] = useState(false);
+
   const attemptIdStorageKey = useMemo(
     () => `${LS_ATTEMPT_ID_PREFIX}${tenantSlug || "main"}__${testId || ""}`,
     [tenantSlug, testId]
@@ -634,6 +638,55 @@ export default function StudentCBTAttempt() {
     await handleSubmit(true);
   };
 
+  // Proctoring: Prevent copy, cut, paste, context menu
+  useEffect(() => {
+    if (!isStarted) return;
+
+    const preventDefault = (e: Event) => e.preventDefault();
+    
+    document.addEventListener("copy", preventDefault);
+    document.addEventListener("cut", preventDefault);
+    document.addEventListener("paste", preventDefault);
+    document.addEventListener("contextmenu", preventDefault);
+
+    return () => {
+      document.removeEventListener("copy", preventDefault);
+      document.removeEventListener("cut", preventDefault);
+      document.removeEventListener("paste", preventDefault);
+      document.removeEventListener("contextmenu", preventDefault);
+    };
+  }, [isStarted]);
+
+  // Proctoring: Tab switch & Full-screen exit logic
+  useEffect(() => {
+    if (!isStarted) return;
+
+    const handleViolation = () => {
+      setViolationModalOpen(true);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        handleViolation();
+      }
+    };
+
+    const handleFullscreenChange = () => {
+      // If user exits fullscreen AND they are not currently in instructions or submitting or already warned
+      if (!document.fullscreenElement && isStarted && !submitDialogOpen && !violationModalOpen && !instructionsOpen) {
+        handleViolation();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, [isStarted, submitDialogOpen, violationModalOpen, instructionsOpen, handleSubmit]);
+
   // Warn on reload/close while started
   useEffect(() => {
     if (!isStarted) return;
@@ -771,13 +824,14 @@ export default function StudentCBTAttempt() {
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 100, // Lowered from 99999
+        zIndex: 100,
         height: "100dvh",
         background: "#f3f4f6",
         fontFamily: "Arial, sans-serif",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
+        userSelect: "none", // Prevent text selection
       }}
     >
       {/* ─── INSTRUCTIONS GATE ─── */}
@@ -849,29 +903,34 @@ export default function StudentCBTAttempt() {
         </div>
       )}
 
-      {/* ─── TOP HEADER BAR ─── */}
-      <div style={{ background: "#1e3a8a", color: "#fff", padding: "0 12px", height: 44, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: 0.5, truncate: true, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {testMeta.title}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ fontSize: 12, background: "rgba(255,255,255,0.15)", padding: "3px 10px", borderRadius: 20, whiteSpace: "nowrap" }}>
-            {isStarted ? (
-              <TimerChip key={timerKey} initialSeconds={timerStartSeconds} onTimeUp={handleTimeUp} />
-            ) : (
-              <span>{testMeta.durationMinutes} min</span>
-            )}
-          </div>
-          {/* Mobile palette button */}
-          <button
-            onClick={(e) => { e.stopPropagation(); setMobilePaletteOpen(true); }}
-            style={{ display: "none", alignItems: "center", gap: 4, background: "rgba(255,255,255,0.2)", border: "none", borderRadius: 6, color: "#fff", padding: "5px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", pointerEvents: "auto" }}
-            className="mobile-palette-btn"
-          >
-            <LayoutGrid size={14} /> Palette
-          </button>
-        </div>
-      </div>
+            {/* ─── TOP HEADER BAR ─── */}
+            <div style={{ background: "#1e3a8a", color: "#fff", padding: "0 12px", height: 44, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: 0.5, truncate: true, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {testMeta.title}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ fontSize: 12, padding: "0", borderRadius: 20, whiteSpace: "nowrap" }}>
+                  {isStarted ? (
+                    <TimerChip 
+                      key={timerKey} 
+                      initialSeconds={timerStartSeconds} 
+                      onTimeUp={handleTimeUp} 
+                      className="bg-white/20 text-white border border-white/30 h-8 py-0 px-3 text-sm font-bold"
+                    />
+                  ) : (
+                    <span style={{ background: "rgba(255,255,255,0.15)", padding: "3px 10px", borderRadius: 20 }}>{testMeta.durationMinutes} min</span>
+                  )}
+                </div>
+                {/* Mobile palette button */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setMobilePaletteOpen(true); }}
+                  style={{ display: "none", alignItems: "center", gap: 4, background: "rgba(255,255,255,0.2)", border: "none", borderRadius: 6, color: "#fff", padding: "5px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", pointerEvents: "auto" }}
+                  className="mobile-palette-btn"
+                >
+                  <LayoutGrid size={14} /> Palette
+                </button>
+              </div>
+            </div>
 
       {/* ─── MAIN BODY ─── */}
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row", overflow: "hidden" }}>
@@ -1088,8 +1147,8 @@ export default function StudentCBTAttempt() {
 
       {/* ─── MOBILE PALETTE SHEET ─── */}
       <Sheet open={mobilePaletteOpen} onOpenChange={setMobilePaletteOpen}>
-        <SheetContent side="bottom" className="lg:hidden h-[80dvh] rounded-t-2xl px-0 pb-0 z-[200]">
-          <SheetHeader className="px-4 pt-3 pb-3 border-b text-left" style={{ background: "#1e3a8a" }}>
+        <SheetContent side="bottom" className="lg:hidden h-[80dvh] rounded-t-2xl px-0 pb-0 z-[200] mobile-palette-sheet">
+          <SheetHeader className="px-4 pt-6 pb-4 border-b text-left relative" style={{ background: "#1e3a8a" }}>
             <SheetTitle style={{ color: "#fff", fontSize: 14 }}>Question Palette</SheetTitle>
             <SheetDescription className="sr-only">
               Quickly navigate between questions and view your attempt status.
@@ -1100,6 +1159,33 @@ export default function StudentCBTAttempt() {
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* ─── PROCTORING VIOLATION MODAL ─── */}
+      {violationModalOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, backdropFilter: "blur(4px)" }}>
+          <div style={{ width: "100%", maxWidth: 450, borderRadius: 12, background: "#fff", boxShadow: "0 10px 50px rgba(0,0,0,0.3)", overflow: "hidden", textAlign: "center", padding: "40px 30px" }}>
+            <div style={{ color: "#dc2626", marginBottom: 20 }}>
+              <AlertTriangle size={70} style={{ margin: "0 auto" }} />
+            </div>
+            <h2 style={{ fontSize: 24, fontWeight: 800, color: "#111827", marginBottom: 12 }}>Test Terminated!</h2>
+            <p style={{ fontSize: 16, color: "#4b5563", marginBottom: 30, lineHeight: 1.6 }}>
+              A proctoring violation was detected (Tab Switch or Full-screen Exit). <br />
+              <strong>As per the rules, your test is being automatically submitted.</strong>
+            </p>
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <button
+                onClick={() => {
+                  handleSubmit(true);
+                  setViolationModalOpen(false);
+                }}
+                style={{ padding: "12px 40px", background: "#1e3a8a", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 16, cursor: "pointer", boxShadow: "0 4px 10px rgba(30,58,138,0.3)" }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ─── SUBMIT DIALOG ─── */}
       {submitDialogOpen && (
@@ -1158,8 +1244,23 @@ export default function StudentCBTAttempt() {
           z-index: 200 !important;
           position: relative;
         }
-        [data-radix-portal] > div {
-          z-index: 200 !important;
+        /* Ensure mobile palette sheet close button is visible */
+        .mobile-palette-sheet button {
+          color: white !important;
+          opacity: 1 !important;
+          background: rgba(255,255,255,0.1) !important;
+          border-radius: 50% !important;
+          width: 32px !important;
+          height: 32px !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          top: 24px !important;
+          right: 12px !important;
+        }
+        .mobile-palette-sheet button svg {
+          width: 20px !important;
+          height: 20px !important;
         }
       `}</style>
     </div>
