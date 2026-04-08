@@ -4,7 +4,7 @@ import {
   SchemaType,
   type GenerationConfig,
 } from "@google/generative-ai";
-import { initializeStreaming, sendStreamEvent, endStreaming, streamError } from "../_lib/aiStreamingUtils";
+import { initializeStreaming, sendStreamEvent, endStreaming, streamError } from "../_lib/aiStreamingUtils.js";
 
 // ---------------------------------------------------------------------------
 // Request types (from frontend)
