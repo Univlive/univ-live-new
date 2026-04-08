@@ -632,6 +632,7 @@ function QuestionsManager({
   const [importSummary, setImportSummary] = useState<AiImportSummary | null>(null);
   const [importItems, setImportItems] = useState<AiImportPreviewItem[]>([]);
   const pdfInputRef = useRef<HTMLInputElement | null>(null);
+  const importAbortControllerRef = useRef<AbortController | null>(null);
 
   const qCol = useMemo(
     () => collection(db, "educators", educatorUid, "my_tests", testId, "questions"),
@@ -846,6 +847,9 @@ function QuestionsManager({
       return;
     }
 
+    // Create a new abort controller for this import
+    importAbortControllerRef.current = new AbortController();
+
     setImportBusy(true);
     setImportFileName(file.name);
     setImportPreviewOpen(true);
@@ -858,7 +862,8 @@ function QuestionsManager({
         { testTitle, subject: testSubject, educatorId: educatorUid },
         (completed, total) => {
           toast.info(`Processing page ${completed} of ${total}...`, { id: "pdf-progress" });
-        }
+        },
+        importAbortControllerRef.current.signal
       );
       const previewItems: AiImportPreviewItem[] = (result.items || []).map((item) => ({
         ...item,
@@ -869,10 +874,26 @@ function QuestionsManager({
       toast.success("AI import preview is ready");
     } catch (error) {
       console.error(error);
-      toast.error(error instanceof Error ? error.message : "Failed to import PDF with AI");
+      const errorMsg = error instanceof Error ? error.message : "Failed to import PDF with AI";
+      // Don't show error toast if it was cancelled
+      if (!errorMsg.includes("cancelled")) {
+        toast.error(errorMsg);
+      } else {
+        toast.info("PDF import cancelled");
+      }
       setImportPreviewOpen(false);
     } finally {
       setImportBusy(false);
+      importAbortControllerRef.current = null;
+    }
+  }
+
+  function cancelPdfImport() {
+    if (importAbortControllerRef.current) {
+      importAbortControllerRef.current.abort();
+      setImportBusy(false);
+      setImportPreviewOpen(false);
+      toast.info("PDF import cancelled");
     }
   }
 
@@ -1332,8 +1353,9 @@ function QuestionsManager({
           importing={importBusy}
           saving={savingImported}
           onClose={() => {
-            if (!savingImported) setImportPreviewOpen(false);
+            if (!savingImported && !importBusy) setImportPreviewOpen(false);
           }}
+          onCancel={cancelPdfImport}
           onItemIncludeChange={updateImportItemInclude}
           onSelectReadyOnly={selectReadyOnly}
           onToggleAllPartials={toggleAllPartials}

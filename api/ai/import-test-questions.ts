@@ -171,57 +171,73 @@ async function processWithGemini(
   mimeType: string,
   context: { testTitle?: string; subject?: string }
 ): Promise<GeminiResponse> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not configured");
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY is not configured");
+    }
+
+    const modelName = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+    if (!modelName) {
+      throw new Error("GEMINI_MODEL is not configured");
+    }
+
+    const genAI = new GoogleGenerativeAI(apiKey);
+
+    const generationConfig: GenerationConfig = {
+      temperature: 0.1,
+      maxOutputTokens: 8192,
+      responseMimeType: "application/json",
+      responseSchema: mcqSchema as any, // SDK typing requires cast
+    };
+
+    const model = genAI.getGenerativeModel({
+      model: modelName,
+      generationConfig,
+      systemInstruction: buildSystemInstruction(context),
+    });
+
+    // Build the multimodal content parts
+    const imagePart = {
+      inlineData: {
+        data: imageBuffer.toString("base64"),
+        mimeType,
+      },
+    };
+
+    const result = await model.generateContent([
+      "Extract all MCQs from this exam page image. " +
+      "For any question that has an associated diagram, figure, or graph, " +
+      "return its bounding box in questionImageBox. " +
+      "Return the results as structured JSON.",
+      imagePart,
+    ]);
+
+    const text = result.response.text();
+    if (!text) {
+      throw new Error("Gemini returned an empty response");
+    }
+
+    const parsed = JSON.parse(text) as GeminiResponse;
+
+    // Validate the top-level shape
+    if (!parsed || !Array.isArray(parsed.items)) {
+      throw new Error(
+        "Gemini response did not match expected schema (missing 'items' array)"
+      );
+    }
+
+    return parsed;
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : "Unknown error";
+    console.error(`[processWithGemini] Error:`, errorMsg);
+    
+    // Re-throw with context
+    if (errorMsg.includes("INVALID_ARGUMENT")) {
+      throw new Error("Invalid PDF image sent to AI service. Please try a clearer image.");
+    }
+    throw err;
   }
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-
-  const generationConfig: GenerationConfig = {
-    temperature: 0.1,
-    maxOutputTokens: 8192,
-    responseMimeType: "application/json",
-    responseSchema: mcqSchema as any, // SDK typing requires cast
-  };
-
-  const model = genAI.getGenerativeModel({
-    model: `${process.env.GEMINI_MODEL}`,
-    generationConfig,
-    systemInstruction: buildSystemInstruction(context),
-  });
-
-  // Build the multimodal content parts
-  const imagePart = {
-    inlineData: {
-      data: imageBuffer.toString("base64"),
-      mimeType,
-    },
-  };
-
-  const result = await model.generateContent([
-    "Extract all MCQs from this exam page image. " +
-    "For any question that has an associated diagram, figure, or graph, " +
-    "return its bounding box in questionImageBox. " +
-    "Return the results as structured JSON.",
-    imagePart,
-  ]);
-
-  const text = result.response.text();
-  if (!text) {
-    throw new Error("Gemini returned an empty response");
-  }
-
-  const parsed = JSON.parse(text) as GeminiResponse;
-
-  // Validate the top-level shape
-  if (!parsed || !Array.isArray(parsed.items)) {
-    throw new Error(
-      "Gemini response did not match expected schema (missing 'items' array)"
-    );
-  }
-
-  return parsed;
 }
 
 // ---------------------------------------------------------------------------
@@ -232,35 +248,49 @@ async function extractAndCropImage(
   originalImageBuffer: Buffer,
   geminiBox: number[] // [ymin, xmin, ymax, xmax] in 0..1000
 ): Promise<Buffer> {
-  const metadata = await sharp(originalImageBuffer).metadata();
-  const imgWidth = metadata.width ?? 1;
-  const imgHeight = metadata.height ?? 1;
+  try {
+    if (!originalImageBuffer || originalImageBuffer.length === 0) {
+      throw new Error("Original image buffer is empty");
+    }
 
-  const [ymin, xmin, ymax, xmax] = geminiBox;
+    const metadata = await sharp(originalImageBuffer).metadata();
+    const imgWidth = metadata.width ?? 1;
+    const imgHeight = metadata.height ?? 1;
 
-  // Map from Gemini's 1000×1000 grid to actual pixel coordinates
-  // Apply padding to avoid clipping edges of diagrams
-  const padX = (xmax - xmin) * BBOX_PAD_PERCENT;
-  const padY = (ymax - ymin) * BBOX_PAD_PERCENT;
+    if (imgWidth < 1 || imgHeight < 1) {
+      throw new Error("Invalid image dimensions");
+    }
 
-  const left = Math.max(0, Math.round(((xmin - padX) / 1000) * imgWidth));
-  const top = Math.max(0, Math.round(((ymin - padY) / 1000) * imgHeight));
-  const right = Math.min(
-    imgWidth,
-    Math.round(((xmax + padX) / 1000) * imgWidth)
-  );
-  const bottom = Math.min(
-    imgHeight,
-    Math.round(((ymax + padY) / 1000) * imgHeight)
-  );
+    const [ymin, xmin, ymax, xmax] = geminiBox;
 
-  const cropWidth = Math.max(1, right - left);
-  const cropHeight = Math.max(1, bottom - top);
+    // Map from Gemini's 1000×1000 grid to actual pixel coordinates
+    // Apply padding to avoid clipping edges of diagrams
+    const padX = (xmax - xmin) * BBOX_PAD_PERCENT;
+    const padY = (ymax - ymin) * BBOX_PAD_PERCENT;
 
-  return sharp(originalImageBuffer)
-    .extract({ left, top, width: cropWidth, height: cropHeight })
-    .png()
-    .toBuffer();
+    const left = Math.max(0, Math.round(((xmin - padX) / 1000) * imgWidth));
+    const top = Math.max(0, Math.round(((ymin - padY) / 1000) * imgHeight));
+    const right = Math.min(
+      imgWidth,
+      Math.round(((xmax + padX) / 1000) * imgWidth)
+    );
+    const bottom = Math.min(
+      imgHeight,
+      Math.round(((ymax + padY) / 1000) * imgHeight)
+    );
+
+    const cropWidth = Math.max(1, right - left);
+    const cropHeight = Math.max(1, bottom - top);
+
+    return await sharp(originalImageBuffer)
+      .extract({ left, top, width: cropWidth, height: cropHeight })
+      .png()
+      .toBuffer();
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : "Unknown error";
+    console.error(`[extractAndCropImage] Error cropping image:`, errorMsg);
+    throw new Error(`Failed to crop diagram from PDF: ${errorMsg}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -272,27 +302,38 @@ async function uploadToFirebase(
   questionId: string,
   educatorId?: string
 ): Promise<string> {
-  const admin = getAdmin();
-  const bucket = admin.storage().bucket();
+  try {
+    const admin = getAdmin();
+    const bucket = admin.storage().bucket();
 
-  const prefix = educatorId
-    ? `question-images/${educatorId}`
-    : "question-images";
-  const filePath = `${prefix}/${questionId}.png`;
+    if (!bucket) {
+      throw new Error("Firebase Storage bucket is not available");
+    }
 
-  const file = bucket.file(filePath);
+    const prefix = educatorId
+      ? `question-images/${educatorId}`
+      : "question-images";
+    const filePath = `${prefix}/${questionId}.png`;
 
-  await file.save(croppedBuffer, {
-    metadata: {
-      contentType: "image/png",
-      cacheControl: "public, max-age=31536000",
-    },
-    public: true,
-  });
+    const file = bucket.file(filePath);
 
-  // Construct the public URL
-  const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filePath}`;
-  return publicUrl;
+    await file.save(croppedBuffer, {
+      metadata: {
+        contentType: "image/png",
+        cacheControl: "public, max-age=31536000",
+      },
+      public: true,
+    });
+
+    // Construct the public URL
+    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filePath}`;
+    return publicUrl;
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : "Unknown Firebase error";
+    console.error(`[uploadToFirebase] Error uploading ${questionId}:`, errorMsg);
+    // Re-throw to be handled by caller
+    throw new Error(`Failed to upload diagram: ${errorMsg}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -326,10 +367,10 @@ export default async function handler(
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Initialize streaming response
-  initializeStreaming(res);
-
   try {
+    // Initialize streaming response
+    initializeStreaming(res);
+
     const {
       imageBase64,
       imageMimeType,

@@ -20,6 +20,7 @@ type Props = {
   importing: boolean;
   saving: boolean;
   onClose: () => void;
+  onCancel?: () => void;
   onItemIncludeChange: (sourceIndex: number, include: boolean) => void;
   onSelectReadyOnly: () => void;
   onToggleAllPartials: (include: boolean) => void;
@@ -34,6 +35,7 @@ export default function AiQuestionImportOverlay({
   importing,
   saving,
   onClose,
+  onCancel,
   onItemIncludeChange,
   onSelectReadyOnly,
   onToggleAllPartials,
@@ -58,13 +60,27 @@ export default function AiQuestionImportOverlay({
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="rounded-xl" onClick={onClose} disabled={saving}>
-            <X className="mr-2 h-4 w-4" /> Close
-          </Button>
-          <Button className="rounded-xl" onClick={onSaveSelected} disabled={saving || selectedCount === 0}>
-            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Save Selected ({selectedCount})
-          </Button>
+          {importing ? (
+            <>
+              <Button variant="outline" className="rounded-xl" onClick={onCancel} disabled={saving}>
+                Cancel
+              </Button>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Processing PDF...
+              </div>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" className="rounded-xl" onClick={onClose} disabled={saving}>
+                <X className="mr-2 h-4 w-4" /> Close
+              </Button>
+              <Button className="rounded-xl" onClick={onSaveSelected} disabled={saving || selectedCount === 0}>
+                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Save Selected ({selectedCount})
+              </Button>
+            </>
+          )}
         </div>
       </div>
 

@@ -127,7 +127,8 @@ export async function importQuestionsFromPdf(
     subject?: string;
     educatorId?: string;
   },
-  onPageProgress?: (completed: number, total: number) => void
+  onPageProgress?: (completed: number, total: number) => void,
+  abortSignal?: AbortSignal
 ): Promise<AiImportResponse> {
   const pdfjs = await loadPdfJs();
   const data = new Uint8Array(await file.arrayBuffer());
@@ -144,132 +145,148 @@ export async function importQuestionsFromPdf(
   }
 
   const allItems: Omit<AiImportPreviewItem, "include">[] = [];
-  const allDiagnostics: string[] = [];
   let globalIndex = 0;
+  let consecutiveErrors = 0;
+  const MAX_CONSECUTIVE_ERRORS = 3;
 
   for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+    // Check if import was cancelled from outside
+    if (abortSignal?.aborted) {
+      throw new Error("PDF import cancelled by user");
+    }
+
+    // Check if import was cancelled by creating a fresh signal per page
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120_000);
+
+    let res: Response;
+    let pageData: AiImportResponse | null = null;
+
     try {
-      const { base64, mimeType } = await renderPageToImage(pdfDoc, pageNum);
+      res = await fetch("/api/ai/import-test-questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          imageBase64: await renderPageToImageBase64(pdfDoc, pageNum),
+          imageMimeType: "image/jpeg",
+          fileName: file.name,
+          pageNumber: pageNum,
+          testTitle: context?.testTitle || "",
+          subject: context?.subject || "",
+          educatorId: context?.educatorId || "",
+        }),
+      });
 
-      // 120-second timeout per page so the UI never hangs indefinitely
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120_000);
+      // Handle streaming response (Server-Sent Events)
+      if (res.headers.get("content-type")?.includes("text/event-stream")) {
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("Response body is not readable");
 
-      let res: Response;
-      let pageData: AiImportResponse | null = null;
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let streamDone = false;
+        let hasError = false;
 
-      try {
-        res = await fetch("/api/ai/import-test-questions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({
-            imageBase64: base64,
-            imageMimeType: mimeType,
-            fileName: file.name,
-            pageNumber: pageNum,
-            testTitle: context?.testTitle || "",
-            subject: context?.subject || "",
-            educatorId: context?.educatorId || "",
-          }),
-        });
+        while (!streamDone && !hasError) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        // Handle streaming response (Server-Sent Events)
-        if (res.headers.get("content-type")?.includes("text/event-stream")) {
-          const reader = res.body?.getReader();
-          if (!reader) throw new Error("Response body is not readable");
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
 
-          const decoder = new TextDecoder();
-          let buffer = "";
-          let streamDone = false;
+          // Process all complete lines
+          for (let i = 0; i < lines.length - 1; i++) {
+            const line = lines[i].trim();
 
-          while (!streamDone) {
-            const { done, value } = await reader.read();
-            if (done) break;
+            if (line.startsWith("data: ")) {
+              const jsonStr = line.substring(6).trim();
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
+              // Check for stream terminator
+              if (jsonStr === "[DONE]") {
+                streamDone = true;
+                break;
+              }
 
-            // Process all complete lines
-            for (let i = 0; i < lines.length - 1; i++) {
-              const line = lines[i].trim();
-
-              if (line.startsWith("data: ")) {
-                const jsonStr = line.substring(6).trim();
-
-                // Check for stream terminator
-                if (jsonStr === "[DONE]") {
-                  streamDone = true;
-                  break;
+              try {
+                const event = JSON.parse(jsonStr);
+                if (event.type === "complete" && event.data) {
+                  pageData = event.data as AiImportResponse;
+                  consecutiveErrors = 0; // Reset error counter on success
+                } else if (event.type === "error") {
+                  hasError = true;
+                  consecutiveErrors++;
+                  throw new Error(event.error || "Unknown error from API");
                 }
-
-                try {
-                  const event = JSON.parse(jsonStr);
-                  if (event.type === "complete" && event.data) {
-                    pageData = event.data as AiImportResponse;
-                  } else if (event.type === "error") {
-                    throw new Error(event.error || "Unknown error from API");
-                  }
-                } catch (parseErr) {
-                  console.error("Failed to parse stream event:", parseErr);
-                }
+              } catch (parseErr) {
+                console.error("Failed to parse stream event:", parseErr);
               }
             }
-
-            // Keep the last incomplete line in buffer
-            buffer = lines[lines.length - 1];
           }
 
-          if (!pageData || !res.ok) {
-            throw new Error(
-              pageData?.summary
-                ? "Failed to process page"
-                : "API error in streaming response"
-            );
-          }
-        } else {
-          // Fallback for non-streaming response (e.g., JSON)
-          pageData = (await res.json().catch(() => ({}))) as AiImportResponse;
-
-          if (!res.ok) {
-            allDiagnostics.push(
-              `Page ${pageNum}: ${pageData?.meta?.diagnostics?.[0] || `API error (${res.status})`}`
-            );
-            continue;
-          }
+          // Keep the last incomplete line in buffer
+          buffer = lines[lines.length - 1];
         }
-      } finally {
-        clearTimeout(timeoutId);
+
+        if (hasError) {
+          throw new Error("Failed to process page");
+        }
+
+        if (!pageData || !res.ok) {
+          consecutiveErrors++;
+          throw new Error(`API error: ${res.status}`);
+        }
+      } else {
+        // Fallback for non-streaming response (e.g., JSON)
+        pageData = (await res.json().catch(() => ({}))) as AiImportResponse;
+
+        if (!res.ok) {
+          consecutiveErrors++;
+          throw new Error(`API error: ${res.status}`);
+        }
       }
 
-      if (!pageData) {
-        allDiagnostics.push(`Page ${pageNum}: No data returned`);
-        continue;
-      }
-
-      // Re-number sourceIndex to be globally unique across all pages
-      for (const item of pageData.items || []) {
-        globalIndex += 1;
-        allItems.push({
-          ...item,
-          sourceIndex: globalIndex,
-        });
-      }
-
-      if (pageData.meta?.diagnostics) {
-        allDiagnostics.push(
-          ...pageData.meta.diagnostics.map((d) => `Page ${pageNum}: ${d}`)
-        );
+      // If we got here, processing was successful
+      if (pageData?.items) {
+        for (const item of pageData.items || []) {
+          globalIndex += 1;
+          allItems.push({
+            ...item,
+            sourceIndex: globalIndex,
+          });
+        }
       }
     } catch (pageErr: any) {
-      const isTimeout = pageErr?.name === "AbortError";
-      const msg = isTimeout
-        ? "Request timed out (120s)"
-        : pageErr instanceof Error
-          ? pageErr.message
-          : "Unknown error";
-      console.error(`Failed to process page ${pageNum}:`, pageErr);
-      allDiagnostics.push(`Page ${pageNum}: ${msg}`);
+      // Check if this was a cancellation error
+      if (pageErr?.name === "AbortError") {
+        throw new Error("PDF import cancelled by user");
+      }
+
+      // Check if it's an API error
+      if (pageErr instanceof Error && pageErr.message.includes("API error")) {
+        console.error(`Failed to process page ${pageNum}:`, pageErr);
+
+        // Stop if we have too many consecutive errors
+        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+          throw new Error(
+            `The AI service is experiencing issues. Failed to process page ${pageNum}. ` +
+            `Please try again later or contact support.`
+          );
+        }
+      } else {
+        // For other errors, just log and continue
+        console.error(`Failed to process page ${pageNum}:`, pageErr);
+        consecutiveErrors++;
+
+        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+          throw new Error(
+            `Unable to process the PDF. Multiple pages failed. ` +
+            `Please try uploading a clearer PDF or contact support.`
+          );
+        }
+      }
+    } finally {
+      clearTimeout(timeoutId);
     }
 
     // Report progress
@@ -288,10 +305,8 @@ export async function importQuestionsFromPdf(
 
   if (allItems.length === 0 && numPages > 0) {
     throw new Error(
-      "No MCQ questions could be detected in any page of this PDF. " +
-        (allDiagnostics.length
-          ? `Diagnostics: ${allDiagnostics.join("; ")}`
-          : "")
+      "No MCQ questions could be detected in this PDF. " +
+      "Please ensure you're uploading a clear PDF with visible MCQ questions."
     );
   }
 
@@ -300,9 +315,20 @@ export async function importQuestionsFromPdf(
     items: allItems,
     meta: {
       fileName: file.name,
-      diagnostics: allDiagnostics,
+      diagnostics: [],
     },
   };
+}
+
+/**
+ * Helper to render a page and return base64 immediately
+ */
+async function renderPageToImageBase64(
+  pdfDoc: any,
+  pageNumber: number
+): Promise<string> {
+  const { base64 } = await renderPageToImage(pdfDoc, pageNumber);
+  return base64;
 }
 
 // ---------------------------------------------------------------------------
