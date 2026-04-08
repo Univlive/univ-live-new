@@ -716,50 +716,50 @@ export default function StudentCBTAttempt() {
     const isCurrent = idx === currentIndex;
 
     if (isCurrent) {
-      return { background: "#3b82f6", color: "#fff", border: "2px solid #2563eb", fontWeight: 700 };
+      return { background: "#3b82f6", color: "#ffffff", border: "2px solid #1e40af" };
     }
     if (r?.answered && r?.markedForReview) {
-      return { background: "linear-gradient(135deg, #7c3aed 60%, #22c55e 100%)", color: "#fff", border: "2px solid #7c3aed" };
+      return { background: "linear-gradient(135deg, #7c3aed 60%, #22c55e 100%)", color: "#ffffff", border: "1px solid #7c3aed" };
     }
     if (r?.answered) {
-      return { background: "#22c55e", color: "#fff", border: "2px solid #16a34a" };
+      return { background: "#22c55e", color: "#ffffff", border: "1px solid #16a34a" };
     }
     if (r?.markedForReview) {
-      return { background: "#7c3aed", color: "#fff", border: "2px solid #6d28d9" };
+      return { background: "#7c3aed", color: "#ffffff", border: "1px solid #6d28d9" };
     }
     if (r?.visited) {
-      return { background: "#ef4444", color: "#fff", border: "2px solid #dc2626" };
+      return { background: "#ef4444", color: "#ffffff", border: "1px solid #dc2626" };
     }
-    return { background: "#e5e7eb", color: "#374151", border: "2px solid #d1d5db" };
+    return { background: "#e5e7eb", color: "#374151", border: "1px solid #d1d5db" };
   };
 
   const PaletteContent = ({ onClose }: { onClose?: () => void }) => (
     <div style={{ fontFamily: "Arial, sans-serif" }}>
       {/* Legend */}
       <div style={{ padding: "8px 10px", borderBottom: "1px solid #d1d5db" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: 11 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ minWidth: 28, height: 24, borderRadius: 4, background: "#e5e7eb", border: "2px solid #d1d5db", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12, color: "#374151" }}>{notVisitedCount}</span>
+            <span style={{ width: 22, height: 22, borderRadius: "50%", background: "#e5e7eb", border: "1px solid #d1d5db", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 10, color: "#374151" }}>{notVisitedCount}</span>
             <span style={{ color: "#374151" }}>Not Visited</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ minWidth: 28, height: 24, borderRadius: 4, background: "#ef4444", border: "2px solid #dc2626", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12, color: "#fff" }}>{notAnsweredCount}</span>
+            <span style={{ width: 22, height: 22, borderRadius: "50%", background: "#ef4444", border: "1px solid #dc2626", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 10, color: "#fff" }}>{notAnsweredCount}</span>
             <span style={{ color: "#374151" }}>Not Answered</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ minWidth: 28, height: 24, borderRadius: 4, background: "#22c55e", border: "2px solid #16a34a", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12, color: "#fff" }}>{answeredCount}</span>
+            <span style={{ width: 22, height: 22, borderRadius: "50%", background: "#22c55e", border: "1px solid #16a34a", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 10, color: "#fff" }}>{answeredCount}</span>
             <span style={{ color: "#374151" }}>Answered</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ minWidth: 28, height: 24, borderRadius: 50, background: "#7c3aed", border: "2px solid #6d28d9", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12, color: "#fff" }}>{markedForReviewCount}</span>
+            <span style={{ width: 22, height: 22, borderRadius: "50%", background: "#7c3aed", border: "1px solid #6d28d9", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 10, color: "#fff" }}>{markedForReviewCount}</span>
             <span style={{ color: "#374151" }}>Marked for Review</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, gridColumn: "span 2" }}>
-            <span style={{ position: "relative", minWidth: 28, height: 24, borderRadius: 50, background: "#7c3aed", border: "2px solid #6d28d9", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12, color: "#fff" }}>
-              <span style={{ position: "absolute", bottom: -4, right: -4, width: 13, height: 13, borderRadius: "50%", background: "#22c55e", border: "2px solid #fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, color: "#fff" }}>✓</span>
+            <span style={{ position: "relative", width: 22, height: 22, borderRadius: "50%", background: "#7c3aed", border: "1px solid #6d28d9", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 10, color: "#fff" }}>
+              <span style={{ position: "absolute", bottom: -3, right: -3, width: 11, height: 11, borderRadius: "50%", background: "#22c55e", border: "1px solid #fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 7, color: "#fff" }}>✓</span>
               {answeredAndMarkedCount}
             </span>
-            <span style={{ color: "#374151" }}>Answered &amp; Marked for Review <span style={{ fontSize: 10, color: "#6b7280" }}>(will be considered)</span></span>
+            <span style={{ color: "#374151" }}>Answered &amp; Marked for Review <span style={{ fontSize: 9, color: "#6b7280" }}>(will be considered)</span></span>
           </div>
         </div>
       </div>
@@ -790,8 +790,8 @@ export default function StudentCBTAttempt() {
       )}
 
       {/* Question grid */}
-      <div style={{ padding: "10px", overflowY: "auto", maxHeight: "calc(100% - 160px)" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 5 }}>
+      <div style={{ padding: "15px", overflowY: "auto", maxHeight: "calc(100% - 160px)" }}>
+        <div className="question-grid">
           {questions.map((q, idx) => (
             <button
               key={q.id}
@@ -800,18 +800,23 @@ export default function StudentCBTAttempt() {
                 ...getQuestionBtnStyle(idx),
                 width: "100%",
                 aspectRatio: "1",
-                borderRadius: 4,
-                fontSize: 12,
-                fontWeight: 600,
+                borderRadius: "50%",
+                fontSize: "13px",
+                fontWeight: "bold",
                 cursor: "pointer",
                 transition: "transform 0.1s",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                minHeight: 30,
+                boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+                padding: 0,
+                lineHeight: "1",
+                textAlign: "center",
               }}
+              onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.92)")}
+              onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
             >
-              {String(idx + 1).padStart(2, "0")}
+              <span style={{ display: "block", width: "100%", textAlign: "center", color: "inherit" }}>{idx + 1}</span>
             </button>
           ))}
         </div>
@@ -1160,27 +1165,37 @@ export default function StudentCBTAttempt() {
         </SheetContent>
       </Sheet>
 
-      {/* ─── PROCTORING VIOLATION MODAL ─── */}
+      {/* ─── PROCTORING VIOLATION WARNING MODAL ─── */}
       {violationModalOpen && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, backdropFilter: "blur(4px)" }}>
-          <div style={{ width: "100%", maxWidth: 450, borderRadius: 12, background: "#fff", boxShadow: "0 10px 50px rgba(0,0,0,0.3)", overflow: "hidden", textAlign: "center", padding: "40px 30px" }}>
-            <div style={{ color: "#dc2626", marginBottom: 20 }}>
-              <AlertTriangle size={70} style={{ margin: "0 auto" }} />
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, backdropFilter: "blur(5px)" }}>
+          <div style={{ width: "100%", maxWidth: 480, borderRadius: 16, background: "#fff", boxShadow: "0 20px 60px rgba(0,0,0,0.4)", overflow: "hidden", textAlign: "center", padding: "35px 25px" }}>
+            <div style={{ color: "#f59e0b", marginBottom: 20 }}>
+              <AlertTriangle size={64} style={{ margin: "0 auto" }} />
             </div>
-            <h2 style={{ fontSize: 24, fontWeight: 800, color: "#111827", marginBottom: 12 }}>Test Terminated!</h2>
-            <p style={{ fontSize: 16, color: "#4b5563", marginBottom: 30, lineHeight: 1.6 }}>
-              A proctoring violation was detected (Tab Switch or Full-screen Exit). <br />
-              <strong>As per the rules, your test is being automatically submitted.</strong>
+            <h2 style={{ fontSize: 22, fontWeight: 800, color: "#111827", marginBottom: 12 }}>Proctoring Warning!</h2>
+            <p style={{ fontSize: 15, color: "#4b5563", marginBottom: 28, lineHeight: 1.6 }}>
+              You have left the test environment (Tab Switch or Full-screen Exit). <br />
+              This is a violation of the test rules. <br /><br />
+              <strong>Do you want to submit and exit the test?</strong>
             </p>
-            <div style={{ display: "flex", justifyContent: "center" }}>
+            <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
               <button
                 onClick={() => {
                   handleSubmit(true);
                   setViolationModalOpen(false);
                 }}
-                style={{ padding: "12px 40px", background: "#1e3a8a", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 16, cursor: "pointer", boxShadow: "0 4px 10px rgba(30,58,138,0.3)" }}
+                style={{ flex: 1, padding: "12px 20px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer", boxShadow: "0 4px 10px rgba(239,68,68,0.2)" }}
               >
-                OK
+                Yes, Submit &amp; Exit
+              </button>
+              <button
+                onClick={async () => {
+                  await requestFullscreenSafe();
+                  setViolationModalOpen(false);
+                }}
+                style={{ flex: 1, padding: "12px 20px", background: "#1e3a8a", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer", boxShadow: "0 4px 10px rgba(30,58,138,0.2)" }}
+              >
+                No, Return to Test
               </button>
             </div>
           </div>
@@ -1239,13 +1254,24 @@ export default function StudentCBTAttempt() {
           .mobile-palette-btn { display: none !important; }
           .desktop-palette { display: flex !important; }
         }
+        .question-grid {
+          display: grid;
+          grid-template-columns: repeat(7, 1fr);
+          gap: 10px;
+        }
+        @media (max-width: 480px) {
+          .question-grid {
+            grid-template-columns: repeat(8, 1fr);
+            gap: 8px;
+          }
+        }
         /* Fix for Sheet z-index - ensure portals appear on top of test container */
         [data-radix-portal] {
           z-index: 200 !important;
           position: relative;
         }
         /* Ensure mobile palette sheet close button is visible */
-        .mobile-palette-sheet button {
+        .mobile-palette-sheet button.absolute {
           color: white !important;
           opacity: 1 !important;
           background: rgba(255,255,255,0.1) !important;
@@ -1258,7 +1284,7 @@ export default function StudentCBTAttempt() {
           top: 24px !important;
           right: 12px !important;
         }
-        .mobile-palette-sheet button svg {
+        .mobile-palette-sheet button.absolute svg {
           width: 20px !important;
           height: 20px !important;
         }
