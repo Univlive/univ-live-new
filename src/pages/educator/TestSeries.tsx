@@ -78,6 +78,15 @@ type TestQuestion = {
 
   isActive?: boolean;
 
+  // AI import metadata
+  source?: "ai_import" | "ai_import_partial" | string;
+  importStatus?: "ready" | "partial";
+  reviewRequired?: boolean;
+  importIssues?: string[];
+  importSourceIndex?: number;
+  rawImportBlock?: string;
+  questionImageUrl?: string;
+
   createdAt?: any;
   updatedAt?: any;
 };
@@ -823,6 +832,9 @@ function QuestionsManager({
     }
   }
 
+
+
+  // Upload pdf starts here....
   async function handlePdfSelected(file: File | null) {
     if (!file) return;
     if (file.type !== "application/pdf") {

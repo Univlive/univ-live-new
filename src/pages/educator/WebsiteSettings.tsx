@@ -64,6 +64,7 @@ import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { useTenant } from "@/contexts/TenantProvider";
 import { uploadToImageKit } from "@/lib/imagekitUpload";
+import { useAIStream } from "@/hooks/useAIStream";
 
 // --- Types ---
 type StatItem = { label: string; value: string; icon: string };
@@ -96,10 +97,10 @@ export default function WebsiteSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // --- AI Generation State ---
+  // --- AI Generation with streaming ---
+  const { data: generatedContent, loading: aiGenerating, error: aiError, progress: aiProgress, request: requestAI, cancel: cancelAI } = useAIStream();
+  
   const [showAIDialog, setShowAIDialog] = useState(false);
-  const [aiGenerating, setAiGenerating] = useState(false);
-  const [generatedContent, setGeneratedContent] = useState<any>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   
   // AI Input Form
@@ -151,50 +152,42 @@ export default function WebsiteSettings() {
     ).sort((a, b) => a.localeCompare(b));
   }, [availableTests]);
 
-  // --- AI Generation Function ---
+  // --- AI Generation Function with streaming ---
   const handleGenerateWithAI = async () => {
     if (!aiEducatorName || !aiSubjects || !aiDescription) {
       toast.error("Please fill in all required fields");
       return;
     }
 
-    setAiGenerating(true);
     try {
       const subjectsArray = aiSubjects.split(",").map(s => s.trim()).filter(Boolean);
       if (subjectsArray.length === 0) {
         toast.error("Please enter at least one subject");
-        setAiGenerating(false);
         return;
       }
 
-      const response = await fetch("/api/ai/generate-website-content", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          coachingName: coachingName || tenant?.coachingName || "Coaching Center",
-          educatorName: aiEducatorName,
-          subjects: subjectsArray,
-          description: aiDescription,
-          yearEstablished: aiYearEstablished ? Number(aiYearEstablished) : undefined,
-          studentCount: aiStudentCount ? Number(aiStudentCount) : undefined,
-        }),
+      const content = await requestAI("/api/ai/generate-website-content", {
+        coachingName: coachingName || tenant?.coachingName || "Coaching Center",
+        educatorName: aiEducatorName,
+        subjects: subjectsArray,
+        description: aiDescription,
+        yearEstablished: aiYearEstablished ? Number(aiYearEstablished) : undefined,
+        studentCount: aiStudentCount ? Number(aiStudentCount) : undefined,
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Failed to generate content");
+      if (content) {
+        setShowAIDialog(false);
+        setShowConfirmModal(true);
       }
-
-      const content = await response.json();
-      setGeneratedContent(content);
-      setShowAIDialog(false);
-      setShowConfirmModal(true);
     } catch (err) {
       console.error("Error generating content:", err);
-      toast.error(err instanceof Error ? err.message : "Failed to generate content with AI");
-    } finally {
-      setAiGenerating(false);
     }
+  };
+
+  // --- Cancel AI Generation ---
+  const handleCancelAI = () => {
+    cancelAI();
+    toast.info("Generation cancelled");
   };
 
   // --- Apply Generated Content ---
@@ -207,7 +200,6 @@ export default function WebsiteSettings() {
     setFaculty(generatedContent.faculty || []);
 
     setShowConfirmModal(false);
-    setGeneratedContent(null);
     toast.success("AI-generated content applied! Review and publish when ready.");
   };
 
@@ -515,9 +507,32 @@ export default function WebsiteSettings() {
                   </div>
                 </div>
               </div>
+              {aiProgress && (
+                <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-sm text-blue-800">
+                  <div className="flex items-start gap-2">
+                    <Loader2 className="h-4 w-4 mt-0.5 animate-spin flex-shrink-0" />
+                    <div>{aiProgress}</div>
+                  </div>
+                </div>
+              )}
+              {aiError && (
+                <div className="bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-800">
+                  <div className="font-medium">Error</div>
+                  <div>{aiError}</div>
+                </div>
+              )}
               <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={() => setShowAIDialog(false)}>
-                  Cancel
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    if (aiGenerating) {
+                      handleCancelAI();
+                    } else {
+                      setShowAIDialog(false);
+                    }
+                  }}
+                >
+                  {aiGenerating ? "Cancel Generation" : "Close"}
                 </Button>
                 <Button 
                   onClick={handleGenerateWithAI} 

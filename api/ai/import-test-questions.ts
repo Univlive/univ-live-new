@@ -22,6 +22,7 @@ import {
   normalizeImportedItem,
   type ImportedQuestionItem,
 } from "../_lib/pdfQuestionImport.js";
+import { initializeStreaming, sendStreamEvent, endStreaming, streamError } from "../_lib/aiStreamingUtils";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -325,7 +326,8 @@ export default async function handler(
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const isDev = process.env.NODE_ENV !== "production";
+  // Initialize streaming response
+  initializeStreaming(res);
 
   try {
     const {
@@ -340,44 +342,43 @@ export default async function handler(
 
     // ---- Input Validation ----
     if (!imageBase64) {
-      return res.status(400).json({
-        error:
-          "Missing required field: imageBase64 (Base64-encoded page image)",
-      });
+      return streamError(res, new Error("imageBase64 is required"));
     }
 
     if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({
-        error: isDev
-          ? "GEMINI_API_KEY not configured. Add it to Vercel environment variables."
-          : "API configuration error",
-      });
+      return streamError(res, new Error("GEMINI_API_KEY is not configured"));
     }
+
+    sendStreamEvent(res, {
+      type: "progress",
+      message: `Processing page ${pageNumber || "unknown"} from ${fileName || "PDF document"}...`,
+    });
 
     // Validate MIME type
     const mimeType = imageMimeType || "image/png";
     if (!ALLOWED_MIME_TYPES.has(mimeType)) {
-      return res.status(400).json({
-        error: `Unsupported image MIME type: ${mimeType}. Allowed: ${[...ALLOWED_MIME_TYPES].join(", ")}`,
-      });
+      return streamError(res, new Error(`Unsupported image MIME type: ${mimeType}`));
     }
 
     // Decode the incoming image
     const imageBuffer = Buffer.from(imageBase64, "base64");
     if (!imageBuffer.length) {
-      return res.status(400).json({ error: "Uploaded image is empty" });
+      return streamError(res, new Error("Uploaded image is empty"));
     }
 
     if (imageBuffer.length > MAX_IMAGE_BYTES) {
-      return res.status(400).json({
-        error: `Image too large (${(imageBuffer.length / 1024 / 1024).toFixed(1)} MB). Maximum is ${MAX_IMAGE_BYTES / 1024 / 1024} MB.`,
-      });
+      return streamError(res, new Error(`Image too large (${(imageBuffer.length / 1024 / 1024).toFixed(1)} MB)`));
     }
 
     // ---- Step 1: Gemini Extraction ----
     console.log(
       `[import-test-questions] Processing page ${pageNumber || "?"} of "${fileName || "unknown"}" (${(imageBuffer.length / 1024).toFixed(0)} KB)`
     );
+
+    sendStreamEvent(res, {
+      type: "progress",
+      message: "Extracting MCQ questions with AI...",
+    });
 
     const geminiResult = await processWithGemini(imageBuffer, mimeType, {
       testTitle,
@@ -393,16 +394,26 @@ export default async function handler(
     );
 
     if (!rawItems.length) {
-      return res.status(200).json({
-        summary: { total: 0, ready: 0, partial: 0, rejected: 0 },
-        items: [],
-        meta: {
-          fileName,
-          pageNumber,
-          diagnostics: ["No MCQ questions were detected on this page."],
+      sendStreamEvent(res, {
+        type: "complete",
+        data: {
+          summary: { total: 0, ready: 0, partial: 0, rejected: 0 },
+          items: [],
+          meta: {
+            fileName,
+            pageNumber,
+            diagnostics: ["No MCQ questions were detected on this page."],
+          },
         },
       });
+      endStreaming(res);
+      return;
     }
+
+    sendStreamEvent(res, {
+      type: "progress",
+      message: `Found ${rawItems.length} questions. Processing diagrams...`,
+    });
 
     // ---- Step 2: Normalize + Crop + Upload diagrams concurrently ----
     const processedItems: (ImportedQuestionItem & {
@@ -445,6 +456,11 @@ export default async function handler(
       })
     );
 
+    sendStreamEvent(res, {
+      type: "progress",
+      message: "Finalizing results...",
+    });
+
     // ---- Step 3: De-duplicate ----
     const unique = processedItems.filter((item, index, arr) => {
       if (item.status === "rejected") return true;
@@ -476,25 +492,28 @@ export default async function handler(
       `[import-test-questions] Final: ${summary.total} questions (${summary.ready} ready, ${summary.partial} partial, ${summary.rejected} rejected)`
     );
 
-    return res.status(200).json({
-      summary,
-      items: unique,
-      meta: {
-        fileName,
-        pageNumber,
-        itemCount: unique.length,
-        diagnostics: [
-          `Gemini extracted ${rawItems.length} candidate(s) from page image.`,
-          unique.length !== rawItems.length
-            ? `${rawItems.length - unique.length} duplicate(s) removed.`
-            : null,
-        ].filter(Boolean),
+    sendStreamEvent(res, {
+      type: "complete",
+      data: {
+        summary,
+        items: unique,
+        meta: {
+          fileName,
+          pageNumber,
+          itemCount: unique.length,
+          diagnostics: [
+            `Gemini extracted ${rawItems.length} candidate(s) from page image.`,
+            unique.length !== rawItems.length
+              ? `${rawItems.length - unique.length} duplicate(s) removed.`
+              : null,
+          ].filter(Boolean),
+        },
       },
     });
+
+    endStreaming(res);
   } catch (error) {
     console.error("[import-test-questions] Unhandled error:", error);
-    return res.status(500).json({
-      error: isDev ? String(error) : "Internal server error",
-    });
+    streamError(res, error);
   }
 }

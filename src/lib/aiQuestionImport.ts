@@ -151,11 +151,13 @@ export async function importQuestionsFromPdf(
     try {
       const { base64, mimeType } = await renderPageToImage(pdfDoc, pageNum);
 
-      // 60-second timeout per page so the UI never hangs indefinitely
+      // 120-second timeout per page so the UI never hangs indefinitely
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60_000);
+      const timeoutId = setTimeout(() => controller.abort(), 120_000);
 
       let res: Response;
+      let pageData: AiImportResponse | null = null;
+
       try {
         res = await fetch("/api/ai/import-test-questions", {
           method: "POST",
@@ -171,23 +173,82 @@ export async function importQuestionsFromPdf(
             educatorId: context?.educatorId || "",
           }),
         });
+
+        // Handle streaming response (Server-Sent Events)
+        if (res.headers.get("content-type")?.includes("text/event-stream")) {
+          const reader = res.body?.getReader();
+          if (!reader) throw new Error("Response body is not readable");
+
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let streamDone = false;
+
+          while (!streamDone) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+
+            // Process all complete lines
+            for (let i = 0; i < lines.length - 1; i++) {
+              const line = lines[i].trim();
+
+              if (line.startsWith("data: ")) {
+                const jsonStr = line.substring(6).trim();
+
+                // Check for stream terminator
+                if (jsonStr === "[DONE]") {
+                  streamDone = true;
+                  break;
+                }
+
+                try {
+                  const event = JSON.parse(jsonStr);
+                  if (event.type === "complete" && event.data) {
+                    pageData = event.data as AiImportResponse;
+                  } else if (event.type === "error") {
+                    throw new Error(event.error || "Unknown error from API");
+                  }
+                } catch (parseErr) {
+                  console.error("Failed to parse stream event:", parseErr);
+                }
+              }
+            }
+
+            // Keep the last incomplete line in buffer
+            buffer = lines[lines.length - 1];
+          }
+
+          if (!pageData || !res.ok) {
+            throw new Error(
+              pageData?.summary
+                ? "Failed to process page"
+                : "API error in streaming response"
+            );
+          }
+        } else {
+          // Fallback for non-streaming response (e.g., JSON)
+          pageData = (await res.json().catch(() => ({}))) as AiImportResponse;
+
+          if (!res.ok) {
+            allDiagnostics.push(
+              `Page ${pageNum}: ${pageData?.meta?.diagnostics?.[0] || `API error (${res.status})`}`
+            );
+            continue;
+          }
+        }
       } finally {
         clearTimeout(timeoutId);
       }
 
-      const pageData = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        allDiagnostics.push(
-          `Page ${pageNum}: ${pageData?.error || `API error (${res.status})`}`
-        );
+      if (!pageData) {
+        allDiagnostics.push(`Page ${pageNum}: No data returned`);
         continue;
       }
 
-      const pageResult = pageData as AiImportResponse;
-
       // Re-number sourceIndex to be globally unique across all pages
-      for (const item of pageResult.items || []) {
+      for (const item of pageData.items || []) {
         globalIndex += 1;
         allItems.push({
           ...item,
@@ -195,15 +256,15 @@ export async function importQuestionsFromPdf(
         });
       }
 
-      if (pageResult.meta?.diagnostics) {
+      if (pageData.meta?.diagnostics) {
         allDiagnostics.push(
-          ...pageResult.meta.diagnostics.map((d) => `Page ${pageNum}: ${d}`)
+          ...pageData.meta.diagnostics.map((d) => `Page ${pageNum}: ${d}`)
         );
       }
     } catch (pageErr: any) {
       const isTimeout = pageErr?.name === "AbortError";
       const msg = isTimeout
-        ? "Request timed out (60s)"
+        ? "Request timed out (120s)"
         : pageErr instanceof Error
           ? pageErr.message
           : "Unknown error";

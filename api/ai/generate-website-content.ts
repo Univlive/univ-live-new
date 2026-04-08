@@ -4,6 +4,7 @@ import {
   SchemaType,
   type GenerationConfig,
 } from "@google/generative-ai";
+import { initializeStreaming, sendStreamEvent, endStreaming, streamError, getUserFriendlyErrorMessage } from "../_lib/aiStreamingUtils";
 
 // ---------------------------------------------------------------------------
 // Request type (from frontend WebsiteSettings.tsx)
@@ -254,7 +255,8 @@ export default async function handler(
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const isDev = process.env.NODE_ENV !== "production";
+  // Initialize streaming response
+  initializeStreaming(res);
 
   try {
     const {
@@ -268,25 +270,21 @@ export default async function handler(
 
     // ---- Input Validation ----
     if (!coachingName || !educatorName || !subjects || !description) {
-      return res.status(400).json({
-        error:
-          "Missing required fields: coachingName, educatorName, subjects, description",
-      });
+      return streamError(res, new Error("Missing required fields: coachingName, educatorName, subjects, description"));
     }
 
     if (!Array.isArray(subjects) || subjects.length === 0) {
-      return res.status(400).json({
-        error: "subjects must be a non-empty array of strings",
-      });
+      return streamError(res, new Error("subjects must be a non-empty array of strings"));
     }
 
     if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({
-        error: isDev
-          ? "GEMINI_API_KEY not configured. Add it to Vercel environment variables."
-          : "API configuration error",
-      });
+      return streamError(res, new Error("GEMINI_API_KEY is not configured"));
     }
+
+    sendStreamEvent(res, {
+      type: "progress",
+      message: `Preparing content generation for ${coachingName}...`,
+    });
 
     // ---- Build prompt ----
     const prompt = buildPrompt(
@@ -302,6 +300,11 @@ export default async function handler(
       `[generate-website-content] Generating content for "${coachingName}" — subjects: ${subjects.join(", ")}`
     );
 
+    sendStreamEvent(res, {
+      type: "progress",
+      message: `Generating creative content for ${subjects.join(", ")}...`,
+    });
+
     // ---- Call Gemini ----
     const content = await generateWithGemini(prompt);
 
@@ -312,14 +315,20 @@ export default async function handler(
       `${content.faculty?.length || 0} faculty`
     );
 
-    // Return the full response — frontend reads stats, achievements,
-    // testimonials, faculty directly. heroTagline and aboutUs are bonus
-    // fields that can be used for tagline / about sections.
-    return res.status(200).json(content);
+    sendStreamEvent(res, {
+      type: "progress",
+      message: "Processing and finalizing content...",
+    });
+
+    // Send the complete content
+    sendStreamEvent(res, {
+      type: "complete",
+      data: content,
+    });
+
+    endStreaming(res);
   } catch (error) {
     console.error("[generate-website-content] Unhandled error:", error);
-    return res.status(500).json({
-      error: isDev ? String(error) : "Failed to generate website content",
-    });
+    streamError(res, error);
   }
 }
