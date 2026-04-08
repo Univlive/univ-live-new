@@ -185,7 +185,7 @@ async function processWithGemini(
   };
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash-latest",
+    model: `${process.env.GEMINI_MODEL}`,
     generationConfig,
     systemInstruction: buildSystemInstruction(context),
   });

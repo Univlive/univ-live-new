@@ -281,7 +281,7 @@ async function analyzeWithGemini(
   };
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash-latest",
+    model: `${process.env.GEMINI_MODEL}`,
     generationConfig,
     systemInstruction: SYSTEM_INSTRUCTION,
   });
@@ -373,8 +373,8 @@ export default async function handler(
 
     console.log(
       `[analyze-performance] Analysis complete — ${analysis.weakAreas.length} weak areas, ` +
-        `${analysis.prerequisites.length} prerequisites, ` +
-        `projection ${analysis.marksProjection.currentScore} → ${analysis.marksProjection.potentialScore}`
+      `${analysis.prerequisites.length} prerequisites, ` +
+      `projection ${analysis.marksProjection.currentScore} → ${analysis.marksProjection.potentialScore}`
     );
 
     return res.status(200).json(analysis);

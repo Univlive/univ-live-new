@@ -217,7 +217,7 @@ async function generateWithGemini(prompt: string): Promise<Record<string, any>> 
   };
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash-latest",
+    model: `${process.env.GEMINI_MODEL}`,
     generationConfig,
     systemInstruction: SYSTEM_INSTRUCTION,
   });
@@ -307,9 +307,9 @@ export default async function handler(
 
     console.log(
       `[generate-website-content] Generated: ${content.stats?.length || 0} stats, ` +
-        `${content.achievements?.length || 0} achievements, ` +
-        `${content.testimonials?.length || 0} testimonials, ` +
-        `${content.faculty?.length || 0} faculty`
+      `${content.achievements?.length || 0} achievements, ` +
+      `${content.testimonials?.length || 0} testimonials, ` +
+      `${content.faculty?.length || 0} faculty`
     );
 
     // Return the full response — frontend reads stats, achievements,
