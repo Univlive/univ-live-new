@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Trophy, Target, Clock, TrendingUp, Eye } from "lucide-react";
+import { ArrowLeft, Trophy, Target, Clock, TrendingUp, Eye, Loader2 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { AIReviewPanel } from "@/components/student/AIReviewPanel";
 import { useAuth } from "@/contexts/AuthProvider";
 import { db } from "@/lib/firebase";
 import { collection, doc, getDoc, getDocs } from "firebase/firestore";
+import { useAIStream } from "@/hooks/useAIStream";
 
 type AttemptResponse = {
   answer: string | null;
@@ -157,7 +158,9 @@ export default function StudentResults() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
+  
+  // AI Analysis with streaming
+  const { progress: aiProgress, error: aiError, cancel: cancelAI } = useAIStream();
 
   const [attempt, setAttempt] = useState<AttemptDoc | null>(null);
   const [sectionScores, setSectionScores] = useState<SectionScore[]>([]);
@@ -177,6 +180,8 @@ export default function StudentResults() {
     return `Top ${top}%`;
   }, [rank, totalParticipants]);
 
+  const { request: requestAIAnalysis } = useAIStream();
+
   async function triggerAIAnalysis(
     questions: { id: string; data: QuestionDoc }[],
     responses: Record<string, AttemptResponse>,
@@ -188,7 +193,16 @@ export default function StudentResults() {
   ) {
     if (!attemptId) return;
 
-    setAiAnalysisLoading(true);
+    // Set status to in-progress
+    setAttempt((prev) =>
+      prev
+        ? {
+            ...prev,
+            aiReviewStatus: "in-progress",
+          }
+        : null
+    );
+
     try {
       // Prepare the data for the API
       const userResponses = questions.map((q) => {
@@ -223,17 +237,7 @@ export default function StudentResults() {
         accuracy,
       };
 
-      const response = await fetch("/api/ai/analyze-performance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(analysisRequest),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to get AI analysis");
-      }
-
-      const analysis = await response.json();
+      const analysis = await requestAIAnalysis("/api/ai/analyze-performance", analysisRequest);
 
       // Update attempt with the analysis
       setAttempt((prev) =>
@@ -255,8 +259,6 @@ export default function StudentResults() {
             }
           : null
       );
-    } finally {
-      setAiAnalysisLoading(false);
     }
   }
 
@@ -460,7 +462,13 @@ export default function StudentResults() {
       </Card>
 
       {/* AI Review */}
-      <AIReviewPanel status={attempt.aiReviewStatus ?? "queued"} review={attempt.aiReview} />
+      <AIReviewPanel 
+        status={attempt.aiReviewStatus ?? "queued"} 
+        review={attempt.aiReview}
+        progress={aiProgress}
+        error={aiError}
+        onCancel={cancelAI}
+      />
 
       {/* Actions */}
       <div className="flex gap-4">

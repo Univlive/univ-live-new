@@ -4,6 +4,7 @@ import {
   SchemaType,
   type GenerationConfig,
 } from "@google/generative-ai";
+import { initializeStreaming, sendStreamEvent, endStreaming, streamError } from "../_lib/aiStreamingUtils";
 
 // ---------------------------------------------------------------------------
 // Request types (from frontend)
@@ -318,7 +319,8 @@ export default async function handler(
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const isDev = process.env.NODE_ENV !== "production";
+  // Initialize streaming response
+  initializeStreaming(res);
 
   try {
     const {
@@ -333,24 +335,21 @@ export default async function handler(
 
     // ---- Input Validation ----
     if (!questions || !Array.isArray(questions) || !questions.length) {
-      return res
-        .status(400)
-        .json({ error: "Missing or empty required field: questions" });
+      return streamError(res, new Error("Missing or empty required field: questions"));
     }
 
     if (!responses || !Array.isArray(responses)) {
-      return res
-        .status(400)
-        .json({ error: "Missing required field: responses" });
+      return streamError(res, new Error("Missing required field: responses"));
     }
 
     if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({
-        error: isDev
-          ? "GEMINI_API_KEY not configured. Add it to Vercel environment variables."
-          : "API configuration error",
-      });
+      return streamError(res, new Error("GEMINI_API_KEY is not configured"));
     }
+
+    sendStreamEvent(res, {
+      type: "progress",
+      message: `Analyzing your performance on ${testTitle || "this test"}...`,
+    });
 
     // ---- Build prompt with full test data ----
     // Gemini 1.5 Flash handles 1M tokens — no chunking/batching needed
@@ -368,6 +367,11 @@ export default async function handler(
       `[analyze-performance] Analyzing "${testTitle}" — ${questions.length} questions, score ${totalScore}/${maxScore}`
     );
 
+    sendStreamEvent(res, {
+      type: "progress",
+      message: "Identifying weak areas and strong concepts...",
+    });
+
     // ---- Call Gemini ----
     const analysis = await analyzeWithGemini(prompt);
 
@@ -377,11 +381,20 @@ export default async function handler(
       `projection ${analysis.marksProjection.currentScore} → ${analysis.marksProjection.potentialScore}`
     );
 
-    return res.status(200).json(analysis);
+    sendStreamEvent(res, {
+      type: "progress",
+      message: "Generating personalized study recommendations...",
+    });
+
+    // Send the complete analysis
+    sendStreamEvent(res, {
+      type: "complete",
+      data: analysis,
+    });
+
+    endStreaming(res);
   } catch (error) {
     console.error("[analyze-performance] Unhandled error:", error);
-    return res.status(500).json({
-      error: isDev ? String(error) : "Failed to analyze performance",
-    });
+    streamError(res, error);
   }
 }
