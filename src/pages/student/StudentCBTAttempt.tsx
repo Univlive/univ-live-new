@@ -1165,27 +1165,37 @@ export default function StudentCBTAttempt() {
         </SheetContent>
       </Sheet>
 
-      {/* ─── PROCTORING VIOLATION MODAL ─── */}
+      {/* ─── PROCTORING VIOLATION WARNING MODAL ─── */}
       {violationModalOpen && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, backdropFilter: "blur(4px)" }}>
-          <div style={{ width: "100%", maxWidth: 450, borderRadius: 12, background: "#fff", boxShadow: "0 10px 50px rgba(0,0,0,0.3)", overflow: "hidden", textAlign: "center", padding: "40px 30px" }}>
-            <div style={{ color: "#dc2626", marginBottom: 20 }}>
-              <AlertTriangle size={70} style={{ margin: "0 auto" }} />
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, backdropFilter: "blur(5px)" }}>
+          <div style={{ width: "100%", maxWidth: 480, borderRadius: 16, background: "#fff", boxShadow: "0 20px 60px rgba(0,0,0,0.4)", overflow: "hidden", textAlign: "center", padding: "35px 25px" }}>
+            <div style={{ color: "#f59e0b", marginBottom: 20 }}>
+              <AlertTriangle size={64} style={{ margin: "0 auto" }} />
             </div>
-            <h2 style={{ fontSize: 24, fontWeight: 800, color: "#111827", marginBottom: 12 }}>Test Terminated!</h2>
-            <p style={{ fontSize: 16, color: "#4b5563", marginBottom: 30, lineHeight: 1.6 }}>
-              A proctoring violation was detected (Tab Switch or Full-screen Exit). <br />
-              <strong>As per the rules, your test is being automatically submitted.</strong>
+            <h2 style={{ fontSize: 22, fontWeight: 800, color: "#111827", marginBottom: 12 }}>Proctoring Warning!</h2>
+            <p style={{ fontSize: 15, color: "#4b5563", marginBottom: 28, lineHeight: 1.6 }}>
+              You have left the test environment (Tab Switch or Full-screen Exit). <br />
+              This is a violation of the test rules. <br /><br />
+              <strong>Do you want to submit and exit the test?</strong>
             </p>
-            <div style={{ display: "flex", justifyContent: "center" }}>
+            <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
               <button
                 onClick={() => {
                   handleSubmit(true);
                   setViolationModalOpen(false);
                 }}
-                style={{ padding: "12px 40px", background: "#1e3a8a", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 16, cursor: "pointer", boxShadow: "0 4px 10px rgba(30,58,138,0.3)" }}
+                style={{ flex: 1, padding: "12px 20px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer", boxShadow: "0 4px 10px rgba(239,68,68,0.2)" }}
               >
-                OK
+                Yes, Submit &amp; Exit
+              </button>
+              <button
+                onClick={async () => {
+                  await requestFullscreenSafe();
+                  setViolationModalOpen(false);
+                }}
+                style={{ flex: 1, padding: "12px 20px", background: "#1e3a8a", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer", boxShadow: "0 4px 10px rgba(30,58,138,0.2)" }}
+              >
+                No, Return to Test
               </button>
             </div>
           </div>
