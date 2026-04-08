@@ -21,7 +21,7 @@ import {
   normalizeImportedItem,
   type ImportedQuestionItem,
 } from "../_lib/pdfQuestionImport.js";
-import { initializeStreaming, sendStreamEvent, endStreaming, streamError } from "../_lib/aiStreamingUtils";
+import { initializeStreaming, sendStreamEvent, endStreaming, streamError } from "../_lib/aiStreamingUtils.js";
 import ImageKit from "imagekit";
 
 // ---------------------------------------------------------------------------
