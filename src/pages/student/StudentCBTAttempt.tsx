@@ -162,6 +162,10 @@ export default function StudentCBTAttempt() {
 
   const [mobilePaletteOpen, setMobilePaletteOpen] = useState(false);
 
+  // Proctoring state
+  const [exitCount, setExitCount] = useState(0);
+  const [warningModalOpen, setWarningModalOpen] = useState(false);
+
   const attemptIdStorageKey = useMemo(
     () => `${LS_ATTEMPT_ID_PREFIX}${tenantSlug || "main"}__${testId || ""}`,
     [tenantSlug, testId]
@@ -634,6 +638,63 @@ export default function StudentCBTAttempt() {
     await handleSubmit(true);
   };
 
+  // Proctoring: Prevent copy, cut, paste, context menu
+  useEffect(() => {
+    if (!isStarted) return;
+
+    const preventDefault = (e: Event) => e.preventDefault();
+    
+    document.addEventListener("copy", preventDefault);
+    document.addEventListener("cut", preventDefault);
+    document.addEventListener("paste", preventDefault);
+    document.addEventListener("contextmenu", preventDefault);
+
+    return () => {
+      document.removeEventListener("copy", preventDefault);
+      document.removeEventListener("cut", preventDefault);
+      document.removeEventListener("paste", preventDefault);
+      document.removeEventListener("contextmenu", preventDefault);
+    };
+  }, [isStarted]);
+
+  // Proctoring: Tab switch & Full-screen exit logic
+  useEffect(() => {
+    if (!isStarted) return;
+
+    const handleViolation = () => {
+      setExitCount((prev) => {
+        const next = prev + 1;
+        if (next >= 3) {
+          handleSubmit(true);
+          return next;
+        }
+        setWarningModalOpen(true);
+        return next;
+      });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        handleViolation();
+      }
+    };
+
+    const handleFullscreenChange = () => {
+      // If user exits fullscreen AND they are not currently in instructions or submitting or already warned
+      if (!document.fullscreenElement && isStarted && !submitDialogOpen && !warningModalOpen && !instructionsOpen) {
+        handleViolation();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, [isStarted, submitDialogOpen, warningModalOpen, instructionsOpen, handleSubmit]);
+
   // Warn on reload/close while started
   useEffect(() => {
     if (!isStarted) return;
@@ -771,13 +832,14 @@ export default function StudentCBTAttempt() {
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 100, // Lowered from 99999
+        zIndex: 100,
         height: "100dvh",
         background: "#f3f4f6",
         fontFamily: "Arial, sans-serif",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
+        userSelect: "none", // Prevent text selection
       }}
     >
       {/* ─── INSTRUCTIONS GATE ─── */}
@@ -855,7 +917,7 @@ export default function StudentCBTAttempt() {
           {testMeta.title}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ fontSize: 12, background: "rgba(255,255,255,0.15)", padding: "3px 10px", borderRadius: 20, whiteSpace: "nowrap" }}>
+          <div style={{  fontSize: 12, background: "rgba(255,255,255,0.15)", padding: "3px 10px", borderRadius: 20, whiteSpace: "nowrap" }}>
             {isStarted ? (
               <TimerChip key={timerKey} initialSeconds={timerStartSeconds} onTimeUp={handleTimeUp} />
             ) : (
@@ -1100,6 +1162,39 @@ export default function StudentCBTAttempt() {
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* ─── PROCTORING WARNING MODAL ─── */}
+      {warningModalOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ width: "100%", maxWidth: 450, borderRadius: 12, background: "#fff", boxShadow: "0 10px 50px rgba(0,0,0,0.3)", overflow: "hidden", textAlign: "center", padding: "30px 20px" }}>
+            <div style={{ color: "#dc2626", marginBottom: 16 }}>
+              <AlertTriangle size={60} style={{ margin: "0 auto" }} />
+            </div>
+            <h2 style={{ fontSize: 20, fontWeight: 700, color: "#111827", marginBottom: 10 }}>Proctoring Violation</h2>
+            <p style={{ fontSize: 15, color: "#4b5563", marginBottom: 24, lineHeight: 1.5 }}>
+              Warning! You have left the test environment.<br />
+              <strong>Violation {exitCount}/3.</strong>
+            </p>
+            <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+              <button
+                onClick={() => setWarningModalOpen(false)}
+                style={{ padding: "10px 20px", background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}
+              >
+                Okay
+              </button>
+              <button
+                onClick={async () => {
+                  await requestFullscreenSafe();
+                  setWarningModalOpen(false);
+                }}
+                style={{ padding: "10px 20px", background: "#1e3a8a", color: "#fff", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}
+              >
+                Return to Test
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ─── SUBMIT DIALOG ─── */}
       {submitDialogOpen && (
