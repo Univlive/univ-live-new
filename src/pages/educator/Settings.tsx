@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "@/hooks/use-toast";
+import { stringToColor } from "@/lib/utils";
 
 import {
   onAuthStateChanged,
@@ -56,23 +57,20 @@ type EducatorProfileDoc = {
 
 export default function Settings() {
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const { refreshProfile } = useAuth();
+  const { firebaseUser, profile, loading: authLoading, refreshProfile } = useAuth();
 
-  const [uid, setUid] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  // Profile fields
-  const [fullName, setFullName] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [email, setEmail] = useState("");
+  // Profile fields. Initialize from profile.
+  const [fullName, setFullName] = useState(profile?.fullName || "");
+  const [displayName, setDisplayName] = useState(profile?.displayName || "");
+  const [email, setEmail] = useState(profile?.email || firebaseUser?.email || "");
   const [phone, setPhone] = useState("");
-  const [photoURL, setPhotoURL] = useState<string>("");
+  const [photoURL, setPhotoURL] = useState<string>(profile?.photoURL || "");
 
   const [savingProfile, setSavingProfile] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   // Subdomain / slug
-  const [tenantSlug, setTenantSlug] = useState("");
+  const [tenantSlug, setTenantSlug] = useState(profile?.tenantSlug || "");
   const [newTenantSlug, setNewTenantSlug] = useState("");
   const [changingSlug, setChangingSlug] = useState(false);
 
@@ -103,48 +101,43 @@ export default function Settings() {
   });
   const [savingPrefs, setSavingPrefs] = useState(false);
 
-  // Auth bootstrap + load profile
+  // Sync local state with AuthProvider's profile
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      setUid(u?.uid ?? null);
+    if (profile) {
+      setFullName(profile.fullName || "");
+      setDisplayName(profile.displayName || "");
+      setEmail(profile.email || firebaseUser?.email || "");
+      setPhotoURL(profile.photoURL || "");
+      setTenantSlug(profile.tenantSlug || "");
+    }
+  }, [profile, firebaseUser]);
 
-      if (!u) {
-        setLoading(false);
-        return;
-      }
+  // Load phone and notifications separately as they aren't in AuthProvider profile yet
+  useEffect(() => {
+    const uid = firebaseUser?.uid;
+    if (!uid) return;
 
-      setLoading(true);
+    const loadExtraData = async () => {
       try {
-        const profileRef = doc(db, "educators", u.uid);
+        const profileRef = doc(db, "educators", uid);
         const snap = await getDoc(profileRef);
-        const data = (snap.exists() ? (snap.data() as EducatorProfileDoc) : {}) || {};
-
-        setEmail(u.email || "");
-        setFullName(data.fullName || u.displayName || "");
-        setDisplayName(data.displayName || u.displayName || "");
+        const data = snap.exists() ? (snap.data() as EducatorProfileDoc) : {};
+        
         setPhone(data.phone || "");
-        setPhotoURL(data.photoURL || u.photoURL || "");
-        setTenantSlug(data.tenantSlug || "");
-
-        const n = data.prefs?.notifications;
-        setNotifications({
-          email: n?.email ?? true,
-          sms: n?.sms ?? false,
-          push: n?.push ?? true,
-        });
-      } catch {
-        toast({
-          title: "Failed to load settings",
-          description: "Please refresh and try again.",
-          variant: "destructive",
-        });
-      } finally {
-        setLoading(false);
+        if (data.prefs?.notifications) {
+          setNotifications({
+            email: data.prefs.notifications.email ?? true,
+            sms: data.prefs.notifications.sms ?? false,
+            push: data.prefs.notifications.push ?? true,
+          });
+        }
+      } catch (e) {
+        console.error("Failed to load extra settings", e);
       }
-    });
+    };
 
-    return () => unsub();
-  }, []);
+    loadExtraData();
+  }, [firebaseUser?.uid]);
 
   const initials = (displayName || fullName || "U")
     .split(" ")
@@ -158,7 +151,7 @@ export default function Settings() {
   }
 
   async function handleUploadPhoto(file: File) {
-    if (!uid) return;
+    if (!firebaseUser?.uid) return;
 
     if (file.size > 2 * 1024 * 1024) {
       toast({
@@ -171,7 +164,7 @@ export default function Settings() {
 
     setUploadingPhoto(true);
     try {
-      const path = `educators/${uid}/profile/avatar_${Date.now()}`;
+      const path = `educators/${firebaseUser.uid}/profile/avatar_${Date.now()}`;
       const storageRef = ref(storage, path);
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
@@ -181,12 +174,12 @@ export default function Settings() {
         await updateProfile(auth.currentUser, { photoURL: url });
       }
       await setDoc(
-        doc(db, "educators", uid),
+        doc(db, "educators", firebaseUser.uid),
         { photoURL: url, updatedAt: serverTimestamp() },
         { merge: true }
       );
 
-      setPhotoURL(url);
+      await refreshProfile();
 
       toast({
         title: "Photo updated",
@@ -204,7 +197,7 @@ export default function Settings() {
   }
 
   async function saveProfile() {
-    if (!uid || !auth.currentUser) return;
+    if (!firebaseUser?.uid || !auth.currentUser) return;
 
     if (!fullName.trim() || !displayName.trim()) {
       toast({
@@ -223,7 +216,7 @@ export default function Settings() {
       });
 
       await setDoc(
-        doc(db, "educators", uid),
+        doc(db, "educators", firebaseUser.uid),
         {
           fullName: fullName.trim(),
           displayName: displayName.trim(),
@@ -233,6 +226,8 @@ export default function Settings() {
         },
         { merge: true }
       );
+
+      await refreshProfile();
 
       toast({
         title: "Saved",
@@ -250,7 +245,7 @@ export default function Settings() {
   }
 
   async function updateSubdomainSlug() {
-    if (!auth.currentUser || !uid) return;
+    if (!auth.currentUser || !firebaseUser?.uid) return;
 
     const slug = previewSlug;
 
@@ -302,12 +297,12 @@ export default function Settings() {
   }
 
   async function saveNotificationPrefs() {
-    if (!uid) return;
+    if (!firebaseUser?.uid) return;
 
     setSavingPrefs(true);
     try {
       await setDoc(
-        doc(db, "educators", uid),
+        doc(db, "educators", firebaseUser.uid),
         {
           prefs: {
             notifications: {
@@ -418,7 +413,7 @@ export default function Settings() {
     }
   }
 
-  if (loading) {
+  if (authLoading) {
     return (
       <div className="flex items-center justify-center py-20 text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -427,7 +422,7 @@ export default function Settings() {
     );
   }
 
-  if (!uid) {
+  if (!firebaseUser) {
     return (
       <div className="p-6 rounded-2xl border border-dashed border-border text-center text-muted-foreground">
         Please login as educator to access Settings.
@@ -455,10 +450,10 @@ export default function Settings() {
           <CardContent className="space-y-6">
             <div className="flex items-center gap-4">
               <Avatar className="h-20 w-20">
-                <AvatarImage
-                  src={photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=educator"}
-                />
-                <AvatarFallback>{initials}</AvatarFallback>
+                {profile?.photoURL && <AvatarImage src={profile.photoURL} />}
+                <AvatarFallback style={{ backgroundColor: stringToColor(initials) }}>
+                  {initials}
+                </AvatarFallback>
               </Avatar>
 
               <div>
@@ -711,9 +706,12 @@ export default function Settings() {
             <CardTitle className="text-base flex items-center gap-2">
               <Bell className="h-5 w-5" />
               Notification Preferences
+              <p className="text-xl text-red-700">
+                (Coming soon) 
+              </p>
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-6">
+          <CardContent className="space-y-6 blur-sm">
             <div className="space-y-4">
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -723,9 +721,7 @@ export default function Settings() {
                   </div>
                   <Switch
                     checked={notifications.email}
-                    onCheckedChange={(checked) =>
-                      setNotifications({ ...notifications, email: checked })
-                    }
+                    
                   />
                 </div>
 
@@ -736,9 +732,7 @@ export default function Settings() {
                   </div>
                   <Switch
                     checked={notifications.sms}
-                    onCheckedChange={(checked) =>
-                      setNotifications({ ...notifications, sms: checked })
-                    }
+                    
                   />
                 </div>
 
@@ -749,9 +743,7 @@ export default function Settings() {
                   </div>
                   <Switch
                     checked={notifications.push}
-                    onCheckedChange={(checked) =>
-                      setNotifications({ ...notifications, push: checked })
-                    }
+                    
                   />
                 </div>
               </div>
@@ -771,7 +763,7 @@ export default function Settings() {
         </Card>
       </motion.div>
 
-      {/* Security Section */}
+      {/* Security Section
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -826,7 +818,7 @@ export default function Settings() {
             </div>
           </CardContent>
         </Card>
-      </motion.div>
+      </motion.div> */}
 
       {/* Danger Zone */}
       <motion.div
@@ -904,4 +896,3 @@ export default function Settings() {
     </div>
   );
 }
-

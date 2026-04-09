@@ -27,7 +27,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
+import { cn, stringToColor } from "@/lib/utils";
 import univLogo from "@/assets/univ-logo-1.png";
 import { useAuth } from "@/contexts/AuthProvider";
 import { signOut } from "firebase/auth";
@@ -53,14 +53,16 @@ export default function EducatorLayout() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const { firebaseUser, profile } = useAuth();
+  const { profile } = useAuth();
 
-  const educatorName = profile?.displayName || firebaseUser?.displayName || "Educator";
-  const educatorEmail = profile?.email || firebaseUser?.email || "No email";
+  const educatorName = profile?.displayName || profile?.fullName || "Educator";
+  const educatorEmail = profile?.email || "No email";
   const tenantSlug = profile?.tenantSlug || "";
+  const photoURL = profile?.photoURL;
+  const userInitials = initials(educatorName);
 
   useEffect(() => {
-    const uid = firebaseUser?.uid;
+    const uid = profile?.uid;
     if (!uid) {
       setUnreadMessages(0);
       return;
@@ -81,7 +83,7 @@ export default function EducatorLayout() {
     );
 
     return () => unsub();
-  }, [firebaseUser?.uid]);
+  }, [profile?.uid]);
 
   const sidebarItems = useMemo<SidebarItem[]>(
     () => [
@@ -223,8 +225,10 @@ export default function EducatorLayout() {
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="flex items-center gap-2 px-2">
                   <Avatar className="h-8 w-8">
-                    <AvatarImage src={firebaseUser?.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=educator"} />
-                    <AvatarFallback>{initials(educatorName)}</AvatarFallback>
+                    {photoURL && <AvatarImage src={photoURL} />}
+                    <AvatarFallback style={{ backgroundColor: stringToColor(userInitials) }}>
+                      {userInitials}
+                    </AvatarFallback>
                   </Avatar>
                   <span className="hidden sm:block text-sm font-medium">{educatorName}</span>
                 </Button>

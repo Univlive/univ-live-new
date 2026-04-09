@@ -161,6 +161,7 @@ export default function StudentCBTAttempt() {
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [timerStartSeconds, setTimerStartSeconds] = useState(0);
 
+  const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [mobilePaletteOpen, setMobilePaletteOpen] = useState(false);
 
   // Proctoring state
@@ -387,11 +388,14 @@ export default function StudentCBTAttempt() {
     }
   }, [loading, authLoading, tenantLoading, isStarted, testId]);
 
-// Keep section in sync
+// Keep section in sync and load saved answer into local state
   useEffect(() => {
     const q = questions[currentIndex];
-    if (q?.sectionId) setCurrentSectionId(q.sectionId);
-  }, [questions, currentIndex]);
+    if (q) {
+      if (q.sectionId) setCurrentSectionId(q.sectionId);
+      setSelectedAnswer(responses[q.id]?.answer || null);
+    }
+  }, [questions, currentIndex, responses]);
 
   // Mark visited (only after started)
   useEffect(() => {
@@ -504,19 +508,69 @@ export default function StudentCBTAttempt() {
     }
   };
 
-  const handleAnswer = (answer: string) => {
-    if (!currentQuestion || !attemptId) return;
+  const handleSelectOption = (answer: string) => {
+    if (!currentQuestion || !isStarted) return;
+    setSelectedAnswer(answer);
+  };
 
+  const handleSaveAndNext = () => {
+    if (!currentQuestion || !attemptId || !isStarted) return;
+    
+    const answer = selectedAnswer;
     setResponses((prev) => ({
       ...prev,
-      [currentQuestion.id]: { ...prev[currentQuestion.id], answer, answered: String(answer).length > 0 },
+      [currentQuestion.id]: { 
+        ...prev[currentQuestion.id], 
+        answer, 
+        answered: String(answer).length > 0,
+        markedForReview: false 
+      },
     }));
 
     queueAttemptUpdate({
       [`responses.${currentQuestion.id}.answer`]: answer,
       [`responses.${currentQuestion.id}.answered`]: String(answer).length > 0,
+      [`responses.${currentQuestion.id}.markedForReview`]: false,
       currentIndex,
     });
+    
+    goToIndex(currentIndex + 1);
+  };
+
+  const handleSaveAndMarkForReview = () => {
+    if (!currentQuestion || !attemptId || !isStarted) return;
+    
+    const answer = selectedAnswer;
+    setResponses((prev) => ({
+      ...prev,
+      [currentQuestion.id]: { 
+        ...prev[currentQuestion.id], 
+        answer, 
+        answered: String(answer).length > 0,
+        markedForReview: true 
+      },
+    }));
+
+    queueAttemptUpdate({
+      [`responses.${currentQuestion.id}.answer`]: answer,
+      [`responses.${currentQuestion.id}.answered`]: String(answer).length > 0,
+      [`responses.${currentQuestion.id}.markedForReview`]: true,
+      currentIndex,
+    });
+    
+    goToIndex(currentIndex + 1);
+  };
+
+  const handleMarkForReviewAndNext = () => {
+    if (!currentQuestion || !attemptId || !isStarted) return;
+    
+    setResponses((prev) => ({
+      ...prev,
+      [currentQuestion.id]: { ...prev[currentQuestion.id], markedForReview: true },
+    }));
+
+    queueAttemptUpdate({ [`responses.${currentQuestion.id}.markedForReview`]: true, currentIndex });
+    goToIndex(currentIndex + 1);
   };
 
   const handleMarkForReview = () => {
@@ -534,14 +588,16 @@ export default function StudentCBTAttempt() {
   const handleClearResponse = () => {
     if (!currentQuestion || !attemptId) return;
 
+    setSelectedAnswer(null);
     setResponses((prev) => ({
       ...prev,
-      [currentQuestion.id]: { ...prev[currentQuestion.id], answer: null, answered: false },
+      [currentQuestion.id]: { ...prev[currentQuestion.id], answer: null, answered: false, markedForReview: false },
     }));
 
     queueAttemptUpdate({
       [`responses.${currentQuestion.id}.answer`]: null,
       [`responses.${currentQuestion.id}.answered`]: false,
+      [`responses.${currentQuestion.id}.markedForReview`]: false,
       currentIndex,
     });
   };
@@ -1008,7 +1064,7 @@ export default function StudentCBTAttempt() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: "#6b7280", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Options :</div>
                   {currentQuestion.options.map((option, i) => {
-                    const isSelected = responses[currentQuestion.id]?.answer === option.id;
+                    const isSelected = selectedAnswer === option.id;
                     return (
                       <label
                         key={option.id}
@@ -1031,7 +1087,7 @@ export default function StudentCBTAttempt() {
                           value={option.id}
                           checked={isSelected}
                           disabled={!isStarted}
-                          onChange={() => handleAnswer(option.id)}
+                          onChange={() => handleSelectOption(option.id)}
                           style={{ marginTop: 2, accentColor: "#1e3a8a", cursor: isStarted ? "pointer" : "not-allowed" }}
                         />
                         <span style={{ fontSize: 13, color: "#1f2937", lineHeight: 1.6 }}>
@@ -1051,8 +1107,8 @@ export default function StudentCBTAttempt() {
                   <input
                     type="number"
                     placeholder="Enter integer answer"
-                    value={responses[currentQuestion.id]?.answer || ""}
-                    onChange={(e) => handleAnswer(e.target.value)}
+                    value={selectedAnswer || ""}
+                    onChange={(e) => handleSelectOption(e.target.value)}
                     disabled={!isStarted}
                     style={{ padding: "8px 12px", border: "1.5px solid #d1d5db", borderRadius: 5, fontSize: 14, width: 200, outline: "none" }}
                   />
@@ -1065,7 +1121,7 @@ export default function StudentCBTAttempt() {
           <div style={{ flexShrink: 0, borderTop: "1px solid #e5e7eb", background: "#f9fafb", padding: "8px 12px", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
             {/* Save & Next */}
             <button
-              onClick={() => { if (responses[currentQuestion.id]?.answer) goToIndex(currentIndex + 1); else goToIndex(currentIndex + 1); }}
+              onClick={handleSaveAndNext}
               disabled={!isStarted}
               style={{ background: isStarted ? "#22c55e" : "#9ca3af", color: "#fff", border: "none", borderRadius: 4, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
             >
@@ -1083,7 +1139,7 @@ export default function StudentCBTAttempt() {
 
             {/* Save & Mark for Review */}
             <button
-              onClick={() => { handleMarkForReview(); goToIndex(currentIndex + 1); }}
+              onClick={handleSaveAndMarkForReview}
               disabled={!isStarted}
               style={{ background: isStarted ? "#7c3aed" : "#9ca3af", color: "#fff", border: "none", borderRadius: 4, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
             >
@@ -1092,7 +1148,7 @@ export default function StudentCBTAttempt() {
 
             {/* Mark for Review & Next */}
             <button
-              onClick={() => { handleMarkForReview(); goToIndex(currentIndex + 1); }}
+              onClick={handleMarkForReviewAndNext}
               disabled={!isStarted}
               style={{ background: isStarted ? "#2563eb" : "#9ca3af", color: "#fff", border: "none", borderRadius: 4, padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
             >

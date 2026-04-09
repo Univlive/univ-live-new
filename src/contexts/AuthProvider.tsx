@@ -10,10 +10,12 @@ export type AppUserProfile = {
   uid: string;
   role: UserRole;
   educatorId?: string;
-  tenantSlug?: string;         // legacy
-  enrolledTenants?: string[];  // preferred
+  tenantSlug?: string;
+  enrolledTenants?: string[];
   displayName?: string;
   email?: string;
+  photoURL?: string;
+  fullName?: string;
 };
 
 type AuthContextValue = {
@@ -29,11 +31,11 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 async function loadProfile(uid: string): Promise<AppUserProfile | null> {
-  const ref = doc(db, "users", uid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) return null;
+  const userRef = doc(db, "users", uid);
+  const userSnap = await getDoc(userRef);
+  if (!userSnap.exists()) return null;
 
-  const data: any = snap.data() || {};
+  const data: any = userSnap.data() || {};
   const rawRole = String(data.role || "STUDENT").toUpperCase();
   const role: UserRole = rawRole === "ADMIN" || rawRole === "EDUCATOR" ? rawRole : "STUDENT";
 
@@ -41,7 +43,7 @@ async function loadProfile(uid: string): Promise<AppUserProfile | null> {
   if (Array.isArray(data.enrolledTenants)) enrolledTenants = data.enrolledTenants;
   else if (typeof data.tenantSlug === "string") enrolledTenants = [data.tenantSlug];
 
-  return {
+  const profile: AppUserProfile = {
     uid,
     role,
     educatorId: typeof data.educatorId === "string" ? data.educatorId : undefined,
@@ -50,6 +52,19 @@ async function loadProfile(uid: string): Promise<AppUserProfile | null> {
     displayName: typeof data.displayName === "string" ? data.displayName : undefined,
     email: typeof data.email === "string" ? data.email : undefined,
   };
+
+  if (role === "EDUCATOR") {
+    const educatorRef = doc(db, "educators", uid);
+    const educatorSnap = await getDoc(educatorRef);
+    if (educatorSnap.exists()) {
+      const educatorData = educatorSnap.data();
+      profile.displayName = educatorData.displayName || profile.displayName;
+      profile.fullName = educatorData.fullName;
+      profile.photoURL = educatorData.photoURL;
+    }
+  }
+
+  return profile;
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
