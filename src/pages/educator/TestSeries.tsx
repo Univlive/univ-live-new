@@ -885,7 +885,6 @@ function QuestionsManager({
         importAbortControllerRef.current.signal,
         // Callback to add questions in real-time as they're detected
         (newQuestions, pageNum) => {
-          console.log(`[PDF Import] Adding ${newQuestions.length} questions from page ${pageNum}`);
           setImportItems((prev) => [...prev, ...newQuestions]);
         }
       );

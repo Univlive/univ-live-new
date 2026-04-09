@@ -296,10 +296,6 @@ export default async function handler(
       studentCount
     );
 
-    console.log(
-      `[generate-website-content] Generating content for "${coachingName}" — subjects: ${subjects.join(", ")}`
-    );
-
     sendStreamEvent(res, {
       type: "progress",
       message: `Generating creative content for ${subjects.join(", ")}...`,
@@ -307,13 +303,6 @@ export default async function handler(
 
     // ---- Call Gemini ----
     const content = await generateWithGemini(prompt);
-
-    console.log(
-      `[generate-website-content] Generated: ${content.stats?.length || 0} stats, ` +
-      `${content.achievements?.length || 0} achievements, ` +
-      `${content.testimonials?.length || 0} testimonials, ` +
-      `${content.faculty?.length || 0} faculty`
-    );
 
     sendStreamEvent(res, {
       type: "progress",

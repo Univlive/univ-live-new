@@ -191,7 +191,6 @@ export async function importQuestionsFromPdf(
   for (let pageNum = 1; pageNum <= numPages; pageNum++) {
     // Add delay before processing (except for first page)
     if (pageNum > 1) {
-      console.log(`[importQuestionsFromPdf] Waiting ${backoffDelay}ms before page ${pageNum}...`);
       await delayMs(backoffDelay);
     }
 

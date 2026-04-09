@@ -133,15 +133,12 @@ export function getAdmin() {
         throw new Error("Service account JSON missing project_id field");
       }
 
-      console.log("[firebaseAdmin] Service account loaded for project:", serviceAccount.project_id);
-
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount as admin.ServiceAccount),
         storageBucket: process.env.FIREBASE_STORAGE_BUCKET || undefined,
       });
 
       inited = true;
-      console.log("[firebaseAdmin] ✅ Firebase admin initialized successfully");
     } catch (e: any) {
       const msg = e?.message || String(e);
       console.error("[firebaseAdmin] ❌ Initialization failed:", msg);

@@ -21,14 +21,11 @@ export async function requireUser(
     if (!token) {
       throw new Error("Missing Authorization token");
     }
-
-    console.log("[requireUser] Verifying token...");
     
     const admin = getAdmin();
     let decoded;
     try {
       decoded = await admin.auth().verifyIdToken(token);
-      console.log("[requireUser] ✅ Token verified for user:", decoded.uid);
     } catch (tokenErr: any) {
       const tokenMsg = tokenErr?.message || String(tokenErr);
       console.error("[requireUser] ❌ Token verification failed:", tokenMsg);
@@ -52,14 +49,10 @@ export async function requireUser(
     const role: AppRole =
       rawRole === "ADMIN" || rawRole === "EDUCATOR" ? (rawRole as AppRole) : "STUDENT";
 
-    console.log("[requireUser] User role:", role);
-
     if (opts?.roles?.length && !opts.roles.includes(role)) {
       console.error("[requireUser] ❌ Forbidden: user role", role, "not in allowed roles", opts.roles);
       throw new Error("Forbidden");
     }
-
-    console.log("[requireUser] ✅ Authorization granted for user:", decoded.uid);
 
     return {
       uid: decoded.uid,
