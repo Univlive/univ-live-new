@@ -16,19 +16,32 @@ import {
   CheckCircle2,
   FileUp,
   XCircle,
+  Folder,
+  FolderPlus,
+  ChevronRight,
+  ChevronDown,
+  MoreVertical,
+  Move,
 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 import EmptyState from "@/components/educator/EmptyState";
 import AiQuestionImportOverlay from "@/components/educator/AiQuestionImportOverlay";
@@ -179,6 +192,7 @@ export default function TestSeries() {
   // Data
   const [myTests, setMyTests] = useState<any[]>([]);
   const [bankTests, setBankTests] = useState<any[]>([]);
+  const [folders, setFolders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // UI
@@ -191,6 +205,14 @@ export default function TestSeries() {
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
 
+  // Folder UI state
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [folderCreating, setFolderCreating] = useState(false);
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+  const [moveTestOpen, setMoveTestOpen] = useState(false);
+  const [testToMove, setTestToMove] = useState<any>(null);
+
   // Auth + Data
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, (user) => {
@@ -201,6 +223,19 @@ export default function TestSeries() {
       }
 
       setCurrentUser(user);
+
+      // FOLDERS: educators/{uid}/folders
+      const foldersQ = query(collection(db, "educators", user.uid, "folders"));
+      const unsubFolders = onSnapshot(
+        foldersQ,
+        (snap) => {
+          const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          setFolders(rows);
+        },
+        () => {
+          toast.error("Failed to load folders.");
+        }
+      );
 
       // MY tests: educators/{uid}/my_tests
       const myTestsQ = query(collection(db, "educators", user.uid, "my_tests"));
@@ -236,6 +271,7 @@ export default function TestSeries() {
       );
 
       return () => {
+        unsubFolders();
         unsubMy();
         unsubBank();
       };
@@ -244,22 +280,162 @@ export default function TestSeries() {
     return () => unsubAuth();
   }, []);
 
-  const filteredMyTests = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return myTests;
-    return myTests.filter((t) => {
-      const hay = `${t.title || ""} ${t.description || ""} ${t.subject || ""} ${t.level || ""}`.toLowerCase();
-      return hay.includes(q);
-    });
-  }, [myTests, search]);
+  const handleCreateFolder = async () => {
+    if (!currentUser || !newFolderName.trim()) return;
+    setFolderCreating(true);
+    try {
+      await addDoc(collection(db, "educators", currentUser.uid, "folders"), {
+        name: newFolderName.trim(),
+        createdAt: serverTimestamp(),
+      });
+      toast.success("Folder created");
+      setNewFolderName("");
+      setCreateFolderOpen(false);
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed to create folder");
+    } finally {
+      setFolderCreating(false);
+    }
+  };
 
-  const filteredBankTests = useMemo(() => {
+  const handleMoveTest = async (testId: string, folderId: string | null) => {
+    if (!currentUser) return;
+    try {
+      await updateDoc(doc(db, "educators", currentUser.uid, "my_tests", testId), {
+        folderId: folderId,
+        updatedAt: serverTimestamp(),
+      });
+      toast.success("Moved successfully");
+      setMoveTestOpen(false);
+      setTestToMove(null);
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed to move test");
+    }
+  };
+
+  const handleDeleteFolder = async (folderId: string) => {
+    if (!currentUser) return;
+    if (!confirm("Delete this folder? Tests inside will be moved to their subject folders or Uncategorized.")) return;
+    try {
+      // 1. Reset folderId for tests in this folder
+      const batch = writeBatch(db);
+      const testsInFolder = myTests.filter(t => t.folderId === folderId);
+      testsInFolder.forEach(t => {
+        batch.update(doc(db, "educators", currentUser.uid, "my_tests", t.id), { folderId: null });
+      });
+      
+      // 2. Delete folder doc
+      batch.delete(doc(db, "educators", currentUser.uid, "folders", folderId));
+      
+      await batch.commit();
+      toast.success("Folder deleted");
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed to delete folder");
+    }
+  };
+
+  const toggleFolder = (folderId: string) => {
+    setExpandedFolders(prev => ({ ...prev, [folderId]: !prev[folderId] }));
+  };
+
+  const normalizeSubjectName = (sub: string) => {
+    const s = sub.trim().toLowerCase();
+    
+    // Exact mapping for requested subjects
+    if (s === "bst" || s === "business studies" || s === "business study") return "Business Studies";
+    if (s === "phy" || s === "physics") return "Physics";
+    if (s === "chem" || s === "chemistry") return "Chemistry";
+    if (s === "math" || s === "maths" || s === "mathematics") return "Maths";
+    if (s === "eng" || s === "english") return "English";
+    if (s === "gt" || s === "general test") return "General Test";
+    if (s === "acc" || s === "accountancy" || s === "accounts") return "Accountancy";
+    if (s === "eco" || s === "economics") return "Economics";
+    if (s === "geo" || s === "geography") return "Geography";
+    if (s === "pol sc" || s === "political science" || s === "polscience" || s === "polity") return "Political Science";
+    if (s === "hist" || s === "history") return "History";
+
+    // Default: Capitalize first letter of each word
+    return sub.trim().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
+  };
+
+  const SUGGESTED_SUBJECTS = [
+    "Physics", "Chemistry", "Maths", "English", "General Test", 
+    "Accountancy", "Business Studies", "Economics", "Geography", 
+    "Political Science", "History"
+  ];
+
+  const groupedTests = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return bankTests;
-    return bankTests.filter((t) => {
+    const filtered = myTests.filter((t) => {
+      if (!q) return true;
       const hay = `${t.title || ""} ${t.description || ""} ${t.subject || ""} ${t.level || ""}`.toLowerCase();
       return hay.includes(q);
     });
+
+    const groups: Record<string, { name: string; type: "custom" | "subject" | "uncategorized", tests: any[] }> = {};
+
+    // 1. Custom Folders (Preserve empty custom folders)
+    folders.forEach(f => {
+      groups[f.id] = { name: f.name, type: "custom", tests: [] };
+    });
+
+    // 2. Pre-create empty folders for main subjects if they have tests or to keep them visible
+    // (Actually, let's only create them if tests exist or user has custom folder with same name)
+    
+    // 3. Distribute Tests
+    filtered.forEach(t => {
+      if (t.folderId && groups[t.folderId]) {
+        groups[t.folderId].tests.push(t);
+      } else if (t.subject) {
+        const normalizedName = normalizeSubjectName(t.subject);
+        const subKey = `subject_${normalizedName.toLowerCase().replace(/\s+/g, "_")}`;
+        if (!groups[subKey]) {
+          groups[subKey] = { name: normalizedName, type: "subject", tests: [] };
+        }
+        groups[subKey].tests.push(t);
+      } else {
+        const unKey = "uncategorized";
+        if (!groups[unKey]) {
+          groups[unKey] = { name: "Uncategorized", type: "uncategorized", tests: [] };
+        }
+        groups[unKey].tests.push(t);
+      }
+    });
+
+    return groups;
+  }, [myTests, folders, search]);
+
+  const groupedBankTests = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const filtered = bankTests.filter((t) => {
+      if (!q) return true;
+      const hay = `${t.title || ""} ${t.description || ""} ${t.subject || ""} ${t.level || ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+
+    const groups: Record<string, { name: string; type: "subject" | "uncategorized", tests: any[] }> = {};
+
+    filtered.forEach(t => {
+      if (t.subject) {
+        const normalizedName = normalizeSubjectName(t.subject);
+        const subKey = `bank_subject_${normalizedName.toLowerCase().replace(/\s+/g, "_")}`;
+        if (!groups[subKey]) {
+          groups[subKey] = { name: normalizedName, type: "subject", tests: [] };
+        }
+        groups[subKey].tests.push(t);
+      } else {
+        const unKey = "bank_uncategorized";
+        if (!groups[unKey]) {
+          groups[unKey] = { name: "Uncategorized", type: "uncategorized", tests: [] };
+        }
+        groups[unKey].tests.push(t);
+      }
+    });
+
+    return groups;
   }, [bankTests, search]);
 
   // Import admin test (metadata + questions) into educator library copy
@@ -472,111 +648,277 @@ export default function TestSeries() {
 
         {/* Library */}
         <TabsContent value="library" className="mt-6">
-          {filteredMyTests.length === 0 ? (
+          <div className="flex justify-end mb-4 gap-2">
+            <Dialog open={createFolderOpen} onOpenChange={setCreateFolderOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" className="rounded-xl border-dashed">
+                  <FolderPlus className="mr-2 h-4 w-4" /> New Folder
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="rounded-2xl">
+                <DialogHeader>
+                  <DialogTitle>Create Folder</DialogTitle>
+                  <DialogDescription>Folders help you organize your tests beyond just subjects.</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label>Folder Name</Label>
+                    <Input
+                      value={newFolderName}
+                      onChange={(e) => setNewFolderName(e.target.value)}
+                      placeholder="e.g. Revision Tests"
+                      className="rounded-xl"
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setCreateFolderOpen(false)}>Cancel</Button>
+                  <Button className="gradient-bg text-white" onClick={handleCreateFolder} disabled={folderCreating}>
+                    {folderCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create Folder"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+
+          {Object.keys(groupedTests).length === 0 ? (
             <EmptyState icon={FileText} title="No tests found" description="Create a custom test or import from the admin bank." />
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredMyTests.map((test) => (
-                <motion.div key={test.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                  <Card className="h-full flex flex-col hover:shadow-md transition-shadow">
-                    <CardHeader>
-                      <CardTitle className="flex justify-between items-start gap-2">
-                        <span className="truncate text-lg">{test.title}</span>
-                        {test.source === "imported" ? (
-                          <Badge variant="secondary" className="text-[10px]">
-                            Imported
-                          </Badge>
-                        ) : (
-                          <Badge className="text-[10px]">Custom</Badge>
-                        )}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="flex-1 flex flex-col gap-4">
-                      <p className="text-sm text-muted-foreground line-clamp-2">{test.description}</p>
-
-                      <div className="flex items-center gap-4 text-xs text-muted-foreground mt-auto">
-                        <span className="flex items-center gap-1">
-                          <BookOpen className="h-3 w-3" /> {test.subject || "—"}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" /> {Number(test.durationMinutes || 0)}m
-                        </span>
+            <div className="space-y-8">
+              {Object.entries(groupedTests).map(([groupId, group]) => {
+                const isExpanded = expandedFolders[groupId] !== false; // default expanded
+                return (
+                  <div key={groupId} className="space-y-4">
+                    <div
+                      className="flex items-center justify-between group cursor-pointer bg-muted/20 p-2 rounded-xl"
+                      onClick={() => toggleFolder(groupId)}
+                    >
+                      <div className="flex items-center gap-2">
+                        {isExpanded ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+                        <Folder className={cn("h-5 w-5", group.type === "custom" ? "text-primary fill-primary/20" : "text-muted-foreground")} />
+                        <h3 className="font-semibold text-lg">{group.name}</h3>
+                        <Badge variant="secondary" className="rounded-full ml-2">
+                          {group.tests.length}
+                        </Badge>
                       </div>
-
-                      <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t">
+                      
+                      {group.type === "custom" && (
                         <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedTest(test);
-                            setIsManageOpen(true);
-                          }}
-                        >
-                          <Edit className="mr-2 h-3 w-3" /> Manage Questions
-                        </Button>
-
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={async () => {
-                            if (!currentUser) return;
-                            if (!confirm("Delete this test and all its questions?")) return;
-                            try {
-                              // delete subcollection questions first (best-effort)
-                              const qs = await getDocs(collection(db, "educators", currentUser.uid, "my_tests", test.id, "questions"));
-                              const batch = writeBatch(db);
-                              qs.forEach((d) => batch.delete(d.ref));
-                              batch.delete(doc(db, "educators", currentUser.uid, "my_tests", test.id));
-                              await batch.commit();
-                              toast.success("Test deleted");
-                            } catch (e) {
-                              console.error(e);
-                              toast.error("Delete failed");
-                            }
+                          variant="ghost"
+                          size="icon"
+                          className="opacity-0 group-hover:opacity-100 rounded-xl text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteFolder(groupId);
                           }}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
+                      )}
+                    </div>
+
+                    {isExpanded && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pl-4">
+                        {group.tests.length === 0 ? (
+                          <p className="text-sm text-muted-foreground py-4 italic col-span-full">No tests in this folder.</p>
+                        ) : (
+                          group.tests.map((test) => (
+                            <motion.div key={test.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                              <Card className="h-full flex flex-col hover:shadow-md transition-shadow relative">
+                                <CardHeader>
+                                  <CardTitle className="flex justify-between items-start gap-2">
+                                    <span className="truncate text-lg">{test.title}</span>
+                                    <div className="flex items-center gap-1">
+                                      <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl">
+                                            <MoreVertical className="h-4 w-4" />
+                                          </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end" className="rounded-xl">
+                                          <DropdownMenuItem onClick={() => {
+                                            setTestToMove(test);
+                                            setMoveTestOpen(true);
+                                          }}>
+                                            <Move className="mr-2 h-4 w-4" /> Move to Folder
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem
+                                            className="text-destructive"
+                                            onClick={async () => {
+                                              if (!currentUser) return;
+                                              if (!confirm("Delete this test and all its questions?")) return;
+                                              try {
+                                                const qs = await getDocs(collection(db, "educators", currentUser.uid, "my_tests", test.id, "questions"));
+                                                const batch = writeBatch(db);
+                                                qs.forEach((d) => batch.delete(d.ref));
+                                                batch.delete(doc(db, "educators", currentUser.uid, "my_tests", test.id));
+                                                await batch.commit();
+                                                toast.success("Test deleted");
+                                              } catch (e) {
+                                                console.error(e);
+                                                toast.error("Delete failed");
+                                              }
+                                            }}
+                                          >
+                                            <Trash2 className="mr-2 h-4 w-4" /> Delete
+                                          </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                      </DropdownMenu>
+                                    </div>
+                                  </CardTitle>
+                                </CardHeader>
+                                <CardContent className="flex-1 flex flex-col gap-4">
+                                  <p className="text-sm text-muted-foreground line-clamp-2">{test.description}</p>
+
+                                  <div className="flex items-center gap-4 text-xs text-muted-foreground mt-auto">
+                                    <span className="flex items-center gap-1">
+                                      <BookOpen className="h-3 w-3" /> {test.subject || "—"}
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                      <Clock className="h-3 w-3" /> {Number(test.durationMinutes || 0)}m
+                                    </span>
+                                    {test.source === "imported" ? (
+                                      <Badge variant="secondary" className="text-[10px] py-0 px-2 h-5">
+                                        Imported
+                                      </Badge>
+                                    ) : (
+                                      <Badge className="text-[10px] py-0 px-2 h-5">Custom</Badge>
+                                    )}
+                                  </div>
+
+                                  <div className="grid grid-cols-1 gap-2 mt-4 pt-4 border-t">
+                                    <Button
+                                      className="gradient-bg text-white rounded-xl shadow-sm"
+                                      size="sm"
+                                      onClick={() => {
+                                        setSelectedTest(test);
+                                        setIsManageOpen(true);
+                                      }}
+                                    >
+                                      <Edit className="mr-2 h-3 w-3" /> Manage Questions
+                                    </Button>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            </motion.div>
+                          ))
+                        )}
                       </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              ))}
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
+
+          {/* Move Test Dialog */}
+          <Dialog open={moveTestOpen} onOpenChange={setMoveTestOpen}>
+            <DialogContent className="rounded-2xl">
+              <DialogHeader>
+                <DialogTitle>Move to Folder</DialogTitle>
+                <DialogDescription>Select a folder to move "{testToMove?.title}" into.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2 py-4">
+                <div
+                  className={cn(
+                    "flex items-center gap-3 p-3 rounded-xl border cursor-pointer hover:bg-accent transition-colors",
+                    !testToMove?.folderId && "border-primary bg-primary/5"
+                  )}
+                  onClick={() => handleMoveTest(testToMove.id, null)}
+                >
+                  <div className="p-2 rounded-lg bg-muted">
+                    <BookOpen className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm">Subject Folder (Default)</p>
+                    <p className="text-xs text-muted-foreground">Move back to auto-subject grouping</p>
+                  </div>
+                </div>
+
+                {folders.map(f => (
+                  <div
+                    key={f.id}
+                    className={cn(
+                      "flex items-center gap-3 p-3 rounded-xl border cursor-pointer hover:bg-accent transition-colors",
+                      testToMove?.folderId === f.id && "border-primary bg-primary/5"
+                    )}
+                    onClick={() => handleMoveTest(testToMove.id, f.id)}
+                  >
+                    <div className="p-2 rounded-lg bg-primary/10">
+                      <Folder className="h-4 w-4 text-primary" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-sm">{f.name}</p>
+                    </div>
+                  </div>
+                ))}
+
+                {folders.length === 0 && (
+                  <p className="text-center text-sm text-muted-foreground py-4 italic">No custom folders created yet.</p>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         {/* Admin Bank */}
         <TabsContent value="bank" className="mt-6">
-          {filteredBankTests.length === 0 ? (
+          {Object.keys(groupedBankTests).length === 0 ? (
             <EmptyState icon={FileText} title="No bank tests found" description="No admin tests are available for import yet." />
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredBankTests.map((test) => (
-                <Card key={test.id} className="bg-muted/30 border-dashed">
-                  <CardHeader>
-                    <CardTitle className="flex justify-between items-start">
-                      <span className="truncate">{test.title}</span>
-                      <Badge variant="outline">Admin</Badge>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <p className="text-sm text-muted-foreground line-clamp-2">{test.description}</p>
-                    <div className="flex gap-2 text-xs text-muted-foreground">
-                      <span>{test.subject || "—"}</span> • <span>{test.level || "—"}</span>
+            <div className="space-y-8">
+              {Object.entries(groupedBankTests).map(([groupId, group]) => {
+                const isExpanded = expandedFolders[groupId] !== false; // default expanded
+                return (
+                  <div key={groupId} className="space-y-4">
+                    <div
+                      className="flex items-center justify-between group cursor-pointer bg-muted/20 p-2 rounded-xl"
+                      onClick={() => toggleFolder(groupId)}
+                    >
+                      <div className="flex items-center gap-2">
+                        {isExpanded ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+                        <Folder className="h-5 w-5 text-muted-foreground" />
+                        <h3 className="font-semibold text-lg">{group.name}</h3>
+                        <Badge variant="secondary" className="rounded-full ml-2">
+                          {group.tests.length}
+                        </Badge>
+                      </div>
                     </div>
-                    <Button className="w-full" disabled={importingId === test.id} onClick={() => handleImport(test)}>
-                      {importingId === test.id ? (
-                        <Loader2 className="animate-spin h-4 w-4" />
-                      ) : (
-                        <>
-                          <Download className="mr-2 h-4 w-4" /> Import to Library
-                        </>
-                      )}
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
+
+                    {isExpanded && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pl-4">
+                        {group.tests.map((test) => (
+                          <Card key={test.id} className="bg-muted/30 border-dashed hover:border-primary transition-colors">
+                            <CardHeader>
+                              <CardTitle className="flex justify-between items-start">
+                                <span className="truncate">{test.title}</span>
+                                <Badge variant="outline">Admin</Badge>
+                              </CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                              <p className="text-sm text-muted-foreground line-clamp-2">{test.description}</p>
+                              <div className="flex gap-2 text-xs text-muted-foreground">
+                                <span className="flex items-center gap-1"><BookOpen className="h-3 w-3" /> {test.subject || "—"}</span>
+                                <span>•</span>
+                                <span>{test.level || "—"}</span>
+                              </div>
+                              <Button className="w-full rounded-xl" disabled={importingId === test.id} onClick={() => handleImport(test)}>
+                                {importingId === test.id ? (
+                                  <Loader2 className="animate-spin h-4 w-4" />
+                                ) : (
+                                  <>
+                                    <Download className="mr-2 h-4 w-4" /> Import to Library
+                                  </>
+                                )}
+                              </Button>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </TabsContent>

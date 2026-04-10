@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Loader2, ShieldOff, ShieldCheck, Search } from "lucide-react";
+import { Loader2, ShieldOff, ShieldCheck, Search, Folder, ChevronDown, ChevronRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -19,6 +19,8 @@ import {
   where,
 } from "firebase/firestore";
 import { TestCard } from "@/components/student/TestCard";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 
 export default function StudentTests() {
   const nav = useNavigate();
@@ -115,11 +117,60 @@ export default function StudentTests() {
     return () => unsub();
   }, [firebaseUser?.uid, educatorId]);
 
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+
+  const toggleFolder = (folderId: string) => {
+    setExpandedFolders((prev) => ({ ...prev, [folderId]: !prev[folderId] }));
+  };
+
+  const normalizeSubjectName = (sub: string) => {
+    const s = sub.trim().toLowerCase();
+    
+    // Exact mapping for requested subjects
+    if (s === "bst" || s === "business studies" || s === "business study") return "Business Studies";
+    if (s === "phy" || s === "physics") return "Physics";
+    if (s === "chem" || s === "chemistry") return "Chemistry";
+    if (s === "math" || s === "maths" || s === "mathematics") return "Maths";
+    if (s === "eng" || s === "english") return "English";
+    if (s === "gt" || s === "general test") return "General Test";
+    if (s === "acc" || s === "accountancy" || s === "accounts") return "Accountancy";
+    if (s === "eco" || s === "economics") return "Economics";
+    if (s === "geo" || s === "geography") return "Geography";
+    if (s === "pol sc" || s === "political science" || s === "polscience" || s === "polity") return "Political Science";
+    if (s === "hist" || s === "history") return "History";
+
+    // Default: Capitalize first letter of each word
+    return sub.trim().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
+  };
+
   const filteredTests = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return tests;
     return tests.filter((t) => (t.title || "").toLowerCase().includes(q) || (t.subject || "").toLowerCase().includes(q));
   }, [tests, search]);
+
+  const groupedTests = useMemo(() => {
+    const groups: Record<string, { name: string; type: "subject" | "uncategorized", tests: any[] }> = {};
+
+    filteredTests.forEach(t => {
+      if (t.subject) {
+        const normalizedName = normalizeSubjectName(t.subject);
+        const subKey = `subject_${normalizedName.toLowerCase().replace(/\s+/g, "_")}`;
+        if (!groups[subKey]) {
+          groups[subKey] = { name: normalizedName, type: "subject", tests: [] };
+        }
+        groups[subKey].tests.push(t);
+      } else {
+        const unKey = "uncategorized";
+        if (!groups[unKey]) {
+          groups[unKey] = { name: "Uncategorized", type: "uncategorized", tests: [] };
+        }
+        groups[unKey].tests.push(t);
+      }
+    });
+
+    return groups;
+  }, [filteredTests]);
 
   // Unlock codes (kept, but only reachable if allowed)
   // Accepts optional expectedTestId to ensure student is unlocking the intended test
@@ -261,26 +312,50 @@ export default function StudentTests() {
         <div className="text-sm text-muted-foreground">Press Enter to unlock</div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {filteredTests.map((t) => {
-          const locked = !(t.isPublic === true || unlockedIds.has(t.id));
+      <div className="space-y-8">
+        {Object.entries(groupedTests).map(([groupId, group]) => {
+          const isExpanded = expandedFolders[groupId] !== false;
           return (
-            <TestCard
-              key={t.id}
-              test={{ ...t, isLocked: locked }}
-              onView={() => nav(`/student/tests/${t.id}`)}
-              onStart={() => nav(`/student/tests/${t.id}`)}
-              onUnlock={(testId: string) => {
-                const entered = window.prompt("Enter access code to unlock this test:");
-                if (entered && entered.trim()) {
-                  unlockWithCode(entered.trim(), testId);
-                }
-              }}
-            />
+            <div key={groupId} className="space-y-4">
+              <div
+                className="flex items-center justify-between group cursor-pointer bg-muted/20 p-2 rounded-xl"
+                onClick={() => toggleFolder(groupId)}
+              >
+                <div className="flex items-center gap-2">
+                  {isExpanded ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+                  <Folder className="h-5 w-5 text-muted-foreground" />
+                  <h3 className="font-semibold text-lg">{group.name}</h3>
+                  <Badge variant="secondary" className="rounded-full ml-2">
+                    {group.tests.length}
+                  </Badge>
+                </div>
+              </div>
+
+              {isExpanded && (
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 pl-4">
+                  {group.tests.map((t) => {
+                    const locked = !(t.isPublic === true || unlockedIds.has(t.id));
+                    return (
+                      <TestCard
+                        key={t.id}
+                        test={{ ...t, isLocked: locked }}
+                        onView={() => nav(`/student/tests/${t.id}`)}
+                        onStart={() => nav(`/student/tests/${t.id}`)}
+                        onUnlock={(testId: string) => {
+                          const entered = window.prompt("Enter access code to unlock this test:");
+                          if (entered && entered.trim()) {
+                            unlockWithCode(entered.trim(), testId);
+                          }
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           );
         })}
       </div>
     </div>
   );
 }
-
