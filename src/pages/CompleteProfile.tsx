@@ -70,11 +70,25 @@ export default function CompleteProfile() {
   }, [tenantLoading, effectiveRole]);
 
   async function callRegisterStudent(token: string, tSlug: string) {
-    await fetch("/api/tenant/register-student", {
+    const res = await fetch("/api/tenant/register-student", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ tenantSlug: tSlug }),
     });
+
+    if (!res.ok) {
+      const contentType = String(res.headers.get("content-type") || "").toLowerCase();
+      if (contentType.includes("application/json")) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || `Failed to register student for this tenant (HTTP ${res.status})`);
+      }
+      const text = (await res.text().catch(() => "")).trim();
+      throw new Error(
+        text
+          ? `Failed to register student for this tenant (HTTP ${res.status}): ${text.slice(0, 160)}`
+          : `Failed to register student for this tenant (HTTP ${res.status})`
+      );
+    }
   }
 
   async function checkSlugAvailable(slug: string, myUid: string) {
@@ -174,7 +188,7 @@ export default function CompleteProfile() {
         );
 
         const token = await u.getIdToken();
-        await callRegisterStudent(token, tSlug).catch(() => {});
+        await callRegisterStudent(token, tSlug);
 
         toast.success("Profile completed!");
         if (isTenantDomain) {

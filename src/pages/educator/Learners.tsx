@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Loader2, RefreshCw, Search, UserCheck, UserX } from "lucide-react";
+import { ArrowRight, Loader2, RefreshCw, Search, UserCheck, UserX } from "lucide-react";
 import { collection, doc, onSnapshot, orderBy, query, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
@@ -70,6 +70,10 @@ export default function Learners() {
     if (!q) return learners;
     return learners.filter((l) => (l.name || "").toLowerCase().includes(q) || (l.email || "").toLowerCase().includes(q));
   }, [learners, search]);
+
+  const openLearnerDetails = (studentId: string) => {
+    nav(`/educator/learners/${studentId}`);
+  };
 
   async function postWithToken(path: string, body: any) {
     if (!firebaseUser) throw new Error("Not logged in");
@@ -151,19 +155,28 @@ export default function Learners() {
           const inactive = l.status === "INACTIVE";
           return (
             <div key={l.id} className="border rounded-lg p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-              <div>
+              <button
+                type="button"
+                onClick={() => openLearnerDetails(l.id)}
+                className="text-left group"
+              >
                 <div className="font-semibold">
                   {l.name || "Student"}{" "}
                   {inactive ? <span className="text-xs text-red-500 ml-2">(INACTIVE)</span> : null}
                 </div>
-                <div className="text-sm text-muted-foreground">{l.email || l.id}</div>
+                <div className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">{l.email || l.id}</div>
                 <div className="text-xs text-muted-foreground mt-1">
                   Seat:{" "}
                   {seatOn ? <span className="text-green-600 font-medium">GRANTED</span> : <span className="text-orange-600 font-medium">NOT GRANTED</span>}
                 </div>
-              </div>
+              </button>
 
               <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" onClick={() => openLearnerDetails(l.id)}>
+                  View Details
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </Button>
+
                 {!seatOn ? (
                   <Button
                     disabled={!canAssign || busyId === l.id || inactive}

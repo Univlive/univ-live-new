@@ -54,6 +54,7 @@ import {
   type AiImportSummary,
   type PageProgressUpdate,
 } from "@/lib/aiQuestionImport";
+import { aiFeatureFlags, getAiFeatureDisabledMessage } from "@/lib/aiFeatureFlags";
 import { uploadToImageKit } from "@/lib/imagekitUpload";
 
 // Firebase
@@ -986,6 +987,7 @@ function QuestionsManager({
   const [importProgressUpdates, setImportProgressUpdates] = useState<PageProgressUpdate[]>([]);
   const pdfInputRef = useRef<HTMLInputElement | null>(null);
   const importAbortControllerRef = useRef<AbortController | null>(null);
+  const isAiPdfImportEnabled = aiFeatureFlags.pdfImport;
 
   const qCol = useMemo(
     () => collection(db, "educators", educatorUid, "my_tests", testId, "questions"),
@@ -1190,6 +1192,11 @@ function QuestionsManager({
 
   // Upload pdf starts here....
   async function handlePdfSelected(file: File | null) {
+    if (!isAiPdfImportEnabled) {
+      toast.error(getAiFeatureDisabledMessage("pdfImport"));
+      return;
+    }
+
     if (!file) return;
     if (file.type !== "application/pdf") {
       toast.error("Please upload a PDF file only");
@@ -1220,7 +1227,6 @@ function QuestionsManager({
         importAbortControllerRef.current.signal,
         // Callback to add questions in real-time as they're detected
         (newQuestions, pageNum) => {
-          console.log(`[PDF Import] Adding ${newQuestions.length} questions from page ${pageNum}`);
           setImportItems((prev) => [...prev, ...newQuestions]);
         }
       );
@@ -1340,11 +1346,17 @@ function QuestionsManager({
                 variant="outline"
                 className="w-full rounded-xl"
                 onClick={() => pdfInputRef.current?.click()}
-                disabled={importBusy}
+                disabled={importBusy || !isAiPdfImportEnabled}
+                title={!isAiPdfImportEnabled ? getAiFeatureDisabledMessage("pdfImport") : undefined}
               >
                 {importBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
                 Import PDF with AI
               </Button>
+              {!isAiPdfImportEnabled ? (
+                <p className="text-xs text-muted-foreground">
+                  {getAiFeatureDisabledMessage("pdfImport")}
+                </p>
+              ) : null}
               <input
                 ref={pdfInputRef}
                 type="file"

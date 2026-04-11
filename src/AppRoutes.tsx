@@ -23,7 +23,7 @@ import CompleteProfile from "@/pages/CompleteProfile";
 
 import AdminTestManager from "./pages/AdminTestManager";
 
-// ✅ Admin pages you added in /pages/admin
+// Admin pages you added in /pages/admin
 import AdminDashboard from "@/pages/admin/Dashboard";
 import AdminQuestions from "@/pages/admin/Questions";
 import AdminTestBank from "@/pages/admin/TestBank";
@@ -36,9 +36,9 @@ import AdminSeatManagement from "@/pages/admin/SeatManagement";
 import EducatorLayout from "@/components/educator/EducatorLayout";
 import EducatorDashboard from "@/pages/educator/Dashboard";
 import Learners from "@/pages/educator/Learners";
+import LearnerDetails from "@/pages/educator/LearnerDetails";
 import TestSeries from "@/pages/educator/TestSeries";
 import AccessCodes from "@/pages/educator/AccessCodes";
-import Analytics from "@/pages/educator/Analytics";
 import Messages from "@/pages/educator/Messages";
 import WebsiteSettings from "@/pages/educator/WebsiteSettings";
 import Billing from "@/pages/educator/Billing";
@@ -63,9 +63,6 @@ export default function AppRoutes() {
 
   return (
     <Routes>
-      {/* =========================================================
-          SCENARIO A: TENANT WEBSITE (e.g. coaching.univ.live)
-         ========================================================= */}
       {isTenantDomain ? (
         <>
           {/* --- Public Routes (Open to everyone) --- */}
@@ -107,9 +104,9 @@ export default function AppRoutes() {
             <Route index element={<EducatorDashboard />} />
             <Route path="dashboard" element={<EducatorDashboard />} />
             <Route path="learners" element={<Learners />} />
+            <Route path="learners/:learnerId" element={<LearnerDetails />} />
             <Route path="test-series" element={<TestSeries />} />
             <Route path="access-codes" element={<AccessCodes />} />
-            <Route path="analytics" element={<Analytics />} />
             <Route path="messages" element={<Messages />} />
             <Route path="website-settings" element={<WebsiteSettings />} />
             <Route path="billing" element={<Billing />} />
@@ -119,9 +116,6 @@ export default function AppRoutes() {
           <Route path="*" element={<NotFound />} />
         </>
       ) : (
-        /* =========================================================
-           SCENARIO B: MAIN PLATFORM (univ.live)
-           ========================================================= */
         <>
           <Route path="/" element={<Index />} />
           <Route path="/how-it-works" element={<HowItWorks />} />
@@ -133,7 +127,7 @@ export default function AppRoutes() {
           <Route path="/complete-profile" element={<CompleteProfile />} />
 
 
-          {/* ✅ Admin Panel */}
+          {/* Admin Panel */}
         <Route
           path="/admin"
           element={
@@ -166,9 +160,9 @@ export default function AppRoutes() {
             <Route index element={<EducatorDashboard />} />
             <Route path="dashboard" element={<EducatorDashboard />} />
             <Route path="learners" element={<Learners />} />
+            <Route path="learners/:learnerId" element={<LearnerDetails />} />
             <Route path="test-series" element={<TestSeries />} />
             <Route path="access-codes" element={<AccessCodes />} />
-            <Route path="analytics" element={<Analytics />} />
             <Route path="messages" element={<Messages />} />
             <Route path="website-settings" element={<WebsiteSettings />} />
             <Route path="billing" element={<Billing />} />

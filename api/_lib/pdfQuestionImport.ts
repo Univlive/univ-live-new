@@ -191,8 +191,29 @@ export function parseJsonResponse<T>(content: string): T {
   return JSON.parse(jsonString) as T;
 }
 
+function stripQuestionNumberPrefix(input: string) {
+  const value = input.trim();
+  if (!value) return value;
+
+  const patterns = [
+    /^(?:q(?:uestion)?\s*(?:no\.?\s*)?)\d{1,4}\s*[:.)-]\s*/i,
+    /^(?:q(?:uestion)?\s*(?:no\.?\s*)?)\d{1,4}\s+/i,
+    /^\(\s*\d{1,4}\s*\)\s*/,
+    /^\[\s*\d{1,4}\s*\]\s*/,
+    /^\d{1,4}\s*[:.)-]\s*/,
+  ];
+
+  for (const pattern of patterns) {
+    if (pattern.test(value)) {
+      return value.replace(pattern, "").trim();
+    }
+  }
+
+  return value;
+}
+
 export function normalizeImportedItem(item: any, fallbackIndex: number): ImportedQuestionItem {
-  const question = String(item?.question || "").trim();
+  const question = stripQuestionNumberPrefix(String(item?.question || ""));
   const options = Array.isArray(item?.options)
     ? item.options.map((option: any) => String(option || "").trim()).filter(Boolean).slice(0, 4)
     : [];

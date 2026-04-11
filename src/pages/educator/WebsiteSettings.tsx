@@ -64,6 +64,7 @@ import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { useTenant } from "@/contexts/TenantProvider";
 import { uploadToImageKit } from "@/lib/imagekitUpload";
+import { aiFeatureFlags, getAiFeatureDisabledMessage } from "@/lib/aiFeatureFlags";
 import { useAIStream } from "@/hooks/useAIStream";
 
 // --- Types ---
@@ -152,8 +153,15 @@ export default function WebsiteSettings() {
     ).sort((a, b) => a.localeCompare(b));
   }, [availableTests]);
 
+  const isAiWebsiteContentEnabled = aiFeatureFlags.websiteContent;
+
   // --- AI Generation Function with streaming ---
   const handleGenerateWithAI = async () => {
+    if (!isAiWebsiteContentEnabled) {
+      toast.error(getAiFeatureDisabledMessage("websiteContent"));
+      return;
+    }
+
     if (!aiEducatorName || !aiSubjects || !aiDescription) {
       toast.error("Please fill in all required fields");
       return;
@@ -442,7 +450,12 @@ export default function WebsiteSettings() {
         <div className="flex gap-2">
           <Dialog open={showAIDialog} onOpenChange={setShowAIDialog}>
             <DialogTrigger asChild>
-              <Button variant="outline" className="border-primary/30 hover:bg-primary/5">
+              <Button
+                variant="outline"
+                className="border-primary/30 hover:bg-primary/5"
+                disabled={!isAiWebsiteContentEnabled}
+                title={!isAiWebsiteContentEnabled ? getAiFeatureDisabledMessage("websiteContent") : undefined}
+              >
                 <Sparkles className="mr-2 h-4 w-4" />
                 AI Generate Content
               </Button>
@@ -536,7 +549,7 @@ export default function WebsiteSettings() {
                 </Button>
                 <Button 
                   onClick={handleGenerateWithAI} 
-                  disabled={aiGenerating}
+                  disabled={aiGenerating || !isAiWebsiteContentEnabled}
                   className="gradient-bg text-white"
                 >
                   {aiGenerating ? (
@@ -554,6 +567,12 @@ export default function WebsiteSettings() {
               </div>
             </DialogContent>
           </Dialog>
+
+          {!isAiWebsiteContentEnabled ? (
+            <p className="text-xs text-muted-foreground">
+              {getAiFeatureDisabledMessage("websiteContent")}
+            </p>
+          ) : null}
 
           <Button onClick={handleSave} disabled={saving} className="gradient-bg text-white shadow-md">
             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}

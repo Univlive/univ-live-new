@@ -23,7 +23,6 @@ function getIdToken(forceRefresh: boolean = false): Promise<string> {
       try {
         // Defaults to cached token unless forceRefresh is explicitly true
         const token = await user.getIdToken(forceRefresh); 
-        console.log(`[getIdToken] Token obtained (length: ${token.length})`);
         resolve(token);
       } catch (e: any) {
         console.error("[getIdToken] Failed to get token:", e?.message);
@@ -46,7 +45,6 @@ export async function uploadToImageKit(
 
   async function fetchAuthParams(authScope: ImageKitScope): Promise<ImageKitAuthParams> {
     const url = `/api/imagekit-auth?scope=${encodeURIComponent(authScope)}`;
-    console.log(`[uploadToImageKit] Requesting auth from: ${url}`);
 
     const authRes = await fetch(url, {
       method: "GET",
@@ -54,11 +52,6 @@ export async function uploadToImageKit(
     });
 
     const rawText = await authRes.text();
-    console.log(`[uploadToImageKit] Auth response status (${authScope}): ${authRes.status}`);
-    console.log(`[uploadToImageKit] Auth response headers (${authScope}):`, {
-      contentType: authRes.headers.get("content-type"),
-      contentLength: authRes.headers.get("content-length"),
-    });
 
     if (!authRes.ok) {
       let parsedError = rawText;
@@ -72,8 +65,6 @@ export async function uploadToImageKit(
       const shortError = parsedError.length > 250 ? `${parsedError.substring(0, 250)}...` : parsedError;
       throw new Error(`ImageKit auth failed (${authScope}) [${authRes.status}]: ${shortError}`);
     }
-
-    console.log(`[uploadToImageKit] Auth response (${authScope}, first 200 chars):`, rawText.substring(0, 200));
     let parsed: ImageKitAuthParams;
     try {
       parsed = JSON.parse(rawText) as ImageKitAuthParams;
@@ -85,8 +76,6 @@ export async function uploadToImageKit(
     if (!parsed?.token || !parsed?.signature || typeof parsed?.expire !== "number") {
       throw new Error(`Invalid auth payload (${authScope}): missing token/signature/expire`);
     }
-
-    console.log(`[uploadToImageKit] ✅ Auth params received successfully (${authScope})`);
     return parsed;
   }
 
@@ -120,7 +109,6 @@ export async function uploadToImageKit(
   form.append("folder", folder);
   form.append("useUniqueFileName", "true");
 
-  console.log("[uploadToImageKit] Uploading to ImageKit...");
   const uploadRes = await fetch("https://upload.imagekit.io/api/v1/files/upload", {
     method: "POST",
     body: form,
@@ -133,7 +121,6 @@ export async function uploadToImageKit(
   }
 
   const json = await uploadRes.json();
-  console.log("[uploadToImageKit] ✅ Upload successful:", json.url);
 
   return {
     url: json.url as string,

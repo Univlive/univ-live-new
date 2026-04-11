@@ -50,13 +50,13 @@ export default function ActivityFeed({ activities = [], delay = 0 }: ActivityFee
         <CardHeader>
           <CardTitle className="text-base font-semibold">Recent Activity</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="h-64 overflow-hidden">
           {activities.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+            <div className="h-full overflow-y-auto rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
               No recent activity yet. New learner joins, attempts, access-code activity, and messages will appear here.
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="h-full space-y-4 overflow-y-auto pr-1">
               {activities.map((activity, index) => {
                 const Icon = iconMap[activity.type];
                 return (

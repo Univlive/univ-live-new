@@ -6,7 +6,6 @@ import {
   Users,
   FileText,
   Key,
-  BarChart3,
   MessageSquare,
   Globe,
   CreditCard,
@@ -92,7 +91,6 @@ export default function EducatorLayout() {
       { icon: Users, label: "Learners", href: "/educator/learners" },
       { icon: FileText, label: "Test Series", href: "/educator/test-series" },
       { icon: Key, label: "Access Codes", href: "/educator/access-codes" },
-      { icon: BarChart3, label: "Analytics", href: "/educator/analytics" },
       {
         icon: MessageSquare,
         label: "Messages",
@@ -106,7 +104,21 @@ export default function EducatorLayout() {
     [unreadMessages]
   );
 
-  const isActive = (href: string) => location.pathname === href;
+  const isActive = (href: string) => {
+    if (href === "/educator/dashboard") {
+      return location.pathname === "/educator" || location.pathname === href;
+    }
+    if (href === "/educator/learners") {
+      return location.pathname === href || location.pathname.startsWith("/educator/learners/");
+    }
+    return location.pathname === href;
+  };
+
+  const pageTitle = useMemo(() => {
+    if (location.pathname.startsWith("/educator/learners/")) return "Learner Deep Dive";
+    const tail = location.pathname.split("/").pop() || "dashboard";
+    return tail.replace(/-/g, " ");
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     try {
@@ -208,7 +220,7 @@ export default function EducatorLayout() {
               <span className="text-muted-foreground">Educator</span>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
               <span className="font-medium text-foreground capitalize">
-                {location.pathname.split("/").pop()?.replace("-", " ") || "Dashboard"}
+                {pageTitle}
               </span>
             </div>
           </div>

@@ -94,7 +94,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const scope = String((req.query?.scope as string) || "question-bank").toLowerCase();
     const method = req.method;
-    console.log(`[imagekit-auth] Handling: method=${method}, scope=${scope}`);
 
     // Get requireUser function
     const requireUser = await getRequireUser();
@@ -107,7 +106,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } else {
         user = await requireUser(req, { roles: ["ADMIN"] });
       }
-      console.log(`[imagekit-auth] ✅ User auth OK: uid=${user.uid}, role=${user.role}`);
     } catch (authErr: any) {
       const authMsg = String(authErr?.message || "Auth failed");
       console.error(`[imagekit-auth] ❌ Auth error:`, authMsg);
@@ -128,7 +126,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let authParams;
     try {
       authParams = imageKit.getAuthenticationParameters();
-      console.log(`[imagekit-auth] ✅ Auth params generated successfully`);
       return res.status(200).json(authParams);
     } catch (paramErr: any) {
       const paramMsg = String(paramErr?.message || "Failed to generate params");

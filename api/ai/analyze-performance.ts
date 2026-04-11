@@ -363,10 +363,6 @@ export default async function handler(
       accuracy ?? 0
     );
 
-    console.log(
-      `[analyze-performance] Analyzing "${testTitle}" — ${questions.length} questions, score ${totalScore}/${maxScore}`
-    );
-
     sendStreamEvent(res, {
       type: "progress",
       message: "Identifying weak areas and strong concepts...",
@@ -374,12 +370,6 @@ export default async function handler(
 
     // ---- Call Gemini ----
     const analysis = await analyzeWithGemini(prompt);
-
-    console.log(
-      `[analyze-performance] Analysis complete — ${analysis.weakAreas.length} weak areas, ` +
-      `${analysis.prerequisites.length} prerequisites, ` +
-      `projection ${analysis.marksProjection.currentScore} → ${analysis.marksProjection.potentialScore}`
-    );
 
     sendStreamEvent(res, {
       type: "progress",

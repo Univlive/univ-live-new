@@ -81,11 +81,9 @@ let sharpLoader: Promise<any> | null = null;
 async function getSharp() {
   try {
     if (!sharpLoader) {
-      console.log("[getSharp] Loading sharp module...");
       sharpLoader = import("sharp") as Promise<any>;
     }
     const mod = await sharpLoader;
-    console.log("[getSharp] Sharp loaded successfully");
     return mod?.default ?? mod;
   } catch (err) {
     console.error("[getSharp] Error loading sharp:", err);
@@ -95,9 +93,7 @@ async function getSharp() {
 
 async function getFirebaseAdmin() {
   try {
-    console.log("[getFirebaseAdmin] Loading Firebase admin...");
     const mod = await import("../_lib/firebaseAdmin.js");
-    console.log("[getFirebaseAdmin] Firebase admin loaded successfully");
     return mod.getAdmin();
   } catch (err) {
     console.error("[getFirebaseAdmin] Error loading Firebase admin:", err);
@@ -110,11 +106,9 @@ let geminiLoader: Promise<any> | null = null;
 async function getGeminiAI() {
   try {
     if (!geminiLoader) {
-      console.log("[getGeminiAI] Loading GoogleGenerativeAI module...");
       geminiLoader = import("@google/generative-ai") as Promise<any>;
     }
     const mod = await geminiLoader;
-    console.log("[getGeminiAI] GoogleGenerativeAI loaded successfully");
     return mod;
   } catch (err) {
     console.error("[getGeminiAI] Error loading GoogleGenerativeAI:", err);
@@ -126,7 +120,6 @@ async function getGeminiAI() {
 async function getSchemaType() {
   try {
     const mod = await getGeminiAI();
-    console.log("[getSchemaType] Getting SchemaType from Gemini...");
     return mod.SchemaType;
   } catch (err) {
     console.error("[getSchemaType] Error getting SchemaType:", err);
@@ -244,16 +237,12 @@ async function processWithGemini(
     }
 
     // Lazy-load GoogleGenerativeAI
-    console.log("[processWithGemini] Loading GoogleGenerativeAI...");
     const { GoogleGenerativeAI } = await getGeminiAI();
-    console.log("[processWithGemini] GoogleGenerativeAI loaded successfully");
     
     const genAI = new GoogleGenerativeAI(apiKey);
 
     // Build schema dynamically
-    console.log("[processWithGemini] Building schema...");
     const mcqSchema = await buildMcqSchema();
-    console.log("[processWithGemini] Schema built successfully");
 
     const generationConfig: GenerationConfig = {
       temperature: 0.1,
@@ -262,7 +251,6 @@ async function processWithGemini(
       responseSchema: mcqSchema as any, // SDK typing requires cast
     };
 
-    console.log(`[processWithGemini] Calling Gemini API with model: ${modelName}`);
     const model = genAI.getGenerativeModel({
       model: modelName,
       generationConfig,
@@ -290,10 +278,6 @@ async function processWithGemini(
       throw new Error("Gemini returned an empty response");
     }
 
-    // Log the response for debugging
-    console.log(`[processWithGemini] Raw response (first 500 chars): ${text.substring(0, 500)}`);
-    console.log(`[processWithGemini] Response length: ${text.length}`);
-
     let parsed: GeminiResponse;
     try {
       parsed = JSON.parse(text) as GeminiResponse;
@@ -311,7 +295,6 @@ async function processWithGemini(
       );
     }
 
-    console.log(`[processWithGemini] Successfully extracted ${parsed.items.length} items`);
     return parsed;
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -419,10 +402,6 @@ async function uploadToImageKit(
       isPrivateFile: false,
     });
 
-    console.log(
-      `[uploadToImageKit] Uploaded diagram for Q${questionId} → ${response.url}`
-    );
-
     return response.url;
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : "Unknown ImageKit error";
@@ -459,21 +438,17 @@ function isValidBoundingBox(box: unknown): box is [number, number, number, numbe
  */
 function isRetryableError(err: any): boolean {
   if (err?.status === 503) {
-    console.log("[retry] Detected 503 Service Unavailable – will retry");
     return true; // Model overloaded
   }
   if (err?.status === 429) {
-    console.log("[retry] Detected 429 Too Many Requests – will retry");
     return true; // Rate limited
   }
   if (err?.status === 502 || err?.status === 504) {
-    console.log(`[retry] Detected ${err.status} gateway error – will retry`);
     return true; // Bad Gateway, Gateway Timeout
   }
   // Check for network timeouts or connection errors
   const errorMsg = (err instanceof Error ? err.message : String(err)).toLowerCase();
   if (errorMsg.includes("econnrefused") || errorMsg.includes("timeout")) {
-    console.log("[retry] Detected network error – will retry");
     return true;
   }
   return false;
@@ -502,7 +477,6 @@ async function processWithGeminiRetry(
   while (attempt < MAX_RETRIES) {
     try {
       if (attempt > 0) {
-        console.log(`[retry] Attempt ${attempt + 1}/${MAX_RETRIES} after ${backoffMs}ms delay`);
         await delayMs(backoffMs);
       }
 
@@ -512,7 +486,6 @@ async function processWithGeminiRetry(
       
       if (!isRetryableError(err)) {
         // Not a retryable error, throw immediately
-        console.log("[retry] Error is not retryable, failing immediately");
         throw err;
       }
 
@@ -594,10 +567,6 @@ export default async function handler(
     }
 
     // ---- Step 1: Gemini Extraction ----
-    console.log(
-      `[import-test-questions] Processing page ${pageNumber || "?"} of "${fileName || "unknown"}" (${(imageBuffer.length / 1024).toFixed(0)} KB)`
-    );
-
     sendStreamEvent(res, {
       type: "progress",
       message: "Extracting MCQ questions with AI...",
@@ -611,10 +580,6 @@ export default async function handler(
     const rawItems = Array.isArray(geminiResult?.items)
       ? geminiResult.items
       : [];
-
-    console.log(
-      `[import-test-questions] Gemini returned ${rawItems.length} candidate(s)`
-    );
 
     if (!rawItems.length) {
       sendStreamEvent(res, {
@@ -660,9 +625,6 @@ export default async function handler(
               educatorId
             );
 
-            console.log(
-              `[import-test-questions] Cropped + uploaded diagram for Q${normalized.sourceIndex} → ${questionImageUrl}`
-            );
           } catch (cropErr) {
             console.error(
               `[import-test-questions] Failed to crop/upload image for Q${normalized.sourceIndex}:`,
@@ -709,10 +671,6 @@ export default async function handler(
         return acc;
       },
       { total: 0, ready: 0, partial: 0, rejected: 0 }
-    );
-
-    console.log(
-      `[import-test-questions] Final: ${summary.total} questions (${summary.ready} ready, ${summary.partial} partial, ${summary.rejected} rejected)`
     );
 
     sendStreamEvent(res, {

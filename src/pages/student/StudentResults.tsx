@@ -11,6 +11,7 @@ import { useAuth } from "@/contexts/AuthProvider";
 import { db } from "@/lib/firebase";
 import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import { useAIStream } from "@/hooks/useAIStream";
+import { aiFeatureFlags, getAiFeatureDisabledMessage } from "@/lib/aiFeatureFlags";
 
 type AttemptResponse = {
   answer: string | null;
@@ -161,6 +162,7 @@ export default function StudentResults() {
   
   // AI Analysis with streaming
   const { progress: aiProgress, error: aiError, cancel: cancelAI } = useAIStream();
+  const isAiPerformanceAnalysisEnabled = aiFeatureFlags.performanceAnalysis;
 
   const [attempt, setAttempt] = useState<AttemptDoc | null>(null);
   const [sectionScores, setSectionScores] = useState<SectionScore[]>([]);
@@ -191,6 +193,7 @@ export default function StudentResults() {
     maxScore: number,
     accuracy: number
   ) {
+    if (!isAiPerformanceAnalysisEnabled) return;
     if (!attemptId) return;
 
     // Set status to in-progress
@@ -354,7 +357,7 @@ export default function StudentResults() {
         setComputedAccuracyPct(storedAcc ?? derived.accuracyPct);
 
         // Trigger AI analysis if not already completed
-        if ((!a.aiReviewStatus || a.aiReviewStatus === "queued") && !a.aiReview) {
+        if (isAiPerformanceAnalysisEnabled && (!a.aiReviewStatus || a.aiReviewStatus === "queued") && !a.aiReview) {
           triggerAIAnalysis(qs, resp, a.testTitle || testData.title || "Untitled Test", a.subject || testData.subject || "General", derived.score, derived.maxScore, derived.accuracyPct);
         }
       } catch (e: any) {
@@ -371,7 +374,7 @@ export default function StudentResults() {
     return () => {
       mounted = false;
     };
-  }, [attemptId, firebaseUser, authLoading]);
+  }, [attemptId, firebaseUser, authLoading, isAiPerformanceAnalysisEnabled]);
 
   if (loading || authLoading) return <div className="text-center py-12">Loading...</div>;
   if (error) return <div className="text-center py-12">{error}</div>;
@@ -462,13 +465,26 @@ export default function StudentResults() {
       </Card>
 
       {/* AI Review */}
-      <AIReviewPanel 
-        status={attempt.aiReviewStatus ?? "queued"} 
-        review={attempt.aiReview}
-        progress={aiProgress}
-        error={aiError}
-        onCancel={cancelAI}
-      />
+      {isAiPerformanceAnalysisEnabled ? (
+        <AIReviewPanel 
+          status={attempt.aiReviewStatus ?? "queued"} 
+          review={attempt.aiReview}
+          progress={aiProgress}
+          error={aiError}
+          onCancel={cancelAI}
+        />
+      ) : (
+        <Card className="card-soft border-0 bg-muted/40">
+          <CardHeader>
+            <CardTitle>AI Review Unavailable</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              {getAiFeatureDisabledMessage("performanceAnalysis")}
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Actions */}
       <div className="flex gap-4">
