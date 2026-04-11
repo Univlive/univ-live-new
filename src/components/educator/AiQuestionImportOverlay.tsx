@@ -22,8 +22,10 @@ type Props = {
   onClose: () => void;
   onCancel?: () => void;
   onItemIncludeChange: (sourceIndex: number, include: boolean) => void;
-  onSelectReadyOnly: () => void;
-  onToggleAllPartials: (include: boolean) => void;
+  onSelectAll: () => void;
+  onSelectOnlyReady: () => void;
+  onSelectOnlyPartial: () => void;
+  onSelectOnlyRejected: () => void;
   onSaveSelected: () => void;
 };
 
@@ -37,14 +39,19 @@ export default function AiQuestionImportOverlay({
   onClose,
   onCancel,
   onItemIncludeChange,
-  onSelectReadyOnly,
-  onToggleAllPartials,
+  onSelectAll,
+  onSelectOnlyReady,
+  onSelectOnlyPartial,
+  onSelectOnlyRejected,
   onSaveSelected,
 }: Props) {
   if (!open) return null;
 
-  const selectedCount = items.filter((item) => item.include && item.status !== "rejected").length;
-  const partialSelected = items.some((item) => item.status === "partial" && item.include);
+  const selectedCount = items.filter((item) => item.include).length;
+  const readyCount = summary?.ready ?? items.filter((item) => item.status === "ready").length;
+  const partialCount = summary?.partial ?? items.filter((item) => item.status === "partial").length;
+  const rejectedCount = summary?.rejected ?? items.filter((item) => item.status === "rejected").length;
+  const acceptedCount = readyCount + partialCount;
 
   return (
     <div className="absolute inset-0 z-20 bg-background/95 backdrop-blur-sm flex flex-col">
@@ -128,28 +135,13 @@ export default function AiQuestionImportOverlay({
                   </div>
 
                   {!importing && (
-                    <div className="space-y-2">
-                      <Button variant="outline" className="w-full rounded-xl" onClick={onSelectReadyOnly}>
-                        Select Ready Only
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="w-full rounded-xl"
-                        onClick={() => onToggleAllPartials(!partialSelected)}
-                      >
-                        {partialSelected ? "Unselect Partial" : "Select Partial as Inactive Drafts"}
-                      </Button>
-                    </div>
-                  )}
-
-                  {!importing && (
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
                       <div className="flex items-start gap-2">
                         <AlertTriangle className="h-4 w-4 mt-0.5" />
                         <div>
                           <p className="font-medium">How partial questions are saved</p>
                           <p className="text-xs mt-1">
-                            Partial questions can be kept, but they will be saved as inactive review drafts so students do not see them until you fix them.
+                            Any non-ready question (partial, incomplete, or rejected by AI) can be kept and will be saved as an inactive review draft so students do not see it until you fix it.
                           </p>
                         </div>
                       </div>
@@ -163,13 +155,41 @@ export default function AiQuestionImportOverlay({
 
         <ScrollArea className="min-h-0">
           <div className="p-5 space-y-4">
+            {!importing && items.length > 0 && (
+              <Card className="rounded-2xl sticky top-0 z-10 bg-background/95 backdrop-blur-sm">
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <Badge variant="secondary" className="rounded-full">Accepted: {acceptedCount}</Badge>
+                    <Badge variant="default" className="rounded-full">Complete: {readyCount}</Badge>
+                    <Badge variant="secondary" className="rounded-full">Partial: {partialCount}</Badge>
+                    <Badge variant="destructive" className="rounded-full">Rejected: {rejectedCount}</Badge>
+                    <Badge variant="outline" className="rounded-full">Selected: {selectedCount}</Badge>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" className="rounded-xl" onClick={onSelectAll}>
+                      Select All
+                    </Button>
+                    <Button variant="outline" size="sm" className="rounded-xl" onClick={onSelectOnlyReady}>
+                      Only Complete
+                    </Button>
+                    <Button variant="outline" size="sm" className="rounded-xl" onClick={onSelectOnlyPartial}>
+                      Only Partial
+                    </Button>
+                    <Button variant="outline" size="sm" className="rounded-xl" onClick={onSelectOnlyRejected}>
+                      Only Rejected
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {items.length === 0 ? (
               <div className="rounded-2xl border border-dashed p-8 text-center text-muted-foreground">
                 No questions were found in this PDF.
               </div>
             ) : (
               items.map((item) => {
-                const canInclude = item.status !== "rejected";
                 return (
                   <Card key={item.sourceIndex} className="rounded-2xl">
                     <CardHeader className="pb-3">
@@ -194,7 +214,7 @@ export default function AiQuestionImportOverlay({
                         <div className="flex items-center gap-2 shrink-0">
                           <Checkbox
                             checked={item.include}
-                            disabled={!canInclude || saving}
+                            disabled={saving}
                             onCheckedChange={(checked) => onItemIncludeChange(item.sourceIndex, checked === true)}
                           />
                           <span className="text-sm text-muted-foreground">Keep</span>

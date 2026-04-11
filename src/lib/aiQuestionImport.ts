@@ -57,6 +57,100 @@ export type QuestionsDetectedCallback = (
   pageNumber: number
 ) => void;
 
+function hasValidCorrectOption(item: Omit<AiImportPreviewItem, "include">) {
+  return (
+    typeof item.correctOption === "number" &&
+    item.correctOption >= 0 &&
+    item.correctOption < (Array.isArray(item.options) ? item.options.length : 0)
+  );
+}
+
+function extractQuestionNumber(text: string): number | null {
+  const value = String(text || "");
+  if (!value.trim()) return null;
+
+  const prefixed = value.match(/(?:^|\n|\s)(?:q(?:uestion)?\s*)?(\d{1,4})\s*[:.)\]-]/i);
+  if (prefixed?.[1]) return Number(prefixed[1]);
+
+  const bracketed = value.match(/(?:^|\n|\s)[\[(](\d{1,4})[\])]/);
+  if (bracketed?.[1]) return Number(bracketed[1]);
+
+  const plain = value.match(/(?:^|\n|\s)(\d{1,4})(?:\s|$)/);
+  if (plain?.[1]) return Number(plain[1]);
+
+  return null;
+}
+
+function extractAnswerKeyPairs(text: string): Array<{ questionNumber: number; correctOption: number }> {
+  const value = String(text || "");
+  if (!value.trim()) return [];
+
+  const pairs: Array<{ questionNumber: number; correctOption: number }> = [];
+
+  // Matches common formats: "12-A", "Q12: B", "12) (C)", "12. D"
+  const regex = /(?:^|[\s,;|])(?:q(?:uestion)?\s*)?(\d{1,4})\s*[-.):\]]\s*\(?([A-D])\)?(?=$|[\s,;|])/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(value)) !== null) {
+    const questionNumber = Number(match[1]);
+    const letter = String(match[2] || "").toUpperCase();
+    const correctOption = letter.charCodeAt(0) - 65;
+    if (
+      Number.isFinite(questionNumber) &&
+      questionNumber > 0 &&
+      Number.isFinite(correctOption) &&
+      correctOption >= 0 &&
+      correctOption <= 3
+    ) {
+      pairs.push({ questionNumber, correctOption });
+    }
+  }
+
+  return pairs;
+}
+
+function reconcileTrailingAnswerKey(items: Omit<AiImportPreviewItem, "include">[]) {
+  const answerMap = new Map<number, number>();
+
+  for (const item of items) {
+    const combined = `${item.rawBlock || ""}\n${item.question || ""}`;
+    const pairs = extractAnswerKeyPairs(combined);
+    for (const pair of pairs) {
+      // Keep the first detected mapping for a question number.
+      if (!answerMap.has(pair.questionNumber)) {
+        answerMap.set(pair.questionNumber, pair.correctOption);
+      }
+    }
+  }
+
+  if (!answerMap.size) return items;
+
+  return items.map((item) => {
+    if (hasValidCorrectOption(item)) return item;
+
+    const combined = `${item.rawBlock || ""}\n${item.question || ""}`;
+    const questionNumber = extractQuestionNumber(combined);
+    if (!questionNumber) return item;
+
+    const mappedOption = answerMap.get(questionNumber);
+    if (typeof mappedOption !== "number") return item;
+    if (!Array.isArray(item.options) || mappedOption < 0 || mappedOption >= item.options.length) return item;
+
+    const nextReasons = (item.reasons || []).filter(
+      (reason) => !String(reason || "").toLowerCase().includes("correct option")
+    );
+
+    const hasQuestion = Boolean(String(item.question || "").trim());
+    const hasEnoughOptions = item.options.length >= 2;
+
+    return {
+      ...item,
+      correctOption: mappedOption,
+      status: hasQuestion && hasEnoughOptions ? "ready" : "partial",
+      reasons: nextReasons,
+    };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // pdf.js – renders each page to a canvas image (not text extraction)
 // ---------------------------------------------------------------------------
@@ -454,8 +548,10 @@ export async function importQuestionsFromPdf(
     });
   }
 
+  const reconciledItems = reconcileTrailingAnswerKey(allItems);
+
   // Build aggregate summary
-  const summary = allItems.reduce(
+  const summary = reconciledItems.reduce(
     (acc, item) => {
       acc.total += 1;
       acc[item.status] += 1;
@@ -473,7 +569,7 @@ export async function importQuestionsFromPdf(
 
   return {
     summary,
-    items: allItems,
+    items: reconciledItems,
     meta: {
       fileName: file.name,
       diagnostics: [],

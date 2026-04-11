@@ -282,13 +282,32 @@ export default function TestSeries() {
   }, []);
 
   const handleCreateFolder = async () => {
-    if (!currentUser || !newFolderName.trim()) return;
+    if (!currentUser) {
+      toast.error("Please login again and retry.");
+      return;
+    }
+
+    const name = newFolderName.trim();
+    if (!name) {
+      toast.error("Folder name is required.");
+      return;
+    }
+
+    const exists = folders.some(
+      (f) => String(f?.name || "").trim().toLowerCase() === name.toLowerCase()
+    );
+    if (exists) {
+      toast.error("A folder with this name already exists.");
+      return;
+    }
+
     setFolderCreating(true);
     try {
-      await addDoc(collection(db, "educators", currentUser.uid, "folders"), {
-        name: newFolderName.trim(),
+      const folderRef = await addDoc(collection(db, "educators", currentUser.uid, "folders"), {
+        name,
         createdAt: serverTimestamp(),
       });
+      setExpandedFolders((prev) => ({ ...prev, [folderRef.id]: true }));
       toast.success("Folder created");
       setNewFolderName("");
       setCreateFolderOpen(false);
@@ -326,10 +345,10 @@ export default function TestSeries() {
       testsInFolder.forEach(t => {
         batch.update(doc(db, "educators", currentUser.uid, "my_tests", t.id), { folderId: null });
       });
-      
+
       // 2. Delete folder doc
       batch.delete(doc(db, "educators", currentUser.uid, "folders", folderId));
-      
+
       await batch.commit();
       toast.success("Folder deleted");
     } catch (e) {
@@ -344,7 +363,7 @@ export default function TestSeries() {
 
   const normalizeSubjectName = (sub: string) => {
     const s = sub.trim().toLowerCase();
-    
+
     // Exact mapping for requested subjects
     if (s === "bst" || s === "business studies" || s === "business study") return "Business Studies";
     if (s === "phy" || s === "physics") return "Physics";
@@ -363,8 +382,8 @@ export default function TestSeries() {
   };
 
   const SUGGESTED_SUBJECTS = [
-    "Physics", "Chemistry", "Maths", "English", "General Test", 
-    "Accountancy", "Business Studies", "Economics", "Geography", 
+    "Physics", "Chemistry", "Maths", "English", "General Test",
+    "Accountancy", "Business Studies", "Economics", "Geography",
     "Political Science", "History"
   ];
 
@@ -385,7 +404,7 @@ export default function TestSeries() {
 
     // 2. Pre-create empty folders for main subjects if they have tests or to keep them visible
     // (Actually, let's only create them if tests exist or user has custom folder with same name)
-    
+
     // 3. Distribute Tests
     filtered.forEach(t => {
       if (t.folderId && groups[t.folderId]) {
@@ -638,50 +657,55 @@ export default function TestSeries() {
       </div>
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
-        <TabsList className="rounded-xl">
-          <TabsTrigger value="library" className="rounded-xl">
-            Your Library
-          </TabsTrigger>
-          <TabsTrigger value="bank" className="rounded-xl">
-            Admin Bank
-          </TabsTrigger>
-        </TabsList>
+        <div className="w-full flex flex-row justify-between">
+          <TabsList className="rounded-xl">
+            <TabsTrigger value="library" className="rounded-xl">
+              Your Library
+            </TabsTrigger>
+            <TabsTrigger value="bank" className="rounded-xl">
+              Admin Bank
+            </TabsTrigger>
+          </TabsList>
+          <Dialog open={createFolderOpen} onOpenChange={setCreateFolderOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" className="rounded-xl border-dashed">
+                <FolderPlus className="mr-2 h-4 w-4" /> New Folder
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="rounded-2xl">
+              <DialogHeader>
+                <DialogTitle>Create Folder</DialogTitle>
+                <DialogDescription>Folders help you organize your tests beyond just subjects.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label>Folder Name</Label>
+                  <Input
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (!folderCreating) void handleCreateFolder();
+                      }
+                    }}
+                    placeholder="e.g. Revision Tests"
+                    className="rounded-xl"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setCreateFolderOpen(false)}>Cancel</Button>
+                <Button className="gradient-bg text-white" onClick={handleCreateFolder} disabled={folderCreating || !newFolderName.trim()}>
+                  {folderCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create Folder"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
 
         {/* Library */}
         <TabsContent value="library" className="mt-6">
-          <div className="flex justify-end mb-4 gap-2">
-            <Dialog open={createFolderOpen} onOpenChange={setCreateFolderOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline" className="rounded-xl border-dashed">
-                  <FolderPlus className="mr-2 h-4 w-4" /> New Folder
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="rounded-2xl">
-                <DialogHeader>
-                  <DialogTitle>Create Folder</DialogTitle>
-                  <DialogDescription>Folders help you organize your tests beyond just subjects.</DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <Label>Folder Name</Label>
-                    <Input
-                      value={newFolderName}
-                      onChange={(e) => setNewFolderName(e.target.value)}
-                      placeholder="e.g. Revision Tests"
-                      className="rounded-xl"
-                    />
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setCreateFolderOpen(false)}>Cancel</Button>
-                  <Button className="gradient-bg text-white" onClick={handleCreateFolder} disabled={folderCreating}>
-                    {folderCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create Folder"}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          </div>
-
           {Object.keys(groupedTests).length === 0 ? (
             <EmptyState icon={FileText} title="No tests found" description="Create a custom test or import from the admin bank." />
           ) : (
@@ -702,7 +726,7 @@ export default function TestSeries() {
                           {group.tests.length}
                         </Badge>
                       </div>
-                      
+
                       {group.type === "custom" && (
                         <Button
                           variant="ghost"
@@ -980,6 +1004,8 @@ function QuestionsManager({
 
   const [importPreviewOpen, setImportPreviewOpen] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
+  const [confirmPdfOpen, setConfirmPdfOpen] = useState(false);
+  const [pendingPdfFile, setPendingPdfFile] = useState<File | null>(null);
   const [savingImported, setSavingImported] = useState(false);
   const [importFileName, setImportFileName] = useState("");
   const [importSummary, setImportSummary] = useState<AiImportSummary | null>(null);
@@ -1025,6 +1051,31 @@ function QuestionsManager({
     );
     return () => unsub();
   }, [qCol]);
+
+  useEffect(() => {
+    if (!importBusy) return;
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!importAbortControllerRef.current) return;
+      importAbortControllerRef.current.abort();
+      event.preventDefault();
+      event.returnValue = "AI import is in progress. Leaving will cancel it.";
+    };
+
+    const handlePageHide = () => {
+      if (importAbortControllerRef.current) {
+        importAbortControllerRef.current.abort();
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [importBusy]);
 
   const filteredQuestions = useMemo(() => {
     const q = searchQ.trim().toLowerCase();
@@ -1216,6 +1267,9 @@ function QuestionsManager({
     setImportItems([]);
     setImportSummary(null);
     setImportProgressUpdates([]);
+    toast.info("AI import started. Please do not close this tab while processing.", {
+      duration: 3500,
+    });
 
     try {
       const result = await importQuestionsFromPdf(
@@ -1232,6 +1286,13 @@ function QuestionsManager({
       );
       // Update summary at the end (questions already added via callback)
       setImportSummary(result.summary || null);
+      setImportItems(
+        (result.items || []).map((item) => ({
+          ...item,
+          include: item.status === "ready",
+        }))
+      );
+      setImportProgressUpdates([]);
       toast.success("AI import preview is ready");
     } catch (error) {
       console.error(error);
@@ -1241,10 +1302,23 @@ function QuestionsManager({
         toast.error(errorMsg);
       }
       setImportPreviewOpen(false);
+      setImportProgressUpdates([]);
     } finally {
       setImportBusy(false);
       importAbortControllerRef.current = null;
     }
+  }
+
+  async function confirmAndStartPdfImport() {
+    if (!pendingPdfFile) {
+      setConfirmPdfOpen(false);
+      return;
+    }
+
+    const selectedFile = pendingPdfFile;
+    setConfirmPdfOpen(false);
+    setPendingPdfFile(null);
+    await handlePdfSelected(selectedFile);
   }
 
   function cancelPdfImport() {
@@ -1261,7 +1335,16 @@ function QuestionsManager({
     setImportItems((prev) => prev.map((item) => (item.sourceIndex === sourceIndex ? { ...item, include } : item)));
   }
 
-  function selectReadyOnly() {
+  function selectAllImportItems() {
+    setImportItems((prev) =>
+      prev.map((item) => ({
+        ...item,
+        include: true,
+      }))
+    );
+  }
+
+  function selectOnlyReadyImportItems() {
     setImportItems((prev) =>
       prev.map((item) => ({
         ...item,
@@ -1270,20 +1353,25 @@ function QuestionsManager({
     );
   }
 
-  function toggleAllPartials(include: boolean) {
+  function selectOnlyPartialImportItems() {
+    setImportItems((prev) =>
+      prev.map((item) => ({
+        ...item,
+        include: item.status === "partial",
+      }))
+    );
+  }
+
+  function selectOnlyRejectedImportItems() {
     setImportItems((prev) =>
       prev.map((item) =>
-        item.status === "partial"
-          ? { ...item, include }
-          : item.status === "ready"
-            ? { ...item, include: true }
-            : { ...item, include: false }
+        ({ ...item, include: item.status === "rejected" })
       )
     );
   }
 
   async function saveImportedQuestions() {
-    const selected = importItems.filter((item) => item.include && item.status !== "rejected");
+    const selected = importItems.filter((item) => item.include);
     if (!selected.length) {
       toast.error("No questions selected to save");
       return;
@@ -1365,11 +1453,13 @@ function QuestionsManager({
                 onChange={async (event) => {
                   const file = event.target.files?.[0] || null;
                   event.currentTarget.value = "";
-                  await handlePdfSelected(file);
+                  if (!file) return;
+                  setPendingPdfFile(file);
+                  setConfirmPdfOpen(true);
                 }}
               />
 
-              {importProgressUpdates.length > 0 && (
+              {importBusy && importProgressUpdates.length > 0 && (
                 <InlineStatusTracker updates={importProgressUpdates} isProcessing={importBusy} />
               )}
 
@@ -1734,10 +1824,53 @@ function QuestionsManager({
           }}
           onCancel={cancelPdfImport}
           onItemIncludeChange={updateImportItemInclude}
-          onSelectReadyOnly={selectReadyOnly}
-          onToggleAllPartials={toggleAllPartials}
+          onSelectAll={selectAllImportItems}
+          onSelectOnlyReady={selectOnlyReadyImportItems}
+          onSelectOnlyPartial={selectOnlyPartialImportItems}
+          onSelectOnlyRejected={selectOnlyRejectedImportItems}
           onSaveSelected={saveImportedQuestions}
         />
+
+        <Dialog
+          open={confirmPdfOpen}
+          onOpenChange={(open) => {
+            setConfirmPdfOpen(open);
+            if (!open) {
+              setPendingPdfFile(null);
+            }
+          }}
+        >
+          <DialogContent className="rounded-2xl">
+            <DialogHeader>
+              <DialogTitle>Confirm PDF Import</DialogTitle>
+              <DialogDescription>
+                Please confirm this is the correct file to import with AI.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="rounded-xl border bg-muted/30 p-3 text-sm">
+              <p className="font-medium truncate">{pendingPdfFile?.name || "No file selected"}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Size: {pendingPdfFile ? `${(pendingPdfFile.size / (1024 * 1024)).toFixed(2)} MB` : "-"}
+              </p>
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setConfirmPdfOpen(false);
+                  setPendingPdfFile(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button className="gradient-bg text-white" onClick={confirmAndStartPdfImport}>
+                Confirm & Start Import
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
