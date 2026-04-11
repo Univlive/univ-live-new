@@ -57,6 +57,14 @@ export type QuestionsDetectedCallback = (
   pageNumber: number
 ) => void;
 
+function sortItemsBySourceIndex<T extends { sourceIndex: number }>(items: T[]) {
+  return [...items].sort((a, b) => {
+    const aIdx = Number.isFinite(Number(a.sourceIndex)) ? Number(a.sourceIndex) : Number.MAX_SAFE_INTEGER;
+    const bIdx = Number.isFinite(Number(b.sourceIndex)) ? Number(b.sourceIndex) : Number.MAX_SAFE_INTEGER;
+    return aIdx - bIdx;
+  });
+}
+
 function hasValidCorrectOption(item: Omit<AiImportPreviewItem, "include">) {
   return (
     typeof item.correctOption === "number" &&
@@ -432,8 +440,9 @@ export async function importQuestionsFromPdf(
       // If we got here, processing was successful
       if (pageData?.items) {
         const pageNewItems: AiImportPreviewItem[] = [];
+        const pageItems = sortItemsBySourceIndex(pageData.items || []);
         
-        for (const item of pageData.items || []) {
+        for (const item of pageItems) {
           globalIndex += 1;
           allItems.push({
             ...item,
@@ -548,7 +557,7 @@ export async function importQuestionsFromPdf(
     });
   }
 
-  const reconciledItems = reconcileTrailingAnswerKey(allItems);
+  const reconciledItems = sortItemsBySourceIndex(reconcileTrailingAnswerKey(allItems));
 
   // Build aggregate summary
   const summary = reconciledItems.reduce(
@@ -604,21 +613,44 @@ function cleanText(input: string) {
 }
 
 /**
- * Strips leading option labels (A., B., C., D., A), A:, etc.) from option text
+ * Strips leading option labels from option text
  * Examples:
  *   "A. Water" → "Water"
  *   "B) Oxygen" → "Oxygen"
+ *   "(C) Carbon" → "Carbon"
+ *   "[D] Nitrogen" → "Nitrogen"
+ *   "Option A: Water" → "Water"
  *   "C: Carbon" → "Carbon"
  *   "D - Nitrogen" → "Nitrogen"
  */
 function stripOptionLabel(optionText: string): string {
-  const cleaned = cleanText(optionText);
-  // Match patterns like "A.", "A)", "A:", "A -", "A ", etc.
-  // Handles: A. B) C: D - and variations
-  const match = cleaned.match(/^[A-D][\.\)\:\-\s]+(.+)$/);
-  if (match && match[1]) {
-    return cleanText(match[1]);
+  let cleaned = cleanText(optionText);
+  if (!cleaned) return cleaned;
+
+  const labelPatterns = [
+    /^\s*(?:option|choice)\s*[A-D]\s*[\)\].:\-]?\s*/i,
+    /^\s*[\[(]\s*[A-D]\s*[\])]\s*[\)\].:\-]?\s*/i,
+    /^\s*[A-D]\s*[\)\].:\-]\s*/i,
+    // Handles forms like: "A $\\frac{1}{5}..." or "B \\sqrt{2}".
+    /^\s*[A-D]\s+(?=(?:\$|\\|\d))/i,
+    /^\s*(?:option|choice)\s*[1-4]\s*[\)\].:\-]?\s*/i,
+    /^\s*[\[(]\s*[1-4]\s*[\])]\s*[\)\].:\-]?\s*/i,
+    /^\s*[1-4]\s*[\)\].:\-]\s*/i,
+  ];
+
+  // Some extracts can include stacked labels, e.g. "Option A) A. Text"
+  for (let i = 0; i < 3; i += 1) {
+    let changed = false;
+    for (const pattern of labelPatterns) {
+      const next = cleaned.replace(pattern, "");
+      if (next !== cleaned) {
+        cleaned = cleanText(next);
+        changed = true;
+      }
+    }
+    if (!changed) break;
   }
+
   return cleaned;
 }
 

@@ -5,6 +5,7 @@ import {
   type GenerationConfig,
 } from "@google/generative-ai";
 import { initializeStreaming, sendStreamEvent, endStreaming, streamError } from "../_lib/aiStreamingUtils.js";
+import { getGeminiModelNameFromEnv } from "../_lib/geminiModel.js";
 
 // ---------------------------------------------------------------------------
 // Request types (from frontend)
@@ -282,7 +283,7 @@ async function analyzeWithGemini(
   };
 
   const model = genAI.getGenerativeModel({
-    model: `${process.env.GEMINI_MODEL}`,
+    model: getGeminiModelNameFromEnv(),
     generationConfig,
     systemInstruction: SYSTEM_INSTRUCTION,
   });

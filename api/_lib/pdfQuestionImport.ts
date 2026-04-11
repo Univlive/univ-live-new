@@ -15,8 +15,16 @@ export type ImportedQuestionItem = {
 };
 
 function decodePdfEscapes(input: string) {
+  const escapeMap: Record<"n" | "r" | "t" | "b" | "f", string> = {
+    n: "\n",
+    r: "\r",
+    t: "\t",
+    b: "\b",
+    f: "\f",
+  };
+
   return input
-    .replace(/\\([nrtbf])/g, (_, ch) => ({ n: "\n", r: "\r", t: "\t", b: "\b", f: "\f" }[ch] || ch))
+    .replace(/\\([nrtbf])/g, (_, ch: string) => escapeMap[ch as keyof typeof escapeMap] || ch)
     .replace(/\\([()\\])/g, "$1")
     .replace(/\\([0-7]{1,3})/g, (_, oct) => {
       try {
