@@ -125,7 +125,7 @@ export async function signUpStudent(input: StudentSignupInput) {
 
   // Best-practice: let server register student into educator learners list
   const token = await cred.user.getIdToken();
-  await fetch("/api/tenant/register-student", {
+  const registerRes = await fetch("/api/tenant/register-student", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -133,6 +133,20 @@ export async function signUpStudent(input: StudentSignupInput) {
     },
     body: JSON.stringify({ tenantSlug: slug, displayName: input.displayName, email: input.email }),
   });
+
+  if (!registerRes.ok) {
+    const contentType = String(registerRes.headers.get("content-type") || "").toLowerCase();
+    if (contentType.includes("application/json")) {
+      const data = await registerRes.json().catch(() => ({}));
+      throw new Error(data?.error || `Failed to register student for this tenant (HTTP ${registerRes.status})`);
+    }
+    const text = (await registerRes.text().catch(() => "")).trim();
+    throw new Error(
+      text
+        ? `Failed to register student for this tenant (HTTP ${registerRes.status}): ${text.slice(0, 160)}`
+        : `Failed to register student for this tenant (HTTP ${registerRes.status})`
+    );
+  }
 
   return { uid, tenantSlug: slug };
 }

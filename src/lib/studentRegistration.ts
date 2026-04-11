@@ -8,15 +8,24 @@ export async function registerStudentForTenant(token: string, tenantSlug: string
     body: JSON.stringify({ tenantSlug }),
   });
 
-  const data = await res.json().catch(() => null);
-
   if (!res.ok) {
-    const message =
-      typeof data?.error === "string" && data.error.trim()
-        ? data.error
-        : `Failed to register student for ${tenantSlug}`;
-    throw new Error(message);
+    const contentType = String(res.headers.get("content-type") || "").toLowerCase();
+    if (contentType.includes("application/json")) {
+      const data = await res.json().catch(() => null);
+      const message =
+        typeof data?.error === "string" && data.error.trim()
+          ? data.error
+          : `Failed to register student for this tenant (HTTP ${res.status})`;
+      throw new Error(message);
+    }
+
+    const text = (await res.text().catch(() => "")).trim();
+    throw new Error(
+      text
+        ? `Failed to register student for this tenant (HTTP ${res.status}): ${text.slice(0, 160)}`
+        : `Failed to register student for this tenant (HTTP ${res.status})`
+    );
   }
 
-  return data;
+  return res.json().catch(() => ({}));
 }

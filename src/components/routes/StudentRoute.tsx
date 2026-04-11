@@ -9,7 +9,7 @@ export default function StudentRoute() {
   const { isTenantDomain, tenantSlug, loading: tenantLoading } = useTenant();
   const location = useLocation();
 
-  // ✅ wait for both contexts
+  // wait for both contexts
   if (authLoading || tenantLoading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center gap-2 text-muted-foreground">
