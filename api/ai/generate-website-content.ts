@@ -5,6 +5,7 @@ import {
   type GenerationConfig,
 } from "@google/generative-ai";
 import { initializeStreaming, sendStreamEvent, endStreaming, streamError, getUserFriendlyErrorMessage } from "../_lib/aiStreamingUtils.js";
+import { getGeminiModelNameFromEnv } from "../_lib/geminiModel.js";
 
 // ---------------------------------------------------------------------------
 // Request type (from frontend WebsiteSettings.tsx)
@@ -218,7 +219,7 @@ async function generateWithGemini(prompt: string): Promise<Record<string, any>> 
   };
 
   const model = genAI.getGenerativeModel({
-    model: `${process.env.GEMINI_MODEL}`,
+    model: getGeminiModelNameFromEnv(),
     generationConfig,
     systemInstruction: SYSTEM_INSTRUCTION,
   });

@@ -78,6 +78,7 @@ type Difficulty = "easy" | "medium" | "hard";
 
 type TestQuestion = {
   id: string;
+  questionOrder?: number;
 
   // Stored schema (admin-compatible)
   question: string; // can be plain text OR HTML
@@ -129,6 +130,7 @@ function normalizeQuestionDoc(id: string, data: any): TestQuestion {
 
   return {
     id,
+    questionOrder: Number.isFinite(Number(data?.questionOrder)) ? Number(data.questionOrder) : undefined,
     question,
     options,
     correctOption: Number.isFinite(correctOption) ? correctOption : 0,
@@ -142,6 +144,36 @@ function normalizeQuestionDoc(id: string, data: any): TestQuestion {
     createdAt: data?.createdAt,
     updatedAt: data?.updatedAt,
   };
+}
+
+function timestampToMillis(value: any) {
+  if (!value) return 0;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value?.toMillis === "function") return value.toMillis();
+  if (typeof value?.seconds === "number") return value.seconds * 1000;
+  return 0;
+}
+
+function sortQuestionsForDisplay(rows: TestQuestion[]) {
+  return [...rows].sort((a, b) => {
+    const aOrder = Number.isFinite(Number(a.questionOrder)) ? Number(a.questionOrder) : null;
+    const bOrder = Number.isFinite(Number(b.questionOrder)) ? Number(b.questionOrder) : null;
+    if (aOrder != null && bOrder != null && aOrder !== bOrder) return aOrder - bOrder;
+    if (aOrder != null && bOrder == null) return -1;
+    if (aOrder == null && bOrder != null) return 1;
+
+    const aImportIndex = Number.isFinite(Number(a.importSourceIndex)) ? Number(a.importSourceIndex) : null;
+    const bImportIndex = Number.isFinite(Number(b.importSourceIndex)) ? Number(b.importSourceIndex) : null;
+    if (aImportIndex != null && bImportIndex != null && aImportIndex !== bImportIndex) {
+      return aImportIndex - bImportIndex;
+    }
+
+    const aCreated = timestampToMillis(a.createdAt) || timestampToMillis(a.updatedAt);
+    const bCreated = timestampToMillis(b.createdAt) || timestampToMillis(b.updatedAt);
+    if (aCreated !== bCreated) return aCreated - bCreated;
+
+    return a.id.localeCompare(b.id);
+  });
 }
 
 function pruneUndefined<T extends Record<string, any>>(obj: T): T {
@@ -1041,7 +1073,7 @@ function QuestionsManager({
       qCol,
       (snap) => {
         const rows = snap.docs.map((d) => normalizeQuestionDoc(d.id, d.data()));
-        setQuestions(rows);
+        setQuestions(sortQuestionsForDisplay(rows));
         setLoading(false);
       },
       () => {
@@ -1085,6 +1117,14 @@ function QuestionsManager({
       return hay.includes(q);
     });
   }, [questions, searchQ]);
+
+  function getNextQuestionOrder() {
+    const maxOrder = questions.reduce((max, q) => {
+      const n = Number(q.questionOrder);
+      return Number.isFinite(n) ? Math.max(max, n) : max;
+    }, 0);
+    return maxOrder + 1;
+  }
 
   function resetEditor() {
     setEditingId(null);
@@ -1168,6 +1208,7 @@ function QuestionsManager({
       if (!editingId) {
         await addDoc(qCol, {
           ...payload,
+          questionOrder: getNextQuestionOrder(),
           createdAt: serverTimestamp(),
           source: "manual",
         });
@@ -1206,6 +1247,7 @@ function QuestionsManager({
   async function duplicateQuestion(q: TestQuestion) {
     try {
       await addDoc(qCol, {
+        questionOrder: getNextQuestionOrder(),
         question: q.question,
         options: q.options || ["", "", "", ""],
         correctOption: q.correctOption ?? 0,
@@ -1281,16 +1323,18 @@ function QuestionsManager({
         importAbortControllerRef.current.signal,
         // Callback to add questions in real-time as they're detected
         (newQuestions, pageNum) => {
-          setImportItems((prev) => [...prev, ...newQuestions]);
+          setImportItems((prev) => sortImportItemsBySourceIndex([...prev, ...newQuestions]));
         }
       );
       // Update summary at the end (questions already added via callback)
       setImportSummary(result.summary || null);
       setImportItems(
-        (result.items || []).map((item) => ({
-          ...item,
-          include: item.status === "ready",
-        }))
+        sortImportItemsBySourceIndex(
+          (result.items || []).map((item) => ({
+            ...item,
+            include: item.status === "ready",
+          }))
+        )
       );
       setImportProgressUpdates([]);
       toast.success("AI import preview is ready");
@@ -1329,6 +1373,14 @@ function QuestionsManager({
       setImportProgressUpdates([]); // Clear progress tracker
       toast.info("PDF import cancelled");
     }
+  }
+
+  function sortImportItemsBySourceIndex(items: AiImportPreviewItem[]) {
+    return [...items].sort((a, b) => {
+      const aIdx = Number.isFinite(Number(a.sourceIndex)) ? Number(a.sourceIndex) : Number.MAX_SAFE_INTEGER;
+      const bIdx = Number.isFinite(Number(b.sourceIndex)) ? Number(b.sourceIndex) : Number.MAX_SAFE_INTEGER;
+      return aIdx - bIdx;
+    });
   }
 
   function updateImportItemInclude(sourceIndex: number, include: boolean) {
@@ -1379,13 +1431,21 @@ function QuestionsManager({
 
     setSavingImported(true);
     try {
+      const baseOrder = questions.reduce((max, q) => {
+        const n = Number(q.questionOrder);
+        return Number.isFinite(n) ? Math.max(max, n) : max;
+      }, 0);
+
       for (let i = 0; i < selected.length; i += 200) {
         const batch = writeBatch(db);
-        for (const item of selected.slice(i, i + 200)) {
+        const chunk = selected.slice(i, i + 200);
+        for (let j = 0; j < chunk.length; j += 1) {
+          const item = chunk[j];
           const payload = buildImportedQuestionPayload(item);
           const newRef = doc(qCol);
           batch.set(newRef, {
             ...payload,
+            questionOrder: baseOrder + i + j + 1,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           });

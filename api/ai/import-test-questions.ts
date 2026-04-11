@@ -22,6 +22,7 @@ import {
   type ImportedQuestionItem,
 } from "../_lib/pdfQuestionImport.js";
 import { initializeStreaming, sendStreamEvent, endStreaming, streamError } from "../_lib/aiStreamingUtils.js";
+import { getGeminiModelNameFromEnv } from "../_lib/geminiModel.js";
 import ImageKit from "imagekit";
 
 // ---------------------------------------------------------------------------
@@ -231,10 +232,7 @@ async function processWithGemini(
       throw new Error("GEMINI_API_KEY is not configured");
     }
 
-    const modelName = process.env.GEMINI_MODEL || "gemini-1.5-flash";
-    if (!modelName) {
-      throw new Error("GEMINI_MODEL is not configured");
-    }
+    const modelName = getGeminiModelNameFromEnv();
 
     // Lazy-load GoogleGenerativeAI
     const { GoogleGenerativeAI } = await getGeminiAI();
