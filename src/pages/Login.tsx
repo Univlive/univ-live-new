@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useTenant } from "@/contexts/TenantProvider";
 import { useAuth } from "@/contexts/AuthProvider";
+import logo from "../assets/univ-logo.png";
 import {
   Dialog,
   DialogContent,
@@ -199,7 +200,7 @@ export default function Login() {
       <div className="flex flex-col min-h-screen p-6 lg:p-12 relative">
         {/* Header / Nav */}
         <div className="flex justify-between items-center mb-8">
-          <div className="font-bold text-2xl tracking-tighter">UNIV.LIVE</div>
+          <img src={logo} className="w-25 h-10" alt="UNIV.LIVE Logo" />
           <Link
             to="/"
             className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
