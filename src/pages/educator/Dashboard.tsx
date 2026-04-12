@@ -751,10 +751,6 @@ export default function EducatorDashboard() {
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Button size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0" onClick={() => navigate("/educator/analytics")}>
-                View Analytics
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
               <Button size="sm" variant="secondary" className="border-0" onClick={() => navigate("/educator/messages")}>
                 Learner Messages
                 {unreadMessages > 0 ? <Badge className="ml-2 bg-primary text-primary-foreground">{unreadMessages}</Badge> : null}
@@ -783,7 +779,7 @@ export default function EducatorDashboard() {
         </div>
       </motion.div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7 gap-4">
         <MetricCard
           title="Total Students"
           value={totalStudents.toLocaleString()}
@@ -814,14 +810,6 @@ export default function EducatorDashboard() {
           icon={Target}
           iconColor="text-orange-500"
           delay={0.15}
-        />
-        <MetricCard
-          title="Avg Score"
-          value={`${avgScore}`}
-          change={{ value: Math.abs(deltaAvgScore), type: deltaAvgScore >= 0 ? "increase" : "decrease" }}
-          icon={TrendingUp}
-          iconColor="text-cyan-500"
-          delay={0.2}
         />
         <MetricCard
           title="Completion Rate"

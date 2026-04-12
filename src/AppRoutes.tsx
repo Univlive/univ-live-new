@@ -38,7 +38,6 @@ import EducatorDashboard from "@/pages/educator/Dashboard";
 import Learners from "@/pages/educator/Learners";
 import TestSeries from "@/pages/educator/TestSeries";
 import AccessCodes from "@/pages/educator/AccessCodes";
-import Analytics from "@/pages/educator/Analytics";
 import Messages from "@/pages/educator/Messages";
 import WebsiteSettings from "@/pages/educator/WebsiteSettings";
 import Billing from "@/pages/educator/Billing";
@@ -54,7 +53,6 @@ import StudentAttempts from "@/pages/student/StudentAttempts";
 import StudentAttemptDetails from "@/pages/student/StudentAttemptDetails";
 import StudentResults from "@/pages/student/StudentResults";
 import StudentRankings from "@/pages/student/StudentRankings";
-import StudentAnalytics from "@/pages/student/StudentAnalytics";
 import StudentMessages from "@/pages/student/StudentMessages";
 import StudentSettings from "@/pages/student/StudentSettings";
 
@@ -89,7 +87,6 @@ export default function AppRoutes() {
               <Route path="attempts/:attemptId" element={<StudentAttemptDetails />} />
               <Route path="results/:attemptId" element={<StudentResults />} />
               <Route path="rankings" element={<StudentRankings />} />
-              <Route path="analytics" element={<StudentAnalytics />} />
               <Route path="messages" element={<StudentMessages />} />
               <Route path="settings" element={<StudentSettings />} />
             </Route>
@@ -109,7 +106,6 @@ export default function AppRoutes() {
             <Route path="learners" element={<Learners />} />
             <Route path="test-series" element={<TestSeries />} />
             <Route path="access-codes" element={<AccessCodes />} />
-            <Route path="analytics" element={<Analytics />} />
             <Route path="messages" element={<Messages />} />
             <Route path="website-settings" element={<WebsiteSettings />} />
             <Route path="billing" element={<Billing />} />
@@ -168,7 +164,6 @@ export default function AppRoutes() {
             <Route path="learners" element={<Learners />} />
             <Route path="test-series" element={<TestSeries />} />
             <Route path="access-codes" element={<AccessCodes />} />
-            <Route path="analytics" element={<Analytics />} />
             <Route path="messages" element={<Messages />} />
             <Route path="website-settings" element={<WebsiteSettings />} />
             <Route path="billing" element={<Billing />} />

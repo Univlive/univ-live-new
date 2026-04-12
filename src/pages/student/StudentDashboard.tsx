@@ -23,9 +23,11 @@ import { useTenant } from "@/contexts/TenantProvider";
 import { db } from "@/lib/firebase";
 
 import {
+  Timestamp,
   collection,
   doc,
   getDoc,
+  getDocs,
   limit,
   onSnapshot,
   orderBy,
@@ -219,41 +221,74 @@ export default function StudentDashboard() {
     return () => unsub();
   }, [canLoad, authLoading, tenantLoading, firebaseUser, educatorId]);
 
-  // 3) Compute rank (best-effort)
+  // 3) Compute rank (align with Rankings page - 30 days)
   useEffect(() => {
     if (!canLoad) return;
+
+    const DAYS = 30;
+    const now = new Date();
+    const start = new Date(now.getTime() - DAYS * 24 * 60 * 60 * 1000);
+    const startTs = Timestamp.fromDate(start);
 
     const qTop = query(
       collection(db, "attempts"),
       where("educatorId", "==", educatorId!),
-      where("status", "in", ["completed", "submitted", "finished", "done"]), // handle older values
-      orderBy("score", "desc"),
-      limit(300)
+      where("status", "in", ["completed", "submitted", "finished", "done"]),
+      where("submittedAt", ">=", startTs),
+      limit(1000)
     );
 
     const unsub = onSnapshot(
       qTop,
       (snap) => {
-        const best: Record<string, number> = {};
+        const best: Record<string, { percent: number; score: number; time: number }> = {};
 
         snap.docs.forEach((d) => {
           const a = d.data() as any;
           const sid = String(a?.studentId || "");
           if (!sid) return;
-          const sc = safeNum(a?.score, 0);
-          best[sid] = Math.max(best[sid] || 0, sc);
+
+          const s = safeNum(a?.score, 0);
+          const m = safeNum(a?.maxScore, 0);
+          const p = m > 0 ? (s / m) * 100 : 0;
+          const t = safeNum(a?.timeSpent || a?.timeTakenSec, 999999);
+
+          const current = best[sid];
+          if (!current || s > current.score || (s === current.score && p > current.percent) || (s === current.score && p === current.percent && t < current.time)) {
+            best[sid] = { percent: p, score: s, time: t };
+          }
         });
 
-        const sorted = Object.entries(best)
-          .sort((a, b) => b[1] - a[1])
-          .map(([studentId]) => studentId);
+        const ranked = Object.entries(best)
+          .sort((a, b) => {
+            if (b[1].score !== a[1].score) return b[1].score - a[1].score;
+            if (b[1].percent !== a[1].percent) return b[1].percent - a[1].percent;
+            return a[1].time - b[1].time;
+          });
 
-        const idx = sorted.findIndex((id) => id === firebaseUser!.uid);
-        setRank(idx >= 0 ? idx + 1 : null);
-        setTotalParticipants(sorted.length);
+        let currentRank = 0;
+        let lastPercent = -1;
+        let lastScore = -1;
+        let lastTime = -1;
+        
+        const sortedWithRank = ranked.map(([studentId, data], index) => {
+          // Standard competition rank: 1, 2, 2, 4
+          if (data.score !== lastScore || data.percent !== lastPercent || data.time !== lastTime) {
+            currentRank = index + 1;
+          }
+          lastPercent = data.percent;
+          lastScore = data.score;
+          lastTime = data.time;
+          return { studentId, rank: currentRank };
+        });
+
+        const myEntry = sortedWithRank.find((e) => e.studentId === firebaseUser!.uid);
+        setRank(myEntry ? myEntry.rank : null);
+        setTotalParticipants(sortedWithRank.length);
       },
       (err) => {
-        console.error(err);
+        console.error("Rank calculation failed:", err);
+        // Fallback: try without date filter if index is missing
         setRank(null);
         setTotalParticipants(0);
       }
@@ -329,11 +364,15 @@ export default function StudentDashboard() {
   const scoreTrend = useMemo(() => {
     const list = [...completedAttempts]
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      .slice(-8);
+      .slice(-10); // Show last 10 attempts
 
     return list.map((a) => ({
+      name: a.testTitle.length > 15 ? a.testTitle.slice(0, 12) + "..." : a.testTitle,
+      fullTitle: a.testTitle,
       date: formatDateLabel(new Date(a.createdAt).getTime()),
-      score: a.score,
+      score: accuracyFrom(a.score, a.maxScore),
+      points: a.score,
+      max: a.maxScore
     }));
   }, [completedAttempts]);
 
@@ -368,15 +407,8 @@ export default function StudentDashboard() {
           color="mint"
         />
         <StudentMetricCard
-          title="Avg Score"
-          value={`${avgScore}/${avgMaxScore}`}
-          icon={Target}
-          color="yellow"
-        />
-        <StudentMetricCard
           title="Best Subject"
           value={bestSubject.subject}
-          subtitle={`${bestSubject.score} avg`}
           icon={Trophy}
           color="lavender"
         />
@@ -408,16 +440,45 @@ export default function StudentDashboard() {
       <div className="grid lg:grid-cols-2 gap-6">
         <Card className="card-soft border-0">
           <CardHeader>
-            <CardTitle className="text-lg">Score Trend</CardTitle>
+            <CardTitle className="text-lg">Accuracy Trend (%)</CardTitle>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={250}>
               <LineChart data={scoreTrend}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                <XAxis dataKey="date" className="text-xs" />
-                <YAxis className="text-xs" />
-                <Tooltip contentStyle={{ borderRadius: "12px" }} />
-                <Line type="monotone" dataKey="score" stroke="hsl(var(--primary))" strokeWidth={2} dot />
+                <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
+                <XAxis 
+                  dataKey="date" 
+                  className="text-[10px]" 
+                  tick={{ fill: "hsl(var(--muted-foreground))" }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis 
+                  className="text-[10px]" 
+                  tick={{ fill: "hsl(var(--muted-foreground))" }}
+                  axisLine={false}
+                  tickLine={false}
+                  domain={[0, 100]}
+                />
+                <Tooltip 
+                  contentStyle={{ borderRadius: "12px", border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}
+                  formatter={(value: any, name: string, props: any) => {
+                    if (name === "score") return [`${value}%`, "Accuracy"];
+                    return [value, name];
+                  }}
+                  labelFormatter={(label, payload) => {
+                    const item = payload[0]?.payload;
+                    return item ? `${item.fullTitle} (${label})` : label;
+                  }}
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="score" 
+                  stroke="hsl(var(--primary))" 
+                  strokeWidth={3} 
+                  dot={{ r: 4, fill: "hsl(var(--primary))", strokeWidth: 2, stroke: "#fff" }} 
+                  activeDot={{ r: 6, strokeWidth: 0 }}
+                />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
@@ -430,11 +491,22 @@ export default function StudentDashboard() {
           <CardContent>
             <ResponsiveContainer width="100%" height={250}>
               <BarChart data={subjectPerformance}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                <XAxis dataKey="subject" className="text-xs" tick={{ fontSize: 10 }} />
-                <YAxis className="text-xs" />
-                <Tooltip contentStyle={{ borderRadius: "12px" }} />
-                <Bar dataKey="score" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
+                <XAxis 
+                  dataKey="subject" 
+                  className="text-[10px]" 
+                  tick={{ fill: "hsl(var(--muted-foreground))" }} 
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis 
+                  className="text-[10px]" 
+                  tick={{ fill: "hsl(var(--muted-foreground))" }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip contentStyle={{ borderRadius: "12px", border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }} />
+                <Bar dataKey="score" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} barSize={30} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>

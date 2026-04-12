@@ -179,7 +179,6 @@ export default function StudentLayout() {
       { icon: FileText, label: "Tests", href: "/student/tests" },
       { icon: History, label: "My Attempts", href: "/student/attempts" },
       { icon: Trophy, label: "Rankings", href: "/student/rankings" },
-      { icon: BarChart3, label: "Analytics", href: "/student/analytics" },
       {
         icon: MessageSquare,
         label: "Messages",
@@ -237,15 +236,14 @@ export default function StudentLayout() {
         )}
       >
         <div className="flex flex-col h-full overflow-hidden">
-          {/* Logo */}
+          {/* Logo Section */}
           <div className="h-16 flex items-center justify-between px-4 border-b border-border shrink-0">
-            {/* <Link to="/" className="flex items-center gap-2">
-              <img src={univLogo} alt="UNIV.LIVE" className="h-8 w-auto" />
-              <span className="font-display font-bold text-lg">
-                <span className="gradient-text">UNIV</span>
-                <span className="text-foreground">.LIVE</span>
-              </span>
-            </Link> */}
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Trophy className="h-5 w-5 text-primary" />
+              </div>
+              <span className="font-display font-bold text-lg tracking-tight">Student Portal</span>
+            </div>
 
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(false)}>
               <X className="h-5 w-5" />

@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { Trophy, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Trophy, TrendingUp, TrendingDown, Minus, Filter, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 import { useAuth } from "@/contexts/AuthProvider";
@@ -26,7 +34,7 @@ type LeaderboardRow = {
   name: string;
   avatar?: string;
   rank: number;
-  score: number; // points
+  score: number; // raw points
   accuracy: number; // percent
   rankChange: number;
   isCurrentUser: boolean;
@@ -36,12 +44,17 @@ type AttemptDoc = {
   studentId: string;
   educatorId: string;
   tenantSlug?: string | null;
-  status?: "in_progress" | "submitted";
+  status?: string;
 
   score?: number;
   maxScore?: number;
   accuracy?: number; // 0..1 or 0..100
   timeTakenSec?: number;
+  timeSpent?: number;
+
+  testId?: string;
+  testTitle?: string;
+  subject?: string;
 
   submittedAt?: any;
 };
@@ -60,7 +73,7 @@ function safeNumber(v: any, fallback: number) {
 
 function pct(score: number, maxScore: number) {
   if (!maxScore || maxScore <= 0) return 0;
-  return Math.max(0, Math.min(100, Math.round((score / maxScore) * 100)));
+  return Math.max(0, Math.min(100, (score / maxScore) * 100));
 }
 
 function normalizeAccuracyPercent(val: any) {
@@ -88,36 +101,47 @@ function previousWindowRange(days: number) {
   return { start: Timestamp.fromDate(start), end: Timestamp.fromDate(end) };
 }
 
-function pickBestAttemptsPerStudent(attempts: AttemptDoc[]) {
-  // Best attempt per student within window (by percent desc, then score desc, then time asc)
-  const best: Record<string, AttemptDoc> = {};
+function computeRankings(attempts: AttemptDoc[]) {
+  const best: Record<string, { percent: number; score: number; time: number; accuracy: number }> = {};
 
   for (const a of attempts) {
     const uid = a.studentId;
     if (!uid) continue;
 
-    const score = safeNumber(a.score, 0);
-    const maxScore = safeNumber(a.maxScore, 0);
-    const percentScore = pct(score, maxScore);
-    const time = safeNumber(a.timeTakenSec, Number.MAX_SAFE_INTEGER);
+    const s = safeNumber(a.score, 0);
+    const m = safeNumber(a.maxScore, 0);
+    const p = pct(s, m);
+    const t = safeNumber(a.timeTakenSec || a.timeSpent, 999999);
+    const acc = a.accuracy != null ? normalizeAccuracyPercent(a.accuracy) : Math.round(p);
 
     const current = best[uid];
-    if (!current) {
-      best[uid] = a;
-      continue;
+    if (!current || p > current.percent || (p === current.percent && s > current.score) || (p === current.percent && s === current.score && t < current.time)) {
+      best[uid] = { percent: p, score: s, time: t, accuracy: acc };
     }
-
-    const cScore = safeNumber(current.score, 0);
-    const cMax = safeNumber(current.maxScore, 0);
-    const cPercent = pct(cScore, cMax);
-    const cTime = safeNumber(current.timeTakenSec, Number.MAX_SAFE_INTEGER);
-
-    if (percentScore > cPercent) best[uid] = a;
-    else if (percentScore === cPercent && score > cScore) best[uid] = a;
-    else if (percentScore === cPercent && score === cScore && time < cTime) best[uid] = a;
   }
 
-  return Object.entries(best).map(([studentId, attempt]) => ({ studentId, attempt }));
+  const sorted = Object.entries(best)
+    .sort((a, b) => {
+      if (b[1].score !== a[1].score) return b[1].score - a[1].score;
+      if (b[1].percent !== a[1].percent) return b[1].percent - a[1].percent;
+      return a[1].time - b[1].time;
+    });
+
+  // Standard Competition Ranking (1, 2, 2, 4)
+  let currentRank = 0;
+  let lastPercent = -1;
+  let lastScore = -1;
+  let lastTime = -1;
+
+  return sorted.map(([studentId, data], index) => {
+    if (data.percent !== lastPercent || data.score !== lastScore || data.time !== lastTime) {
+      currentRank = index + 1;
+    }
+    lastPercent = data.percent;
+    lastScore = data.score;
+    lastTime = data.time;
+    return { studentId, rank: currentRank, ...data };
+  });
 }
 
 async function hydrateProfiles(studentIds: string[]) {
@@ -152,11 +176,47 @@ export default function StudentRankings() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
   const [prevRankMap, setPrevRankMap] = useState<Record<string, number>>({});
 
+  // Filters
+  const [filterTest, setFilterTest] = useState<string>("all");
+  const [filterSubject, setFilterSubject] = useState<string>("all");
+
+  const [availableTests, setAvailableTests] = useState<{ id: string; title: string }[]>([]);
+  const [availableSubjects, setAvailableSubjects] = useState<string[]>([]);
+
   const canLoad = useMemo(() => {
     return !authLoading && !tenantLoading && !!firebaseUser?.uid && !!educatorId;
   }, [authLoading, tenantLoading, firebaseUser?.uid, educatorId]);
 
-  // Load previous window ranks (for rankChange)
+  // 1) Load metadata (tests and subjects) for filters
+  useEffect(() => {
+    if (!canLoad) return;
+
+    // Load unique tests and subjects from attempts
+    const q = query(
+      collection(db, "attempts"),
+      where("educatorId", "==", educatorId!),
+      where("status", "in", ["completed", "submitted", "finished", "done"]),
+      limit(500)
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      const testsMap: Record<string, string> = {};
+      const subjectsSet = new Set<string>();
+
+      snap.docs.forEach((d) => {
+        const a = d.data() as AttemptDoc;
+        if (a.testId && a.testTitle) testsMap[a.testId] = a.testTitle;
+        if (a.subject) subjectsSet.add(a.subject);
+      });
+
+      setAvailableTests(Object.entries(testsMap).map(([id, title]) => ({ id, title })));
+      setAvailableSubjects(Array.from(subjectsSet).sort());
+    });
+
+    return () => unsub();
+  }, [canLoad, educatorId]);
+
+  // 2) Load previous window ranks (for rankChange)
   useEffect(() => {
     let mounted = true;
 
@@ -167,44 +227,25 @@ export default function StudentRankings() {
         const DAYS = 30;
         const prev = previousWindowRange(DAYS);
 
-        const base = [
-          where("educatorId", "==", educatorId),
-          where("status", "==", "submitted"),
+        const constraints: any[] = [
+          where("educatorId", "==", educatorId!),
+          where("status", "in", ["completed", "submitted", "finished", "done"]),
           where("submittedAt", ">=", prev.start),
           where("submittedAt", "<", prev.end),
         ];
 
-        // Tenant-specific leaderboard (batch)
-        if (tenantSlug) base.push(where("tenantSlug", "==", tenantSlug));
+        if (tenantSlug) constraints.push(where("tenantSlug", "==", tenantSlug));
+        if (filterTest !== "all") constraints.push(where("testId", "==", filterTest));
+        if (filterSubject !== "all") constraints.push(where("subject", "==", filterSubject));
 
-        const qPrev = query(
-          collection(db, "attempts"),
-          ...base,
-          // We order by score to pull top attempts with fewer reads; we still aggregate per student
-          orderBy("score", "desc"),
-          orderBy("timeTakenSec", "asc"),
-          limit(600)
-        );
+        const qPrev = query(collection(db, "attempts"), ...constraints, limit(1000));
 
         const snap = await getDocs(qPrev);
         const attempts = snap.docs.map((d) => d.data() as AttemptDoc);
-
-        const best = pickBestAttemptsPerStudent(attempts)
-          .map(({ studentId, attempt }) => {
-            const score = safeNumber(attempt.score, 0);
-            const maxScore = safeNumber(attempt.maxScore, 0);
-            const percentScore = pct(score, maxScore);
-            const time = safeNumber(attempt.timeTakenSec, Number.MAX_SAFE_INTEGER);
-            return { studentId, percentScore, score, time, attempt };
-          })
-          .sort((a, b) => {
-            if (b.percentScore !== a.percentScore) return b.percentScore - a.percentScore;
-            if (b.score !== a.score) return b.score - a.score;
-            return a.time - b.time;
-          });
+        const ranked = computeRankings(attempts);
 
         const map: Record<string, number> = {};
-        best.forEach((row, idx) => (map[row.studentId] = idx + 1));
+        ranked.forEach((row) => (map[row.studentId] = row.rank));
 
         if (!mounted) return;
         setPrevRankMap(map);
@@ -219,9 +260,9 @@ export default function StudentRankings() {
     return () => {
       mounted = false;
     };
-  }, [canLoad, educatorId, tenantSlug]);
+  }, [canLoad, educatorId, tenantSlug, filterTest, filterSubject]);
 
-  // Live leaderboard (current window)
+  // 3) Live leaderboard (current window)
   useEffect(() => {
     if (!canLoad) {
       setLoading(authLoading || tenantLoading);
@@ -234,64 +275,55 @@ export default function StudentRankings() {
     const cur = windowRange(DAYS);
 
     const constraints: any[] = [
-      where("educatorId", "==", educatorId),
-      where("status", "==", "submitted"),
+      where("educatorId", "==", educatorId!),
+      where("status", "in", ["completed", "submitted", "finished", "done"]),
       where("submittedAt", ">=", cur.start),
-      orderBy("score", "desc"),
-      orderBy("timeTakenSec", "asc"),
-      limit(600),
     ];
 
-    if (tenantSlug) constraints.splice(2, 0, where("tenantSlug", "==", tenantSlug)); // insert after educatorId/status
+    if (tenantSlug) constraints.push(where("tenantSlug", "==", tenantSlug));
+    if (filterTest !== "all") constraints.push(where("testId", "==", filterTest));
+    if (filterSubject !== "all") constraints.push(where("subject", "==", filterSubject));
 
-    const qCur = query(collection(db, "attempts"), ...constraints);
+    const qCur = query(collection(db, "attempts"), ...constraints, limit(1000));
 
     const unsub = onSnapshot(
       qCur,
       async (snap) => {
         try {
           const attempts = snap.docs.map((d) => d.data() as AttemptDoc);
+          const ranked = computeRankings(attempts);
 
-          // Aggregate: best attempt per student
-          const best = pickBestAttemptsPerStudent(attempts)
-            .map(({ studentId, attempt }) => {
-              const score = safeNumber(attempt.score, 0);
-              const maxScore = safeNumber(attempt.maxScore, 0);
-              const percentScore = pct(score, maxScore);
-              const time = safeNumber(attempt.timeTakenSec, Number.MAX_SAFE_INTEGER);
-              const accuracy = attempt.accuracy != null ? normalizeAccuracyPercent(attempt.accuracy) : percentScore;
-              return { studentId, percentScore, score, maxScore, time, accuracy };
-            })
-            .sort((a, b) => {
-              if (b.percentScore !== a.percentScore) return b.percentScore - a.percentScore;
-              if (b.score !== a.score) return b.score - a.score;
-              return a.time - b.time;
-            });
-
-          const top = best.slice(0, 50); // keep UI fast + fewer profile reads
+          // Find current user's entry if not in top 50
+          const myEntry = ranked.find(x => x.studentId === firebaseUser!.uid);
+          
+          const top = ranked.slice(0, 50);
           const ids = top.map((x) => x.studentId);
+          if (myEntry && !ids.includes(myEntry.studentId)) {
+            ids.push(myEntry.studentId);
+          }
 
           const profiles = await hydrateProfiles(ids);
 
-          const rows: LeaderboardRow[] = top.map((x, idx) => {
-            const rank = idx + 1;
+          const rows: LeaderboardRow[] = ranked.map((x) => {
             const prevRank = prevRankMap[x.studentId];
-            const rankChange = prevRank ? prevRank - rank : 0; // + means improved
+            const rankChange = prevRank ? prevRank - x.rank : 0;
             const name = profiles[x.studentId]?.name || fallbackName(x.studentId);
             const avatar = profiles[x.studentId]?.avatar;
             return {
               studentId: x.studentId,
               name,
               avatar,
-              rank,
-              score: x.score,
+              rank: x.rank,
+              score: Math.round(x.score),
               accuracy: x.accuracy,
               rankChange,
               isCurrentUser: x.studentId === firebaseUser!.uid,
             };
           });
 
-          setLeaderboard(rows);
+          // Final leaderboard displays top 50 + current user if needed
+          const filteredRows = rows.filter((r) => r.rank <= 50 || r.isCurrentUser);
+          setLeaderboard(filteredRows);
           setLoading(false);
         } catch (e) {
           console.error(e);
@@ -300,176 +332,265 @@ export default function StudentRankings() {
         }
       },
       (err) => {
-        console.error(err);
+        console.error("Leaderboard query failed:", err);
         setLeaderboard([]);
         setLoading(false);
       }
     );
 
     return () => unsub();
-  }, [canLoad, educatorId, tenantSlug, firebaseUser, authLoading, tenantLoading, prevRankMap]);
+  }, [canLoad, educatorId, tenantSlug, firebaseUser, authLoading, tenantLoading, prevRankMap, filterTest, filterSubject]);
 
   const top3 = leaderboard.slice(0, 3);
 
-  if (loading) {
+  const clearFilters = () => {
+    setFilterTest("all");
+    setFilterSubject("all");
+  };
+
+  if (loading && leaderboard.length === 0) {
     return (
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold">Rankings</h1>
-          <p className="text-muted-foreground">See how you compare with others in your batch</p>
+          <p className="text-muted-foreground">See how you compare with others</p>
         </div>
         <div className="rounded-xl border border-border p-6 text-muted-foreground">Loading leaderboard…</div>
       </div>
     );
   }
 
-  if (!firebaseUser?.uid || !educatorId) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">Rankings</h1>
-          <p className="text-muted-foreground">See how you compare with others in your batch</p>
-        </div>
-        <div className="rounded-xl border border-border p-6 text-muted-foreground">
-          Open rankings from your coaching website (tenant) and make sure you are logged in.
-        </div>
-      </div>
-    );
-  }
-
-  if (leaderboard.length === 0) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">Rankings</h1>
-          <p className="text-muted-foreground">See how you compare with others in your batch</p>
-        </div>
-        <div className="rounded-xl border border-border p-6 text-muted-foreground">
-          No leaderboard yet. Submit at least one test attempt to appear here.
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Rankings</h1>
-        <p className="text-muted-foreground">See how you compare with others in your batch</p>
+    <div className="space-y-6 pb-12">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Rankings</h1>
+          <p className="text-muted-foreground">See how you compare with others in your coaching</p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 bg-muted/50 px-3 py-1.5 rounded-lg border border-border">
+            <Filter className="h-4 w-4 text-muted-foreground" />
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Filters</span>
+          </div>
+
+          <Select value={filterTest} onValueChange={setFilterTest}>
+            <SelectTrigger className="w-[180px] h-9 rounded-xl bg-card">
+              <SelectValue placeholder="Test Series" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Test Series</SelectItem>
+              {availableTests.map((t) => (
+                <SelectItem key={t.id} value={t.id}>{t.title}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={filterSubject} onValueChange={setFilterSubject}>
+            <SelectTrigger className="w-[150px] h-9 rounded-xl bg-card">
+              <SelectValue placeholder="Subject" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Subjects</SelectItem>
+              {availableSubjects.map((s) => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {(filterTest !== "all" || filterSubject !== "all") && (
+            <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9 px-2 text-muted-foreground hover:text-foreground">
+              <XCircle className="h-4 w-4 mr-1" /> Clear
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* Top 3 */}
-      <div className="grid grid-cols-3 gap-4">
-        {top3.map((entry, i) => (
-          <Card
-            key={entry.studentId}
-            className={cn(
-              "card-soft border-0 text-center",
-              i === 0
-                ? "bg-yellow-100 dark:bg-yellow-900/20"
-                : i === 1
-                ? "bg-gray-100 dark:bg-gray-800"
-                : "bg-orange-100 dark:bg-orange-900/20"
-            )}
-          >
-            <CardContent className="pt-6">
-              <div className="relative inline-block">
-                <Avatar className="h-16 w-16 border-4 border-white shadow-lg">
-                  <AvatarImage src={entry.avatar} />
-                  <AvatarFallback>{entry.name?.[0] || "S"}</AvatarFallback>
-                </Avatar>
-                <div
-                  className={cn(
-                    "absolute -bottom-2 -right-2 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold",
-                    i === 0 ? "bg-yellow-400" : i === 1 ? "bg-gray-400" : "bg-orange-400"
-                  )}
-                >
-                  {entry.rank}
-                </div>
+      {leaderboard.length === 0 ? (
+        <Card className="card-soft border-0">
+          <CardContent className="py-12 text-center text-muted-foreground">
+            No rankings found for the selected filters in the last 30 days.
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {/* Top 3 */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Rank 2 (Left on desktop) */}
+            {top3[1] && (
+              <div className="order-2 md:order-1 flex flex-col justify-end h-full">
+                <Card className="card-soft border-0 text-center bg-gray-100 dark:bg-gray-800/50">
+                  <CardContent className="pt-6 pb-8">
+                    <div className="relative inline-block">
+                      <Avatar className="h-16 w-16 border-4 border-white dark:border-gray-700 shadow-lg">
+                        <AvatarImage src={top3[1].avatar} />
+                        <AvatarFallback>{top3[1].name?.[0]}</AvatarFallback>
+                      </Avatar>
+                      <div className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-gray-400 flex items-center justify-center text-white text-sm font-bold shadow-md">
+                        2
+                      </div>
+                    </div>
+                    <p className="font-semibold mt-4 truncate max-w-[150px] mx-auto">{top3[1].name}</p>
+                    <p className="text-2xl font-bold text-gray-600 dark:text-gray-300">{top3[1].score}</p>
+                    <p className="text-xs text-muted-foreground">{top3[1].accuracy}% accuracy</p>
+                  </CardContent>
+                </Card>
               </div>
-              <p className="font-semibold mt-3">{entry.name}</p>
-              <p className="text-2xl font-bold gradient-text">{entry.score}</p>
-              <p className="text-xs text-muted-foreground">{entry.accuracy}% accuracy</p>
+            )}
+
+            {/* Rank 1 (Center) */}
+            {top3[0] && (
+              <div className="order-1 md:order-2">
+                <Card className="card-soft border-0 text-center bg-yellow-50 dark:bg-yellow-900/10 border-2 border-yellow-200/50 scale-105 shadow-xl relative z-10">
+                  <div className="absolute -top-4 left-1/2 -translate-x-1/2">
+                    <Trophy className="h-10 w-10 text-yellow-500 fill-yellow-500 animate-bounce" />
+                  </div>
+                  <CardContent className="pt-8 pb-10">
+                    <div className="relative inline-block">
+                      <Avatar className="h-24 w-24 border-4 border-yellow-400 shadow-xl">
+                        <AvatarImage src={top3[0].avatar} />
+                        <AvatarFallback>{top3[0].name?.[0]}</AvatarFallback>
+                      </Avatar>
+                      <div className="absolute -bottom-2 -right-2 w-10 h-10 rounded-full bg-yellow-400 flex items-center justify-center text-white text-lg font-bold shadow-md">
+                        1
+                      </div>
+                    </div>
+                    <p className="font-bold text-lg mt-4 truncate max-w-[200px] mx-auto">{top3[0].name}</p>
+                    <p className="text-4xl font-black gradient-text">{top3[0].score}</p>
+                    <p className="text-sm font-medium text-yellow-600 dark:text-yellow-400">{top3[0].accuracy}% accuracy</p>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {/* Rank 3 (Right) */}
+            {top3[2] && (
+              <div className="order-3 md:order-3 flex flex-col justify-end h-full">
+                <Card className="card-soft border-0 text-center bg-orange-50 dark:bg-orange-900/10">
+                  <CardContent className="pt-6 pb-8">
+                    <div className="relative inline-block">
+                      <Avatar className="h-16 w-16 border-4 border-white dark:border-orange-900/30 shadow-lg">
+                        <AvatarImage src={top3[2].avatar} />
+                        <AvatarFallback>{top3[2].name?.[0]}</AvatarFallback>
+                      </Avatar>
+                      <div className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-orange-400 flex items-center justify-center text-white text-sm font-bold shadow-md">
+                        3
+                      </div>
+                    </div>
+                    <p className="font-semibold mt-4 truncate max-w-[150px] mx-auto">{top3[2].name}</p>
+                    <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">{top3[2].score}</p>
+                    <p className="text-xs text-muted-foreground">{top3[2].accuracy}% accuracy</p>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </div>
+
+          {/* Full Leaderboard */}
+          <Card className="card-soft border-0 mt-8 overflow-hidden">
+            <CardHeader className="border-b border-border bg-muted/30">
+              <CardTitle className="text-lg font-display flex items-center gap-2">
+                <Trophy className="h-5 w-5 text-primary" />
+                Coaching Leaderboard
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="w-20 pl-6">Rank</TableHead>
+                    <TableHead>Student</TableHead>
+                    <TableHead className="text-center">Score</TableHead>
+                    <TableHead className="text-center">Accuracy</TableHead>
+                    <TableHead className="text-center pr-6">Change</TableHead>
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody>
+                  {leaderboard.map((entry) => (
+                    <TableRow 
+                      key={entry.studentId} 
+                      className={cn(
+                        "group transition-colors",
+                        entry.isCurrentUser ? "bg-primary/5 hover:bg-primary/10" : "hover:bg-muted/50"
+                      )}
+                    >
+                      <TableCell className="font-bold pl-6">
+                        {entry.rank <= 3 ? (
+                          <div className={cn(
+                            "w-8 h-8 rounded-full flex items-center justify-center text-white text-xs",
+                            entry.rank === 1 ? "bg-yellow-400" : entry.rank === 2 ? "bg-gray-400" : "bg-orange-400"
+                          )}>
+                            {entry.rank}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground ml-2">#{entry.rank}</span>
+                        )}
+                      </TableCell>
+
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10 border border-border group-hover:scale-105 transition-transform">
+                            <AvatarImage src={entry.avatar} />
+                            <AvatarFallback>{entry.name?.[0]}</AvatarFallback>
+                          </Avatar>
+
+                          <div className="flex flex-col">
+                            <span className={cn("font-semibold", entry.isCurrentUser && "text-primary")}>
+                              {entry.name}
+                              {entry.isCurrentUser && " (You)"}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground uppercase tracking-tight font-medium">Batch Learner</span>
+                          </div>
+                        </div>
+                      </TableCell>
+
+                      <TableCell className="text-center">
+                        <span className="text-lg font-bold tabular-nums">{entry.score}</span>
+                      </TableCell>
+                      
+                      <TableCell className="text-center">
+                        <div className="flex flex-col items-center">
+                          <span className="text-sm font-medium">{entry.accuracy}%</span>
+                          <div className="w-12 h-1 bg-muted rounded-full mt-1 overflow-hidden">
+                            <div 
+                              className="h-full bg-primary" 
+                              style={{ width: `${entry.accuracy}%` }}
+                            />
+                          </div>
+                        </div>
+                      </TableCell>
+
+                      <TableCell className="text-center pr-6">
+                        {entry.rankChange > 0 ? (
+                          <div className="inline-flex items-center gap-1 text-green-600 bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded-md text-xs font-bold">
+                            <TrendingUp className="h-3 w-3" />
+                            {entry.rankChange}
+                          </div>
+                        ) : entry.rankChange < 0 ? (
+                          <div className="inline-flex items-center gap-1 text-red-500 bg-red-900/10 px-2 py-1 rounded-md text-xs font-bold">
+                            <TrendingDown className="h-3 w-3" />
+                            {Math.abs(entry.rankChange)}
+                          </div>
+                        ) : (
+                          <Minus className="h-4 w-4 text-muted-foreground mx-auto" />
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+
+              <div className="p-4 bg-muted/20 border-t border-border">
+                <p className="text-xs text-muted-foreground text-center">
+                  Leaderboard calculations are based on each student’s best attempt in the last 30 days. 
+                  Ties are broken by total raw score followed by time taken.
+                </p>
+              </div>
             </CardContent>
           </Card>
-        ))}
-      </div>
-
-      {/* Full Leaderboard */}
-      <Card className="card-soft border-0">
-        <CardHeader>
-          <CardTitle>Full Leaderboard</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-16">Rank</TableHead>
-                <TableHead>Student</TableHead>
-                <TableHead className="text-center">Score</TableHead>
-                <TableHead className="text-center">Accuracy</TableHead>
-                <TableHead className="text-center">Change</TableHead>
-              </TableRow>
-            </TableHeader>
-
-            <TableBody>
-              {leaderboard.map((entry) => (
-                <TableRow key={entry.studentId} className={cn(entry.isCurrentUser && "bg-primary/5")}>
-                  <TableCell className="font-bold">
-                    {entry.rank <= 3 ? (
-                      <Trophy
-                        className={cn(
-                          "h-5 w-5",
-                          entry.rank === 1 ? "text-yellow-500" : entry.rank === 2 ? "text-gray-400" : "text-orange-400"
-                        )}
-                      />
-                    ) : (
-                      `#${entry.rank}`
-                    )}
-                  </TableCell>
-
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-8 w-8">
-                        <AvatarImage src={entry.avatar} />
-                        <AvatarFallback>{entry.name?.[0] || "S"}</AvatarFallback>
-                      </Avatar>
-
-                      <span className={cn("font-medium", entry.isCurrentUser && "text-primary")}>
-                        {entry.name}
-                        {entry.isCurrentUser && " (You)"}
-                      </span>
-                    </div>
-                  </TableCell>
-
-                  <TableCell className="text-center font-semibold">{entry.score}</TableCell>
-                  <TableCell className="text-center">{entry.accuracy}%</TableCell>
-
-                  <TableCell className="text-center">
-                    {entry.rankChange > 0 ? (
-                      <span className="text-green-600 flex items-center justify-center gap-1">
-                        <TrendingUp className="h-4 w-4" />+{entry.rankChange}
-                      </span>
-                    ) : entry.rankChange < 0 ? (
-                      <span className="text-red-500 flex items-center justify-center gap-1">
-                        <TrendingDown className="h-4 w-4" />
-                        {entry.rankChange}
-                      </span>
-                    ) : (
-                      <Minus className="h-4 w-4 text-muted-foreground mx-auto" />
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-
-          <p className="text-xs text-muted-foreground mt-3">
-            Leaderboard is based on each student’s best submitted attempt in the last 30 days.
-          </p>
-        </CardContent>
-      </Card>
+        </>
+      )}
     </div>
   );
 }
-

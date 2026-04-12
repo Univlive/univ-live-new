@@ -6,7 +6,6 @@ import {
   Users,
   FileText,
   Key,
-  BarChart3,
   MessageSquare,
   Globe,
   CreditCard,
@@ -14,7 +13,9 @@ import {
   LogOut,
   Menu,
   X,
+  Bell,
   ChevronRight,
+  Shield,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -27,12 +28,20 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn, stringToColor } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import logo from "@/assets/logo.png";
 import univLogo from "@/assets/univ-logo-1.png";
+
 import { useAuth } from "@/contexts/AuthProvider";
-import { signOut } from "firebase/auth";
-import { auth, db } from "@/lib/firebase";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { useTenant } from "@/contexts/TenantProvider";
+import { db } from "@/lib/firebase";
+import {
+  collection,
+  onSnapshot,
+  query,
+  where,
+} from "firebase/firestore";
+import { getAuth, signOut } from "firebase/auth";
 
 type SidebarItem = {
   icon: any;
@@ -41,49 +50,44 @@ type SidebarItem = {
   badge?: number;
 };
 
-function initials(name: string) {
-  const parts = (name || "").trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "ED";
-  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
-}
-
 export default function EducatorLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [unreadMessages, setUnreadMessages] = useState(0);
   const location = useLocation();
   const navigate = useNavigate();
 
-  const { profile } = useAuth();
+  const { firebaseUser, profile, loading: authLoading } = useAuth();
+  const { tenant, loading: tenantLoading } = useTenant();
 
-  const educatorName = profile?.displayName || profile?.fullName || "Educator";
-  const educatorEmail = profile?.email || "No email";
-  const tenantSlug = profile?.tenantSlug || "";
-  const photoURL = profile?.photoURL;
-  const userInitials = initials(educatorName);
+  const educatorId = tenant?.educatorId || profile?.educatorId || null;
 
+  const [unreadMessages, setUnreadMessages] = useState(0);
+
+  // Live unread count for support threads
   useEffect(() => {
-    const uid = profile?.uid;
-    if (!uid) {
+    if (!educatorId) {
       setUnreadMessages(0);
       return;
     }
 
-    const unreadQuery = query(collection(db, "support_threads"), where("educatorId", "==", uid));
+    const q = query(
+      collection(db, "support_threads"),
+      where("educatorId", "==", educatorId),
+      where("unreadCountEducator", ">", 0)
+    );
 
     const unsub = onSnapshot(
-      unreadQuery,
+      q,
       (snap) => {
-        let total = 0;
-        snap.docs.forEach((docSnap) => {
-          total += Number((docSnap.data() as any)?.unreadCountEducator || 0);
-        });
-        setUnreadMessages(total);
+        setUnreadMessages(snap.size);
       },
-      () => setUnreadMessages(0)
+      (err) => {
+        console.error(err);
+        setUnreadMessages(0);
+      }
     );
 
     return () => unsub();
-  }, [profile?.uid]);
+  }, [educatorId]);
 
   const sidebarItems = useMemo<SidebarItem[]>(
     () => [
@@ -91,7 +95,6 @@ export default function EducatorLayout() {
       { icon: Users, label: "Learners", href: "/educator/learners" },
       { icon: FileText, label: "Test Series", href: "/educator/test-series" },
       { icon: Key, label: "Access Codes", href: "/educator/access-codes" },
-      { icon: BarChart3, label: "Analytics", href: "/educator/analytics" },
       {
         icon: MessageSquare,
         label: "Messages",
@@ -105,36 +108,36 @@ export default function EducatorLayout() {
     [unreadMessages]
   );
 
-  const isActive = (href: string) => location.pathname === href;
+  const isActive = (href: string) => {
+    if (href === "/educator/test-series") return location.pathname.startsWith("/educator/test-series");
+    return location.pathname === href;
+  };
 
   const handleLogout = async () => {
     try {
+      const auth = getAuth();
       await signOut(auth);
-      navigate("/login?role=educator");
-    } catch (error) {
-      console.error(error);
+      navigate("/login");
+    } catch (e) {
+      console.error(e);
     }
   };
 
-  const handleViewWebsite = () => {
-    if (!tenantSlug) {
-      navigate("/educator/website-settings");
-      return;
-    }
-
-    const hostname = window.location.hostname;
-    if (hostname === "localhost" || hostname === "127.0.0.1") {
-      window.open(`/?tenant=${encodeURIComponent(tenantSlug)}`, "_blank");
-      return;
-    }
-
-    const parts = hostname.split(".");
-    const rootDomain = parts.length >= 2 ? parts.slice(-2).join(".") : hostname;
-    window.open(`https://${tenantSlug}.${rootDomain}`, "_blank");
+  const initials = (name: string) => {
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase();
   };
+
+  if (authLoading || tenantLoading) {
+    return <div className="text-center py-12 text-muted-foreground">Loading...</div>;
+  }
 
   return (
     <div className="min-h-screen bg-background flex">
+      {/* Mobile Sidebar Overlay */}
       <AnimatePresence>
         {sidebarOpen && (
           <motion.div
@@ -147,17 +150,21 @@ export default function EducatorLayout() {
         )}
       </AnimatePresence>
 
+      {/* Sidebar */}
       <aside
         className={cn(
-          "fixed left-0 top-0 z-50 h-full w-64 bg-card border-r border-border transition-transform duration-300 lg:translate-x-0 lg:static",
+          "fixed inset-y-0 left-0 z-50 w-64 bg-card border-r border-border transition-transform duration-300 lg:translate-x-0 lg:static",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
         <div className="flex flex-col h-full">
           <div className="h-16 flex items-center justify-between px-4 border-b border-border">
-            <Link to="/" className="flex items-center gap-2">
-              <img src={univLogo} alt="UNIV.LIVE" className="h-8 w-auto" />
-            </Link>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Shield className="h-5 w-5 text-primary" />
+              </div>
+              <span className="font-display font-bold text-lg tracking-tight">Educator Hub</span>
+            </div>
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(false)}>
               <X className="h-5 w-5" />
             </Button>
@@ -172,31 +179,26 @@ export default function EducatorLayout() {
                   to={item.href}
                   onClick={() => setSidebarOpen(false)}
                   className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 group relative overflow-hidden",
-                    active ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                    "flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200",
+                    active
+                      ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
                   )}
                 >
-                  {active && (
-                    <motion.div
-                      layoutId="activeTab"
-                      className="absolute inset-0 gradient-bg rounded-lg"
-                      transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                    />
-                  )}
-                  <item.icon className={cn("h-5 w-5 relative z-10", active && "text-white")} />
-                  <span className="relative z-10">{item.label}</span>
-                  {item.badge ? (
-                    <Badge variant="secondary" className={cn("ml-auto relative z-10 text-xs", active && "bg-white/20 text-white")}>
+                  <item.icon className="h-5 w-5" />
+                  <span>{item.label}</span>
+                  {item.badge != null && (
+                    <Badge variant="secondary" className={cn("ml-auto", active ? "bg-primary-foreground/20 text-white" : "")}>
                       {item.badge}
                     </Badge>
-                  ) : null}
+                  )}
                 </Link>
               );
             })}
           </nav>
 
           <div className="p-4 border-t border-border">
-            <Button variant="ghost" className="w-full justify-start text-muted-foreground hover:text-destructive" onClick={handleLogout}>
+            <Button variant="ghost" className="w-full justify-start text-muted-foreground hover:text-destructive rounded-xl" onClick={handleLogout}>
               <LogOut className="h-5 w-5 mr-3" />
               Logout
             </Button>
@@ -204,54 +206,52 @@ export default function EducatorLayout() {
         </div>
       </aside>
 
+      {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 bg-card border-b border-border flex items-center justify-between px-4 lg:px-6 sticky top-0 z-30">
+        <header className="h-16 bg-card border-b border-border flex items-center justify-between px-4 lg:px-8 sticky top-0 z-30">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)}>
               <Menu className="h-5 w-5" />
             </Button>
-
-            <div className="hidden sm:flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Educator</span>
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span>Educator</span>
+              <ChevronRight className="h-4 w-4" />
               <span className="font-medium text-foreground capitalize">
                 {location.pathname.split("/").pop()?.replace("-", " ") || "Dashboard"}
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-4">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" className="relative rounded-xl">
+              <Bell className="h-5 w-5 text-muted-foreground" />
+              {unreadMessages > 0 && <span className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full" />}
+            </Button>
+
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="flex items-center gap-2 px-2">
+                <Button variant="ghost" className="flex items-center gap-3 px-2 hover:bg-muted rounded-xl">
                   <Avatar className="h-8 w-8">
-                    {photoURL && <AvatarImage src={photoURL} />}
-                    <AvatarFallback style={{ backgroundColor: stringToColor(userInitials) }}>
-                      {userInitials}
-                    </AvatarFallback>
+                    <AvatarImage src={firebaseUser?.photoURL || ""} />
+                    <AvatarFallback>{initials(firebaseUser?.displayName || "Ed")}</AvatarFallback>
                   </Avatar>
-                  <span className="hidden sm:block text-sm font-medium">{educatorName}</span>
+                  <div className="hidden md:block text-left">
+                    <p className="text-sm font-semibold leading-none">{firebaseUser?.displayName || "Educator"}</p>
+                    <p className="text-xs text-muted-foreground mt-1">Admin</p>
+                  </div>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>
-                  <div className="flex flex-col">
-                    <span>{educatorName}</span>
-                    <span className="text-xs font-normal text-muted-foreground">{educatorEmail}</span>
-                  </div>
-                </DropdownMenuLabel>
+              <DropdownMenuContent align="end" className="w-56 rounded-xl">
+                <DropdownMenuLabel>My Account</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => navigate("/educator/settings")}> 
-                  <Settings className="h-4 w-4 mr-2" />
-                  Settings
+                <DropdownMenuItem asChild>
+                  <Link to="/educator/settings">Settings</Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleViewWebsite}>
-                  <Globe className="h-4 w-4 mr-2" />
-                  View Website
+                <DropdownMenuItem asChild>
+                  <Link to="/educator/billing">Billing</Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem className="text-destructive" onClick={handleLogout}>
-                  <LogOut className="h-4 w-4 mr-2" />
                   Logout
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -259,7 +259,7 @@ export default function EducatorLayout() {
           </div>
         </header>
 
-        <main className="flex-1 p-4 lg:p-6 overflow-auto">
+        <main className="flex-1 p-4 lg:p-8">
           <motion.div key={location.pathname} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
             <Outlet />
           </motion.div>
