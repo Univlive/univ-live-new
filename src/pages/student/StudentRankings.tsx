@@ -24,7 +24,6 @@ import {
   getDocs,
   limit,
   onSnapshot,
-  orderBy,
   query,
   where,
 } from "firebase/firestore";
@@ -191,30 +190,42 @@ export default function StudentRankings() {
   useEffect(() => {
     if (!canLoad) return;
 
-    // Load unique tests and subjects from attempts
+    const cur = windowRange(30);
+    // Use ONLY educatorId to avoid index errors on complex queries
     const q = query(
       collection(db, "attempts"),
       where("educatorId", "==", educatorId!),
-      where("status", "in", ["completed", "submitted", "finished", "done"]),
-      limit(500)
+      limit(1000)
     );
 
     const unsub = onSnapshot(q, (snap) => {
       const testsMap: Record<string, string> = {};
       const subjectsSet = new Set<string>();
+      const validStatuses = ["completed", "submitted", "finished", "done"];
 
       snap.docs.forEach((d) => {
         const a = d.data() as AttemptDoc;
+        
+        // --- Client Side Filtering ---
+        if (!validStatuses.includes(a.status || "")) return;
+        if (tenantSlug && a.tenantSlug !== tenantSlug) return;
+        
+        // Time filter (last 30 days)
+        const subAt = a.submittedAt?.toMillis?.() || 0;
+        if (subAt < cur.start.toMillis()) return;
+
         if (a.testId && a.testTitle) testsMap[a.testId] = a.testTitle;
         if (a.subject) subjectsSet.add(a.subject);
       });
 
       setAvailableTests(Object.entries(testsMap).map(([id, title]) => ({ id, title })));
       setAvailableSubjects(Array.from(subjectsSet).sort());
+    }, (err) => {
+      console.error("Metadata load failed:", err);
     });
 
     return () => unsub();
-  }, [canLoad, educatorId]);
+  }, [canLoad, educatorId, tenantSlug]);
 
   // 2) Load previous window ranks (for rankChange)
   useEffect(() => {
@@ -227,21 +238,33 @@ export default function StudentRankings() {
         const DAYS = 30;
         const prev = previousWindowRange(DAYS);
 
-        const constraints: any[] = [
-          where("educatorId", "==", educatorId!),
-          where("status", "in", ["completed", "submitted", "finished", "done"]),
-          where("submittedAt", ">=", prev.start),
-          where("submittedAt", "<", prev.end),
-        ];
-
-        if (tenantSlug) constraints.push(where("tenantSlug", "==", tenantSlug));
-        if (filterTest !== "all") constraints.push(where("testId", "==", filterTest));
-        if (filterSubject !== "all") constraints.push(where("subject", "==", filterSubject));
-
-        const qPrev = query(collection(db, "attempts"), ...constraints, limit(1000));
+        // Minimal query to avoid index errors
+        const qPrev = query(
+          collection(db, "attempts"), 
+          where("educatorId", "==", educatorId!), 
+          limit(1000)
+        );
 
         const snap = await getDocs(qPrev);
-        const attempts = snap.docs.map((d) => d.data() as AttemptDoc);
+        let attempts = snap.docs.map((d) => d.data() as AttemptDoc);
+        
+        const validStatuses = ["completed", "submitted", "finished", "done"];
+        const pStart = prev.start.toMillis();
+        const pEnd = prev.end.toMillis();
+
+        // Client-side filtering
+        attempts = attempts.filter(a => {
+          const subAt = a.submittedAt?.toMillis?.() || 0;
+          return (
+            validStatuses.includes(a.status || "") &&
+            subAt >= pStart &&
+            subAt < pEnd &&
+            (!tenantSlug || a.tenantSlug === tenantSlug) &&
+            (filterTest === "all" || a.testId === filterTest) &&
+            (filterSubject === "all" || a.subject === filterSubject)
+          );
+        });
+
         const ranked = computeRankings(attempts);
 
         const map: Record<string, number> = {};
@@ -250,7 +273,7 @@ export default function StudentRankings() {
         if (!mounted) return;
         setPrevRankMap(map);
       } catch (e) {
-        console.error(e);
+        console.error("Prev rankings load failed:", e);
         if (!mounted) return;
         setPrevRankMap({});
       }
@@ -270,27 +293,39 @@ export default function StudentRankings() {
     }
 
     setLoading(true);
+    setLeaderboard([]);
 
     const DAYS = 30;
     const cur = windowRange(DAYS);
+    const cStart = cur.start.toMillis();
 
-    const constraints: any[] = [
-      where("educatorId", "==", educatorId!),
-      where("status", "in", ["completed", "submitted", "finished", "done"]),
-      where("submittedAt", ">=", cur.start),
-    ];
-
-    if (tenantSlug) constraints.push(where("tenantSlug", "==", tenantSlug));
-    if (filterTest !== "all") constraints.push(where("testId", "==", filterTest));
-    if (filterSubject !== "all") constraints.push(where("subject", "==", filterSubject));
-
-    const qCur = query(collection(db, "attempts"), ...constraints, limit(1000));
+    // Minimal query to avoid index errors
+    const qCur = query(
+      collection(db, "attempts"), 
+      where("educatorId", "==", educatorId!), 
+      limit(1000)
+    );
 
     const unsub = onSnapshot(
       qCur,
       async (snap) => {
         try {
-          const attempts = snap.docs.map((d) => d.data() as AttemptDoc);
+          let attempts = snap.docs.map((d) => d.data() as AttemptDoc);
+          
+          const validStatuses = ["completed", "submitted", "finished", "done"];
+
+          // Client-side filtering
+          attempts = attempts.filter(a => {
+            const subAt = a.submittedAt?.toMillis?.() || 0;
+            return (
+              validStatuses.includes(a.status || "") &&
+              subAt >= cStart &&
+              (!tenantSlug || a.tenantSlug === tenantSlug) &&
+              (filterTest === "all" || a.testId === filterTest) &&
+              (filterSubject === "all" || a.subject === filterSubject)
+            );
+          });
+
           const ranked = computeRankings(attempts);
 
           // Find current user's entry if not in top 50
@@ -326,7 +361,7 @@ export default function StudentRankings() {
           setLeaderboard(filteredRows);
           setLoading(false);
         } catch (e) {
-          console.error(e);
+          console.error("Rank processing failed:", e);
           setLeaderboard([]);
           setLoading(false);
         }
