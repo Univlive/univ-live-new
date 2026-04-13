@@ -239,10 +239,8 @@ export default function StudentLayout() {
           {/* Logo Section */}
           <div className="h-16 flex items-center justify-between px-4 border-b border-border shrink-0">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Trophy className="h-5 w-5 text-primary" />
-              </div>
-              <span className="font-display font-bold text-lg tracking-tight">Student Portal</span>
+              
+              {/* <span className="font-display font-bold text-lg tracking-tight">Student Portal</span> */}
             </div>
 
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(false)}>
@@ -332,15 +330,6 @@ export default function StudentLayout() {
               <span className="font-medium text-foreground capitalize">
                 {location.pathname.split("/").pop()?.replace("-", " ") || "Dashboard"}
               </span>
-            </div>
-
-            {/* Quick Search */}
-            <div className="hidden md:flex items-center relative">
-              <Search className="absolute left-3 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search tests..."
-                className="pl-9 w-64 h-9 rounded-xl bg-muted/50 border-0 focus-visible:ring-1"
-              />
             </div>
           </div>
 
