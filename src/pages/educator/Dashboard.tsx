@@ -123,6 +123,7 @@ type TopPerformerFilter = "overall" | "subject" | "test";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// safeNum Function....
 function safeNum(value: any, fallback = 0) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
@@ -416,10 +417,10 @@ export default function EducatorDashboard() {
   const coachingName =
     String(
       educatorDoc?.coachingName ||
-        educatorDoc?.displayName ||
-        educatorDoc?.name ||
-        profile?.displayName ||
-        "Your Coaching"
+      educatorDoc?.displayName ||
+      educatorDoc?.name ||
+      profile?.displayName ||
+      "Your Coaching"
     ).trim() || "Your Coaching";
 
   const coachingSlug = String(educatorDoc?.tenantSlug || profile?.tenantSlug || "").trim();
@@ -528,10 +529,10 @@ export default function EducatorDashboard() {
     return rows.length
       ? rows
       : [
-          { subject: "Physics", weak: 0, moderate: 0, strong: 0 },
-          { subject: "Chemistry", weak: 0, moderate: 0, strong: 0 },
-          { subject: "Biology", weak: 0, moderate: 0, strong: 0 },
-        ];
+        { subject: "Physics", weak: 0, moderate: 0, strong: 0 },
+        { subject: "Chemistry", weak: 0, moderate: 0, strong: 0 },
+        { subject: "Biology", weak: 0, moderate: 0, strong: 0 },
+      ];
   }, [completedAttempts]);
 
   const topTestsData = useMemo(() => {
@@ -576,6 +577,7 @@ export default function EducatorDashboard() {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [completedAttempts]);
 
+
   useEffect(() => {
     if (topPerformerFilter === "subject" && selectedTopSubject !== "all" && !topPerformerSubjects.includes(selectedTopSubject)) {
       setSelectedTopSubject("all");
@@ -607,6 +609,8 @@ export default function EducatorDashboard() {
     return completedAttempts;
   }, [topPerformerFilter, selectedTopSubject, selectedTopTest, completedAttempts]);
 
+
+  // top performer list....
   const topPerformers = useMemo(() => {
     const byStudent: Record<
       string,
@@ -652,7 +656,10 @@ export default function EducatorDashboard() {
       byStudent[studentId].latestMs = Math.max(byStudent[studentId].latestMs, attemptMs);
     });
 
-    const limit = Math.max(1, safeNum(topPerformerLimit, 10));
+    const limit =
+      topPerformerLimit === "all"
+        ? Number.MAX_SAFE_INTEGER
+        : Math.max(1, safeNum(topPerformerLimit, 10));
 
     return Object.values(byStudent)
       .map((row) => {
@@ -943,6 +950,7 @@ export default function EducatorDashboard() {
               </SelectContent>
             </Select>
 
+            {/* Number of top performer dropdown  */}
             <Select value={topPerformerLimit} onValueChange={setTopPerformerLimit}>
               <SelectTrigger className="w-full sm:w-40">
                 <SelectValue placeholder="Top count" />
@@ -952,6 +960,7 @@ export default function EducatorDashboard() {
                 <SelectItem value="5">Top 5</SelectItem>
                 <SelectItem value="10">Top 10</SelectItem>
                 <SelectItem value="20">Top 20</SelectItem>
+                <SelectItem value="all">All</SelectItem>
               </SelectContent>
             </Select>
 
@@ -1063,7 +1072,7 @@ export default function EducatorDashboard() {
             </div>
           </ChartCard>
         </div>
-        
+
         <div>
           <ChartCard title="Subject Performance Heatmap" delay={0.35}>
             <div className="h-56">
