@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import logo from "@/assets/logo.png";
+import { buildTenantUrl } from "@/lib/tenant";
 import univLogo from "@/assets/univ-logo-1.png";
 
 import { useAuth } from "@/contexts/AuthProvider";
@@ -109,9 +110,20 @@ export default function EducatorLayout() {
   );
 
   const isActive = (href: string) => {
-    if (href === "/educator/test-series") return location.pathname.startsWith("/educator/test-series");
+    if (href === "/educator/dashboard") {
+      return location.pathname === "/educator" || location.pathname === href;
+    }
+    if (href === "/educator/learners") {
+      return location.pathname === href || location.pathname.startsWith("/educator/learners/");
+    }
     return location.pathname === href;
   };
+
+  const pageTitle = useMemo(() => {
+    if (location.pathname.startsWith("/educator/learners/")) return "Learner Deep Dive";
+    const tail = location.pathname.split("/").pop() || "dashboard";
+    return tail.replace(/-/g, " ");
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     try {
@@ -217,7 +229,7 @@ export default function EducatorLayout() {
               <span>Educator</span>
               <ChevronRight className="h-4 w-4" />
               <span className="font-medium text-foreground capitalize">
-                {location.pathname.split("/").pop()?.replace("-", " ") || "Dashboard"}
+                {pageTitle}
               </span>
             </div>
           </div>

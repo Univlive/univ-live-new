@@ -45,13 +45,18 @@ export default function StudentTests() {
       if (!firebaseUser || !tenantSlug || !isTenantDomain) return;
       try {
         const token = await firebaseUser.getIdToken();
-        await fetch("/api/tenant/register-student", {
+        const res = await fetch("/api/tenant/register-student", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({ tenantSlug }),
         });
-      } catch {
-        // ignore
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          console.warn("[StudentTests] register-student failed:", data?.error || res.statusText);
+        }
+      } catch (err) {
+        console.warn("[StudentTests] register-student request failed:", err);
       }
     })();
   }, [firebaseUser, tenantSlug, isTenantDomain]);

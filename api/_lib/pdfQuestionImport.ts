@@ -15,8 +15,16 @@ export type ImportedQuestionItem = {
 };
 
 function decodePdfEscapes(input: string) {
+  const escapeMap: Record<"n" | "r" | "t" | "b" | "f", string> = {
+    n: "\n",
+    r: "\r",
+    t: "\t",
+    b: "\b",
+    f: "\f",
+  };
+
   return input
-    .replace(/\\([nrtbf])/g, (_, ch) => ({ n: "\n", r: "\r", t: "\t", b: "\b", f: "\f" }[ch] || ch))
+    .replace(/\\([nrtbf])/g, (_, ch: string) => escapeMap[ch as keyof typeof escapeMap] || ch)
     .replace(/\\([()\\])/g, "$1")
     .replace(/\\([0-7]{1,3})/g, (_, oct) => {
       try {
@@ -191,11 +199,46 @@ export function parseJsonResponse<T>(content: string): T {
   return JSON.parse(jsonString) as T;
 }
 
+function stripQuestionNumberPrefix(input: string) {
+  const value = input.trim();
+  if (!value) return value;
+
+  const patterns = [
+    /^(?:q(?:uestion)?\s*(?:no\.?\s*)?)\d{1,4}\s*[:.)-]\s*/i,
+    /^(?:q(?:uestion)?\s*(?:no\.?\s*)?)\d{1,4}\s+/i,
+    /^\(\s*\d{1,4}\s*\)\s*/,
+    /^\[\s*\d{1,4}\s*\]\s*/,
+    /^\d{1,4}\s*[:.)-]\s*/,
+  ];
+
+  for (const pattern of patterns) {
+    if (pattern.test(value)) {
+      return value.replace(pattern, "").trim();
+    }
+  }
+
+  return value;
+}
+
 export function normalizeImportedItem(item: any, fallbackIndex: number): ImportedQuestionItem {
-  const question = String(item?.question || "").trim();
-  const options = Array.isArray(item?.options)
-    ? item.options.map((option: any) => String(option || "").trim()).filter(Boolean).slice(0, 4)
-    : [];
+  const question = stripQuestionNumberPrefix(String(item?.question || ""));
+  const options = (() => {
+    if (Array.isArray(item?.options)) {
+      return item.options
+        .map((option: any) => String(option || "").trim())
+        .filter(Boolean)
+        .slice(0, 4);
+    }
+
+    if (item?.options && typeof item.options === "object") {
+      return ["a", "b", "c", "d"]
+        .map((key) => String(item.options?.[key] || "").trim())
+        .filter(Boolean)
+        .slice(0, 4);
+    }
+
+    return [];
+  })();
 
   const rawCorrectOption = item?.correctOption;
   const correctOption =

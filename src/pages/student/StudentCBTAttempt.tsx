@@ -23,8 +23,6 @@ import {
   doc,
   getDoc,
   getDocs,
-  limit,
-  orderBy,
   query,
   serverTimestamp,
   updateDoc,
@@ -86,8 +84,9 @@ const buildInitResponses = (qs: AttemptQuestion[]) => {
 const mapQuestion = (id: string, data: any): AttemptQuestion => {
   const opts: string[] = Array.isArray(data.options) ? data.options : [];
   const correctIndex = safeNumber(data.correctOption, 0);
-  const positive = safeNumber(data.marks, 5);
-  const negative = Math.abs(safeNumber(data.negativeMarks, 1));
+  // Always normalize to +5 marks and -1 negative marks
+  const positive = 5;
+  const negative = 1;
 
   return {
     id,
@@ -311,18 +310,41 @@ export default function StudentCBTAttempt() {
         if (!foundAttempt) {
           const qAttempt = query(
             collection(db, "attempts"),
-            where("studentId", "==", firebaseUser.uid),
-            where("testId", "==", testId),
-            where("educatorId", "==", educatorId),
-            where("status", "==", "in_progress"),
-            orderBy("createdAt", "desc"),
-            limit(1)
+            where("studentId", "==", firebaseUser.uid)
           );
           const aSnap = await getDocs(qAttempt);
           if (!aSnap.empty) {
-            const d = aSnap.docs[0];
-            foundAttempt = { id: d.id, ...(d.data() as AttemptDoc) };
-            localStorage.setItem(attemptIdStorageKey, d.id);
+            const candidates = aSnap.docs
+              .map((d) => ({ id: d.id, ...(d.data() as AttemptDoc) }))
+              .filter(
+                (a) =>
+                  a.testId === testId &&
+                  a.educatorId === educatorId &&
+                  a.status === "in_progress"
+              )
+              .sort((a, b) => {
+                const aStarted = safeNumber((a as any).startedAtMs, 0);
+                const bStarted = safeNumber((b as any).startedAtMs, 0);
+                if (aStarted !== bStarted) return bStarted - aStarted;
+
+                const aCreated =
+                  a?.createdAt && typeof (a.createdAt as any).toMillis === "function"
+                    ? (a.createdAt as any).toMillis()
+                    : 0;
+                const bCreated =
+                  b?.createdAt && typeof (b.createdAt as any).toMillis === "function"
+                    ? (b.createdAt as any).toMillis()
+                    : 0;
+                return bCreated - aCreated;
+              });
+
+            if (candidates.length > 0) {
+              foundAttempt = candidates[0] as any;
+            }
+          }
+
+          if (foundAttempt) {
+            localStorage.setItem(attemptIdStorageKey, foundAttempt.id);
           }
         }
 

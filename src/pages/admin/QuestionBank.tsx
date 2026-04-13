@@ -630,8 +630,9 @@ export default function QuestionBank() {
         const subject = String(q.subject || "").trim() || "General";
         const topic = String((q as any)["spayee:objective"] || "").trim() || "General";
         const tags = normalizeTags(q.tag || []);
-        const marks = typeof q.mark === "number" ? q.mark : 5;
-        const negativeMarks = typeof q.penalty === "number" ? q.penalty : -1;
+        // Always normalize to +5 marks and -1 negative marks
+        const marks = 5;
+        const negativeMarks = -1;
 
         const questionHtml = await replaceImagesInHtml(String(q.text || ""), imageMap, uploadedCache);
 

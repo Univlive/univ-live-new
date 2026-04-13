@@ -58,11 +58,25 @@ export default function Signup() {
 
   async function callRegisterStudent(token: string) {
     if (!tenantSlug) return;
-    await fetch("/api/tenant/register-student", {
+    const res = await fetch("/api/tenant/register-student", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ tenantSlug }),
     });
+
+    if (!res.ok) {
+      const contentType = String(res.headers.get("content-type") || "").toLowerCase();
+      if (contentType.includes("application/json")) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || `Failed to register student for this tenant (HTTP ${res.status})`);
+      }
+      const text = (await res.text().catch(() => "")).trim();
+      throw new Error(
+        text
+          ? `Failed to register student for this tenant (HTTP ${res.status}): ${text.slice(0, 160)}`
+          : `Failed to register student for this tenant (HTTP ${res.status})`
+      );
+    }
   }
 
   async function checkSlugAvailable(slug: string) {
@@ -103,7 +117,7 @@ export default function Signup() {
           );
 
           const token = await cred.user.getIdToken();
-          await callRegisterStudent(token).catch(() => {});
+          await callRegisterStudent(token);
           toast.success("Account created!");
           nav("/student");
           return;
@@ -124,7 +138,7 @@ export default function Signup() {
               );
 
               const token = await cred2.user.getIdToken();
-              await callRegisterStudent(token).catch(() => {});
+              await callRegisterStudent(token);
               toast.success("Signed in and enrolled!");
               nav("/student");
               return;
