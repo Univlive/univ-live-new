@@ -743,7 +743,7 @@ export default function TestSeries() {
           ) : (
             <div className="space-y-8">
               {Object.entries(groupedTests).map(([groupId, group]) => {
-                const isExpanded = expandedFolders[groupId] !== false; // default expanded
+                const isExpanded = !!expandedFolders[groupId]; // default closed
                 return (
                   <div key={groupId} className="space-y-4">
                     <div
@@ -925,7 +925,7 @@ export default function TestSeries() {
           ) : (
             <div className="space-y-8">
               {Object.entries(groupedBankTests).map(([groupId, group]) => {
-                const isExpanded = expandedFolders[groupId] !== false; // default expanded
+                const isExpanded = !!expandedFolders[groupId]; // default closed
                 return (
                   <div key={groupId} className="space-y-4">
                     <div

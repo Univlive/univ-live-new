@@ -3,15 +3,28 @@ import { getAdmin } from "../_lib/firebaseAdmin.js";
 import { requireUser } from "../_lib/requireUser.js";
 
 function normSlug(x: string) {
-  return String(x || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+  return String(x || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/(^-|-$)/g, "");
 }
 
 function normalizeDocId(raw: unknown): string {
-  const value = String(raw || "").trim();
-  if (!value) return "";
-  if (!value.includes("/")) return value;
-  const parts = value.split("/").filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : "";
+  if (!raw) return "";
+  if (typeof raw === "string") {
+    const value = raw.trim();
+    if (!value) return "";
+    if (!value.includes("/")) return value;
+    const parts = value.split("/").filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : "";
+  }
+  // Handle Firestore DocumentReference if returned by admin SDK
+  if (raw && typeof raw === "object" && "id" in raw) {
+    return String(raw.id);
+  }
+  return String(raw || "").trim();
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -28,6 +41,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const tenantSlug = normSlug(req.body?.tenantSlug || "");
     if (!tenantSlug) return res.status(400).json({ error: "Missing tenantSlug" });
 
+    console.log(`[register-student] Attempting registration for uid=${uid}, slug=${tenantSlug}`);
+
     stage = "firebase-admin";
     const admin = getAdmin();
     const db = admin.firestore();
@@ -36,7 +51,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     stage = "tenant-map-lookup";
     const tenantMap = await db.doc(`tenants/${tenantSlug}`).get();
-    if (tenantMap.exists) educatorId = normalizeDocId(tenantMap.data()?.educatorId);
+    if (tenantMap.exists) {
+      educatorId = normalizeDocId(tenantMap.data()?.educatorId);
+    }
 
     if (!educatorId) {
       stage = "educator-fallback-query";
@@ -44,7 +61,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!q.empty) educatorId = q.docs[0].id;
     }
 
-    if (!educatorId) return res.status(404).json({ error: "Coaching not found for this tenantSlug" });
+    if (!educatorId) {
+      console.warn(`[register-student] Coaching not found for slug=${tenantSlug}`);
+      return res.status(404).json({ error: "Coaching not found for this tenantSlug" });
+    }
 
     stage = "write-transaction";
     const userRef = db.doc(`users/${uid}`);

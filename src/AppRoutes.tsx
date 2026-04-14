@@ -54,7 +54,6 @@ import StudentAttempts from "@/pages/student/StudentAttempts";
 import StudentAttemptDetails from "@/pages/student/StudentAttemptDetails";
 import StudentResults from "@/pages/student/StudentResults";
 import StudentRankings from "@/pages/student/StudentRankings";
-import StudentAnalytics from "@/pages/student/StudentAnalytics";
 import StudentMessages from "@/pages/student/StudentMessages";
 import StudentSettings from "@/pages/student/StudentSettings";
 
@@ -63,6 +62,23 @@ export default function AppRoutes() {
 
   return (
     <Routes>
+      {/* --- SHARED STUDENT ROUTES (Available on both Tenant and Main Platform) --- */}
+      <Route path="/student" element={<StudentRoute />}>
+        <Route element={<StudentLayout />}>
+          <Route index element={<StudentDashboard />} />
+          <Route path="dashboard" element={<StudentDashboard />} />
+          <Route path="tests" element={<StudentTests />} />
+          <Route path="tests/:testId" element={<StudentTestDetails />} />
+          <Route path="tests/:testId/attempt" element={<StudentCBTAttempt />} />
+          <Route path="attempts" element={<StudentAttempts />} />
+          <Route path="attempts/:attemptId" element={<StudentAttemptDetails />} />
+          <Route path="results/:attemptId" element={<StudentResults />} />
+          <Route path="rankings" element={<StudentRankings />} />
+          <Route path="messages" element={<StudentMessages />} />
+          <Route path="settings" element={<StudentSettings />} />
+        </Route>
+      </Route>
+
       {isTenantDomain ? (
         <>
           {/* --- Public Routes (Open to everyone) --- */}
@@ -72,25 +88,6 @@ export default function AppRoutes() {
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/complete-profile" element={<CompleteProfile />} />
-
-          {/* --- PROTECTED STUDENT ROUTES --- */}
-          {/* We replace 'RequireRole' with 'StudentRoute' here */}
-          <Route path="/student" element={<StudentRoute />}>
-            <Route element={<StudentLayout />}>
-              <Route index element={<StudentDashboard />} />
-              <Route path="dashboard" element={<StudentDashboard />} />
-              <Route path="tests" element={<StudentTests />} />
-              <Route path="tests/:testId" element={<StudentTestDetails />} />
-              <Route path="tests/:testId/attempt" element={<StudentCBTAttempt />} />
-              <Route path="attempts" element={<StudentAttempts />} />
-              <Route path="attempts/:attemptId" element={<StudentAttemptDetails />} />
-              <Route path="results/:attemptId" element={<StudentResults />} />
-              <Route path="rankings" element={<StudentRankings />} />
-              <Route path="analytics" element={<StudentAnalytics />} />
-              <Route path="messages" element={<StudentMessages />} />
-              <Route path="settings" element={<StudentSettings />} />
-            </Route>
-          </Route>
 
           {/* --- PROTECTED EDUCATOR ROUTES (Tenant Admin) --- */}
           <Route

@@ -101,7 +101,7 @@ export default function AdminLayout() {
           </div>
           <div>
             <h1 className="font-bold text-lg text-foreground">Admin Panel</h1>
-            <p className="text-xs text-muted-foreground">UNIV.LIVE</p>
+            <p className="text-xs text-muted-foreground">Internal</p>
           </div>
         </Link>
       </div>
@@ -197,7 +197,7 @@ export default function AdminLayout() {
               </Avatar>
               <div className="text-sm">
                 <p className="font-medium text-foreground">Admin</p>
-                <p className="text-xs text-muted-foreground">admin@univ.live</p>
+                <p className="text-xs text-muted-foreground">Administrator</p>
               </div>
             </div>
           </div>
