@@ -45,13 +45,16 @@ import { cn } from "@/lib/utils";
 
 import EmptyState from "@/components/educator/EmptyState";
 import AiQuestionImportOverlay from "@/components/educator/AiQuestionImportOverlay";
+import InlineStatusTracker from "@/components/educator/InlineStatusTracker";
 import {
   buildImportedQuestionPayload,
   formatNegativeMarksDisplay,
   importQuestionsFromPdf,
   type AiImportPreviewItem,
   type AiImportSummary,
+  type PageProgressUpdate,
 } from "@/lib/aiQuestionImport";
+import { aiFeatureFlags, getAiFeatureDisabledMessage } from "@/lib/aiFeatureFlags";
 import { uploadToImageKit } from "@/lib/imagekitUpload";
 
 // Firebase
@@ -75,6 +78,7 @@ type Difficulty = "easy" | "medium" | "hard";
 
 type TestQuestion = {
   id: string;
+  questionOrder?: number;
 
   // Stored schema (admin-compatible)
   question: string; // can be plain text OR HTML
@@ -90,6 +94,15 @@ type TestQuestion = {
   negativeMarks?: number;
 
   isActive?: boolean;
+
+  // AI import metadata
+  source?: "ai_import" | "ai_import_partial" | string;
+  importStatus?: "ready" | "partial";
+  reviewRequired?: boolean;
+  importIssues?: string[];
+  importSourceIndex?: number;
+  rawImportBlock?: string;
+  questionImageUrl?: string;
 
   createdAt?: any;
   updatedAt?: any;
@@ -109,13 +122,15 @@ function normalizeQuestionDoc(id: string, data: any): TestQuestion {
     data?.correctOption ?? data?.correctOptionIndex ?? data?.correctOptionIndex ?? 0
   );
 
-  const marks = data?.marks ?? data?.positiveMarks;
-  const negativeMarks = data?.negativeMarks ?? data?.negative ?? data?.negMarks;
+  // Always normalize to +5 marks and -1 negative marks
+  const marks = 5;
+  const negativeMarks = -1;
 
   const difficulty = (data?.difficulty as Difficulty) || "medium";
 
   return {
     id,
+    questionOrder: Number.isFinite(Number(data?.questionOrder)) ? Number(data.questionOrder) : undefined,
     question,
     options,
     correctOption: Number.isFinite(correctOption) ? correctOption : 0,
@@ -123,12 +138,42 @@ function normalizeQuestionDoc(id: string, data: any): TestQuestion {
     difficulty,
     subject: data?.subject ? String(data.subject) : "",
     topic: data?.topic ? String(data.topic) : "",
-    marks: marks != null && marks !== "" ? Number(marks) : undefined,
-    negativeMarks: negativeMarks != null && negativeMarks !== "" ? Number(negativeMarks) : undefined,
+    marks: marks,
+    negativeMarks: negativeMarks,
     isActive: data?.isActive !== false,
     createdAt: data?.createdAt,
     updatedAt: data?.updatedAt,
   };
+}
+
+function timestampToMillis(value: any) {
+  if (!value) return 0;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value?.toMillis === "function") return value.toMillis();
+  if (typeof value?.seconds === "number") return value.seconds * 1000;
+  return 0;
+}
+
+function sortQuestionsForDisplay(rows: TestQuestion[]) {
+  return [...rows].sort((a, b) => {
+    const aOrder = Number.isFinite(Number(a.questionOrder)) ? Number(a.questionOrder) : null;
+    const bOrder = Number.isFinite(Number(b.questionOrder)) ? Number(b.questionOrder) : null;
+    if (aOrder != null && bOrder != null && aOrder !== bOrder) return aOrder - bOrder;
+    if (aOrder != null && bOrder == null) return -1;
+    if (aOrder == null && bOrder != null) return 1;
+
+    const aImportIndex = Number.isFinite(Number(a.importSourceIndex)) ? Number(a.importSourceIndex) : null;
+    const bImportIndex = Number.isFinite(Number(b.importSourceIndex)) ? Number(b.importSourceIndex) : null;
+    if (aImportIndex != null && bImportIndex != null && aImportIndex !== bImportIndex) {
+      return aImportIndex - bImportIndex;
+    }
+
+    const aCreated = timestampToMillis(a.createdAt) || timestampToMillis(a.updatedAt);
+    const bCreated = timestampToMillis(b.createdAt) || timestampToMillis(b.updatedAt);
+    if (aCreated !== bCreated) return aCreated - bCreated;
+
+    return a.id.localeCompare(b.id);
+  });
 }
 
 function pruneUndefined<T extends Record<string, any>>(obj: T): T {
@@ -161,9 +206,16 @@ async function appendImageToField(current: string, folder = "/test-questions") {
   const f = await pickImageFile();
   if (!f) return { next: current, url: null };
 
-  const { url } = await uploadToImageKit(f, f.name, folder);
-  const imgTag = `\n<img src="${url}" alt="" />\n`;
-  return { next: (current || "") + imgTag, url };
+  try {
+    // Use "website" scope so educators can upload (question-bank scope is admin-only)
+    const { url } = await uploadToImageKit(f, f.name, folder, "website");
+    const imgTag = `\n<img src="${url}" alt="" />\n`;
+    return { next: (current || "") + imgTag, url };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : "Failed to upload image";
+    console.error("[Image Upload Error]", errorMsg);
+    throw error; // Re-throw so caller can handle
+  }
 }
 
 export default function TestSeries() {
@@ -262,13 +314,32 @@ export default function TestSeries() {
   }, []);
 
   const handleCreateFolder = async () => {
-    if (!currentUser || !newFolderName.trim()) return;
+    if (!currentUser) {
+      toast.error("Please login again and retry.");
+      return;
+    }
+
+    const name = newFolderName.trim();
+    if (!name) {
+      toast.error("Folder name is required.");
+      return;
+    }
+
+    const exists = folders.some(
+      (f) => String(f?.name || "").trim().toLowerCase() === name.toLowerCase()
+    );
+    if (exists) {
+      toast.error("A folder with this name already exists.");
+      return;
+    }
+
     setFolderCreating(true);
     try {
-      await addDoc(collection(db, "educators", currentUser.uid, "folders"), {
-        name: newFolderName.trim(),
+      const folderRef = await addDoc(collection(db, "educators", currentUser.uid, "folders"), {
+        name,
         createdAt: serverTimestamp(),
       });
+      setExpandedFolders((prev) => ({ ...prev, [folderRef.id]: true }));
       toast.success("Folder created");
       setNewFolderName("");
       setCreateFolderOpen(false);
@@ -306,10 +377,10 @@ export default function TestSeries() {
       testsInFolder.forEach(t => {
         batch.update(doc(db, "educators", currentUser.uid, "my_tests", t.id), { folderId: null });
       });
-      
+
       // 2. Delete folder doc
       batch.delete(doc(db, "educators", currentUser.uid, "folders", folderId));
-      
+
       await batch.commit();
       toast.success("Folder deleted");
     } catch (e) {
@@ -324,7 +395,7 @@ export default function TestSeries() {
 
   const normalizeSubjectName = (sub: string) => {
     const s = sub.trim().toLowerCase();
-    
+
     // Exact mapping for requested subjects
     if (s === "bst" || s === "business studies" || s === "business study") return "Business Studies";
     if (s === "phy" || s === "physics") return "Physics";
@@ -343,8 +414,8 @@ export default function TestSeries() {
   };
 
   const SUGGESTED_SUBJECTS = [
-    "Physics", "Chemistry", "Maths", "English", "General Test", 
-    "Accountancy", "Business Studies", "Economics", "Geography", 
+    "Physics", "Chemistry", "Maths", "English", "General Test",
+    "Accountancy", "Business Studies", "Economics", "Geography",
     "Political Science", "History"
   ];
 
@@ -365,7 +436,7 @@ export default function TestSeries() {
 
     // 2. Pre-create empty folders for main subjects if they have tests or to keep them visible
     // (Actually, let's only create them if tests exist or user has custom folder with same name)
-    
+
     // 3. Distribute Tests
     filtered.forEach(t => {
       if (t.folderId && groups[t.folderId]) {
@@ -437,6 +508,12 @@ export default function TestSeries() {
         sections: bankTest.sections ?? [],
         instructions: bankTest.instructions ?? "",
 
+        // attempts & marking
+        attemptsAllowed: bankTest.attemptsAllowed != null
+          ? Math.max(1, Number(bankTest.attemptsAllowed))
+          : 3,
+        markingScheme: bankTest.markingScheme ?? undefined,
+
         // marks config (omit if missing - Firestore rejects undefined)
         positiveMarks:
           bankTest.positiveMarks != null ? Number(bankTest.positiveMarks) : undefined,
@@ -498,6 +575,7 @@ export default function TestSeries() {
       subject: String(fd.get("subject") || ""),
       level: String(fd.get("level") || "General"),
       durationMinutes: Number(fd.get("duration") || 0),
+      attemptsAllowed: 3,
 
       // educator ownership
       source: "custom",
@@ -611,50 +689,55 @@ export default function TestSeries() {
       </div>
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
-        <TabsList className="rounded-xl">
-          <TabsTrigger value="library" className="rounded-xl">
-            Your Library
-          </TabsTrigger>
-          <TabsTrigger value="bank" className="rounded-xl">
-            Admin Bank
-          </TabsTrigger>
-        </TabsList>
+        <div className="w-full flex flex-row justify-between">
+          <TabsList className="rounded-xl">
+            <TabsTrigger value="library" className="rounded-xl">
+              Your Library
+            </TabsTrigger>
+            <TabsTrigger value="bank" className="rounded-xl">
+              Admin Bank
+            </TabsTrigger>
+          </TabsList>
+          <Dialog open={createFolderOpen} onOpenChange={setCreateFolderOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" className="rounded-xl border-dashed">
+                <FolderPlus className="mr-2 h-4 w-4" /> New Folder
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="rounded-2xl">
+              <DialogHeader>
+                <DialogTitle>Create Folder</DialogTitle>
+                <DialogDescription>Folders help you organize your tests beyond just subjects.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label>Folder Name</Label>
+                  <Input
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (!folderCreating) void handleCreateFolder();
+                      }
+                    }}
+                    placeholder="e.g. Revision Tests"
+                    className="rounded-xl"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setCreateFolderOpen(false)}>Cancel</Button>
+                <Button className="gradient-bg text-white" onClick={handleCreateFolder} disabled={folderCreating || !newFolderName.trim()}>
+                  {folderCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create Folder"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
 
         {/* Library */}
         <TabsContent value="library" className="mt-6">
-          <div className="flex justify-end mb-4 gap-2">
-            <Dialog open={createFolderOpen} onOpenChange={setCreateFolderOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline" className="rounded-xl border-dashed">
-                  <FolderPlus className="mr-2 h-4 w-4" /> New Folder
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="rounded-2xl">
-                <DialogHeader>
-                  <DialogTitle>Create Folder</DialogTitle>
-                  <DialogDescription>Folders help you organize your tests beyond just subjects.</DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <Label>Folder Name</Label>
-                    <Input
-                      value={newFolderName}
-                      onChange={(e) => setNewFolderName(e.target.value)}
-                      placeholder="e.g. Revision Tests"
-                      className="rounded-xl"
-                    />
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setCreateFolderOpen(false)}>Cancel</Button>
-                  <Button className="gradient-bg text-white" onClick={handleCreateFolder} disabled={folderCreating}>
-                    {folderCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create Folder"}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          </div>
-
           {Object.keys(groupedTests).length === 0 ? (
             <EmptyState icon={FileText} title="No tests found" description="Create a custom test or import from the admin bank." />
           ) : (
@@ -675,7 +758,7 @@ export default function TestSeries() {
                           {group.tests.length}
                         </Badge>
                       </div>
-                      
+
                       {group.type === "custom" && (
                         <Button
                           variant="ghost"
@@ -953,11 +1036,16 @@ function QuestionsManager({
 
   const [importPreviewOpen, setImportPreviewOpen] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
+  const [confirmPdfOpen, setConfirmPdfOpen] = useState(false);
+  const [pendingPdfFile, setPendingPdfFile] = useState<File | null>(null);
   const [savingImported, setSavingImported] = useState(false);
   const [importFileName, setImportFileName] = useState("");
   const [importSummary, setImportSummary] = useState<AiImportSummary | null>(null);
   const [importItems, setImportItems] = useState<AiImportPreviewItem[]>([]);
+  const [importProgressUpdates, setImportProgressUpdates] = useState<PageProgressUpdate[]>([]);
   const pdfInputRef = useRef<HTMLInputElement | null>(null);
+  const importAbortControllerRef = useRef<AbortController | null>(null);
+  const isAiPdfImportEnabled = aiFeatureFlags.pdfImport;
 
   const qCol = useMemo(
     () => collection(db, "educators", educatorUid, "my_tests", testId, "questions"),
@@ -985,7 +1073,7 @@ function QuestionsManager({
       qCol,
       (snap) => {
         const rows = snap.docs.map((d) => normalizeQuestionDoc(d.id, d.data()));
-        setQuestions(rows);
+        setQuestions(sortQuestionsForDisplay(rows));
         setLoading(false);
       },
       () => {
@@ -996,6 +1084,31 @@ function QuestionsManager({
     return () => unsub();
   }, [qCol]);
 
+  useEffect(() => {
+    if (!importBusy) return;
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!importAbortControllerRef.current) return;
+      importAbortControllerRef.current.abort();
+      event.preventDefault();
+      event.returnValue = "AI import is in progress. Leaving will cancel it.";
+    };
+
+    const handlePageHide = () => {
+      if (importAbortControllerRef.current) {
+        importAbortControllerRef.current.abort();
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [importBusy]);
+
   const filteredQuestions = useMemo(() => {
     const q = searchQ.trim().toLowerCase();
     if (!q) return questions;
@@ -1004,6 +1117,54 @@ function QuestionsManager({
       return hay.includes(q);
     });
   }, [questions, searchQ]);
+
+  const questionNumberById = useMemo(() => {
+    const numberMap = new Map<string, number>();
+    questions.forEach((q, index) => {
+      const persistedOrder = Number(q.questionOrder);
+      const displayOrder = Number.isFinite(persistedOrder) && persistedOrder > 0 ? persistedOrder : index + 1;
+      numberMap.set(q.id, displayOrder);
+    });
+    return numberMap;
+  }, [questions]);
+
+  function getNextQuestionOrder() {
+    const maxOrder = questions.reduce((max, q) => {
+      const n = Number(q.questionOrder);
+      return Number.isFinite(n) ? Math.max(max, n) : max;
+    }, 0);
+    return maxOrder + 1;
+  }
+
+  async function resequenceQuestionOrders(remainingQuestions: TestQuestion[]) {
+    const ordered = sortQuestionsForDisplay(remainingQuestions);
+    const updates = ordered
+      .map((q, index) => {
+        const nextOrder = index + 1;
+        const currentOrder = Number(q.questionOrder);
+        return {
+          id: q.id,
+          nextOrder,
+          currentOrder: Number.isFinite(currentOrder) ? currentOrder : null,
+        };
+      })
+      .filter((item) => item.currentOrder !== item.nextOrder);
+
+    if (!updates.length) return;
+
+    const CHUNK_SIZE = 450;
+    for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
+      const batch = writeBatch(db);
+      const chunk = updates.slice(i, i + CHUNK_SIZE);
+      chunk.forEach((item) => {
+        batch.update(doc(qCol, item.id), {
+          questionOrder: item.nextOrder,
+          updatedAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+    }
+  }
 
   function resetEditor() {
     setEditingId(null);
@@ -1087,6 +1248,7 @@ function QuestionsManager({
       if (!editingId) {
         await addDoc(qCol, {
           ...payload,
+          questionOrder: getNextQuestionOrder(),
           createdAt: serverTimestamp(),
           source: "manual",
         });
@@ -1110,6 +1272,14 @@ function QuestionsManager({
     if (!confirm("Delete this question?")) return;
     try {
       await deleteDoc(doc(qCol, id));
+      const remaining = questions.filter((q) => q.id !== id);
+      await resequenceQuestionOrders(remaining);
+      setQuestions(
+        sortQuestionsForDisplay(remaining).map((q, index) => ({
+          ...q,
+          questionOrder: index + 1,
+        }))
+      );
       await syncTestQuestionCount();
       toast.success("Deleted");
       if (editingId === id) {
@@ -1125,6 +1295,7 @@ function QuestionsManager({
   async function duplicateQuestion(q: TestQuestion) {
     try {
       await addDoc(qCol, {
+        questionOrder: getNextQuestionOrder(),
         question: q.question,
         options: q.options || ["", "", "", ""],
         correctOption: q.correctOption ?? 0,
@@ -1158,7 +1329,15 @@ function QuestionsManager({
     }
   }
 
+
+
+  // Upload pdf starts here....
   async function handlePdfSelected(file: File | null) {
+    if (!isAiPdfImportEnabled) {
+      toast.error(getAiFeatureDisabledMessage("pdfImport"));
+      return;
+    }
+
     if (!file) return;
     if (file.type !== "application/pdf") {
       toast.error("Please upload a PDF file only");
@@ -1169,41 +1348,103 @@ function QuestionsManager({
       return;
     }
 
+    // Create a new abort controller for this import
+    importAbortControllerRef.current = new AbortController();
+
     setImportBusy(true);
     setImportFileName(file.name);
     setImportPreviewOpen(true);
     setImportItems([]);
     setImportSummary(null);
+    setImportProgressUpdates([]);
+    toast.info("AI import started. Please do not close this tab while processing.", {
+      duration: 3500,
+    });
 
     try {
       const result = await importQuestionsFromPdf(
         file,
         { testTitle, subject: testSubject, educatorId: educatorUid },
-        (completed, total) => {
-          toast.info(`Processing page ${completed} of ${total}...`, { id: "pdf-progress" });
+        (update) => {
+          setImportProgressUpdates((prev) => [...prev, update]);
+        },
+        importAbortControllerRef.current.signal,
+        // Callback to add questions in real-time as they're detected
+        (newQuestions, pageNum) => {
+          setImportItems((prev) => sortImportItemsBySourceIndex([...prev, ...newQuestions]));
         }
       );
-      const previewItems: AiImportPreviewItem[] = (result.items || []).map((item) => ({
-        ...item,
-        include: item.status === "ready",
-      }));
-      setImportItems(previewItems);
+      // Update summary at the end (questions already added via callback)
       setImportSummary(result.summary || null);
+      setImportItems(
+        sortImportItemsBySourceIndex(
+          (result.items || []).map((item) => ({
+            ...item,
+            include: item.status === "ready",
+          }))
+        )
+      );
+      setImportProgressUpdates([]);
       toast.success("AI import preview is ready");
     } catch (error) {
       console.error(error);
-      toast.error(error instanceof Error ? error.message : "Failed to import PDF with AI");
+      const errorMsg = error instanceof Error ? error.message : "Failed to import PDF with AI";
+      // Don't show error toast if it was cancelled
+      if (!errorMsg.includes("cancelled")) {
+        toast.error(errorMsg);
+      }
       setImportPreviewOpen(false);
+      setImportProgressUpdates([]);
     } finally {
       setImportBusy(false);
+      importAbortControllerRef.current = null;
     }
+  }
+
+  async function confirmAndStartPdfImport() {
+    if (!pendingPdfFile) {
+      setConfirmPdfOpen(false);
+      return;
+    }
+
+    const selectedFile = pendingPdfFile;
+    setConfirmPdfOpen(false);
+    setPendingPdfFile(null);
+    await handlePdfSelected(selectedFile);
+  }
+
+  function cancelPdfImport() {
+    if (importAbortControllerRef.current) {
+      importAbortControllerRef.current.abort();
+      setImportBusy(false);
+      setImportPreviewOpen(false);
+      setImportProgressUpdates([]); // Clear progress tracker
+      toast.info("PDF import cancelled");
+    }
+  }
+
+  function sortImportItemsBySourceIndex(items: AiImportPreviewItem[]) {
+    return [...items].sort((a, b) => {
+      const aIdx = Number.isFinite(Number(a.sourceIndex)) ? Number(a.sourceIndex) : Number.MAX_SAFE_INTEGER;
+      const bIdx = Number.isFinite(Number(b.sourceIndex)) ? Number(b.sourceIndex) : Number.MAX_SAFE_INTEGER;
+      return aIdx - bIdx;
+    });
   }
 
   function updateImportItemInclude(sourceIndex: number, include: boolean) {
     setImportItems((prev) => prev.map((item) => (item.sourceIndex === sourceIndex ? { ...item, include } : item)));
   }
 
-  function selectReadyOnly() {
+  function selectAllImportItems() {
+    setImportItems((prev) =>
+      prev.map((item) => ({
+        ...item,
+        include: true,
+      }))
+    );
+  }
+
+  function selectOnlyReadyImportItems() {
     setImportItems((prev) =>
       prev.map((item) => ({
         ...item,
@@ -1212,20 +1453,25 @@ function QuestionsManager({
     );
   }
 
-  function toggleAllPartials(include: boolean) {
+  function selectOnlyPartialImportItems() {
+    setImportItems((prev) =>
+      prev.map((item) => ({
+        ...item,
+        include: item.status === "partial",
+      }))
+    );
+  }
+
+  function selectOnlyRejectedImportItems() {
     setImportItems((prev) =>
       prev.map((item) =>
-        item.status === "partial"
-          ? { ...item, include }
-          : item.status === "ready"
-            ? { ...item, include: true }
-            : { ...item, include: false }
+        ({ ...item, include: item.status === "rejected" })
       )
     );
   }
 
   async function saveImportedQuestions() {
-    const selected = importItems.filter((item) => item.include && item.status !== "rejected");
+    const selected = importItems.filter((item) => item.include);
     if (!selected.length) {
       toast.error("No questions selected to save");
       return;
@@ -1233,13 +1479,21 @@ function QuestionsManager({
 
     setSavingImported(true);
     try {
+      const baseOrder = questions.reduce((max, q) => {
+        const n = Number(q.questionOrder);
+        return Number.isFinite(n) ? Math.max(max, n) : max;
+      }, 0);
+
       for (let i = 0; i < selected.length; i += 200) {
         const batch = writeBatch(db);
-        for (const item of selected.slice(i, i + 200)) {
+        const chunk = selected.slice(i, i + 200);
+        for (let j = 0; j < chunk.length; j += 1) {
+          const item = chunk[j];
           const payload = buildImportedQuestionPayload(item);
           const newRef = doc(qCol);
           batch.set(newRef, {
             ...payload,
+            questionOrder: baseOrder + i + j + 1,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           });
@@ -1252,6 +1506,7 @@ function QuestionsManager({
       setImportPreviewOpen(false);
       setImportItems([]);
       setImportSummary(null);
+      setImportProgressUpdates([]); // Clear progress tracker
       if (!editorOpen) openNew();
     } catch (error) {
       console.error(error);
@@ -1287,11 +1542,17 @@ function QuestionsManager({
                 variant="outline"
                 className="w-full rounded-xl"
                 onClick={() => pdfInputRef.current?.click()}
-                disabled={importBusy}
+                disabled={importBusy || !isAiPdfImportEnabled}
+                title={!isAiPdfImportEnabled ? getAiFeatureDisabledMessage("pdfImport") : undefined}
               >
                 {importBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
                 Import PDF with AI
               </Button>
+              {!isAiPdfImportEnabled ? (
+                <p className="text-xs text-muted-foreground">
+                  {getAiFeatureDisabledMessage("pdfImport")}
+                </p>
+              ) : null}
               <input
                 ref={pdfInputRef}
                 type="file"
@@ -1300,9 +1561,15 @@ function QuestionsManager({
                 onChange={async (event) => {
                   const file = event.target.files?.[0] || null;
                   event.currentTarget.value = "";
-                  await handlePdfSelected(file);
+                  if (!file) return;
+                  setPendingPdfFile(file);
+                  setConfirmPdfOpen(true);
                 }}
               />
+
+              {importBusy && importProgressUpdates.length > 0 && (
+                <InlineStatusTracker updates={importProgressUpdates} isProcessing={importBusy} />
+              )}
 
               <div className="relative">
                 <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
@@ -1323,7 +1590,7 @@ function QuestionsManager({
               ) : filteredQuestions.length === 0 ? (
                 <p className="text-center text-sm text-muted-foreground py-10">No questions yet.</p>
               ) : (
-                filteredQuestions.map((q, idx) => (
+                filteredQuestions.map((q) => (
                   <div
                     key={q.id}
                     onClick={() => openEdit(q)}
@@ -1332,7 +1599,7 @@ function QuestionsManager({
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="font-medium line-clamp-2">
-                          Q{idx + 1}: {stripHtml(q.question) || "(empty)"}
+                          Q{questionNumberById.get(q.id) ?? "-"}: {stripHtml(q.question) || "(empty)"}
                         </div>
                         <div className="mt-2 flex flex-wrap gap-1.5">
                           <Badge variant="secondary" className="text-[10px] rounded-full">
@@ -1447,8 +1714,9 @@ function QuestionsManager({
                           setFormQuestion(next);
                           toast.success("Image added");
                         } catch (e) {
-                          console.error(e);
-                          toast.error("Image upload failed");
+                          const msg = e instanceof Error ? e.message : "Image upload failed";
+                          console.error("[Image upload error]", msg);
+                          toast.error(msg);
                         } finally {
                           setImgBusy(null);
                         }
@@ -1486,8 +1754,9 @@ function QuestionsManager({
                               setFormOptions((prev) => prev.map((v, i) => (i === idx ? next : v)));
                               toast.success("Image added");
                             } catch (e) {
-                              console.error(e);
-                              toast.error("Image upload failed");
+                              const msg = e instanceof Error ? e.message : "Image upload failed";
+                              console.error("[Image upload error]", msg);
+                              toast.error(msg);
                             } finally {
                               setImgBusy(null);
                             }
@@ -1594,8 +1863,9 @@ function QuestionsManager({
                           setFormExplanation(next);
                           toast.success("Image added");
                         } catch (e) {
-                          console.error(e);
-                          toast.error("Image upload failed");
+                          const msg = e instanceof Error ? e.message : "Image upload failed";
+                          console.error("[Image upload error]", msg);
+                          toast.error(msg);
                         } finally {
                           setImgBusy(null);
                         }
@@ -1655,13 +1925,60 @@ function QuestionsManager({
           importing={importBusy}
           saving={savingImported}
           onClose={() => {
-            if (!savingImported) setImportPreviewOpen(false);
+            if (!savingImported && !importBusy) {
+              setImportPreviewOpen(false);
+              setImportProgressUpdates([]); // Clear progress tracker
+            }
           }}
+          onCancel={cancelPdfImport}
           onItemIncludeChange={updateImportItemInclude}
-          onSelectReadyOnly={selectReadyOnly}
-          onToggleAllPartials={toggleAllPartials}
+          onSelectAll={selectAllImportItems}
+          onSelectOnlyReady={selectOnlyReadyImportItems}
+          onSelectOnlyPartial={selectOnlyPartialImportItems}
+          onSelectOnlyRejected={selectOnlyRejectedImportItems}
           onSaveSelected={saveImportedQuestions}
         />
+
+        <Dialog
+          open={confirmPdfOpen}
+          onOpenChange={(open) => {
+            setConfirmPdfOpen(open);
+            if (!open) {
+              setPendingPdfFile(null);
+            }
+          }}
+        >
+          <DialogContent className="rounded-2xl">
+            <DialogHeader>
+              <DialogTitle>Confirm PDF Import</DialogTitle>
+              <DialogDescription>
+                Please confirm this is the correct file to import with AI.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="rounded-xl border bg-muted/30 p-3 text-sm">
+              <p className="font-medium truncate">{pendingPdfFile?.name || "No file selected"}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Size: {pendingPdfFile ? `${(pendingPdfFile.size / (1024 * 1024)).toFixed(2)} MB` : "-"}
+              </p>
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setConfirmPdfOpen(false);
+                  setPendingPdfFile(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button className="gradient-bg text-white" onClick={confirmAndStartPdfImport}>
+                Confirm & Start Import
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

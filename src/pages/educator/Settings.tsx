@@ -37,6 +37,7 @@ import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { auth, db, storage } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthProvider";
+import { buildTenantUrl } from "@/lib/tenant";
 
 type EducatorPrefs = {
   notifications?: {
@@ -73,11 +74,6 @@ export default function Settings() {
   const [tenantSlug, setTenantSlug] = useState(profile?.tenantSlug || "");
   const [newTenantSlug, setNewTenantSlug] = useState("");
   const [changingSlug, setChangingSlug] = useState(false);
-
-  const appDomain =
-    (import.meta.env.VITE_APP_DOMAIN as string | undefined) ||
-    (import.meta.env.VITE_APP_BASE_DOMAIN as string | undefined) ||
-    "univ.live";
 
   const previewSlug = String(newTenantSlug || "")
     .trim()
@@ -280,7 +276,7 @@ export default function Settings() {
 
       toast({
         title: "Subdomain updated",
-        description: `Your new coaching URL is https://${slug}.${appDomain}`,
+        description: `Your new coaching URL is ${buildTenantUrl(slug, "/")}`,
       });
 
       // keep AuthProvider profile in sync
@@ -550,7 +546,7 @@ export default function Settings() {
             <div className="text-sm text-muted-foreground">
               Current URL:{" "}
               <span className="text-foreground font-medium">
-                {tenantSlug ? `https://${tenantSlug}.${appDomain}` : "Not set"}
+                {tenantSlug ? buildTenantUrl(tenantSlug, "/") : "Not set"}
               </span>
             </div>
 
@@ -570,7 +566,7 @@ export default function Settings() {
                   <p className="text-xs text-muted-foreground">
                     Preview:{" "}
                     <span className="text-foreground font-medium">
-                      {`https://${previewSlug}.${appDomain}`}
+                      {buildTenantUrl(previewSlug, "/")}
                     </span>
                   </p>
                 )}
@@ -608,7 +604,7 @@ export default function Settings() {
                 type="button"
                 variant="ghost"
                 className="justify-start px-0"
-                onClick={() => window.open(`https://${tenantSlug}.${appDomain}`, "_blank")}
+                onClick={() => window.open(buildTenantUrl(tenantSlug, "/"), "_blank")}
               >
                 <ExternalLink className="h-4 w-4 mr-2" />
                 Open coaching website

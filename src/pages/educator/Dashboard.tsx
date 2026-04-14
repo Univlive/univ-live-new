@@ -4,14 +4,10 @@ import {
   Users,
   UserCheck,
   FileText,
-  Target,
-  TrendingUp,
-  Clock3,
   KeyRound,
-  ClipboardCheck,
-  ArrowRight,
-  Layers3,
-  MessageSquare,
+  Trophy,
+  Copy,
+  Check,
 } from "lucide-react";
 import {
   Area,
@@ -25,7 +21,6 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { motion } from "framer-motion";
 import {
   collection,
   doc,
@@ -34,15 +29,15 @@ import {
   where,
 } from "firebase/firestore";
 
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import MetricCard from "@/components/educator/MetricCard";
 import ChartCard from "@/components/educator/ChartCard";
 import ActivityFeed, { type EducatorActivity } from "@/components/educator/ActivityFeed";
 import EmptyState from "@/components/educator/EmptyState";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthProvider";
+import { buildTenantUrl } from "@/lib/tenant";
 
 type StudentDoc = {
   id: string;
@@ -124,6 +119,8 @@ type EducatorProfileDoc = {
   tenantSlug?: string;
 };
 
+type TopPerformerFilter = "overall" | "subject" | "test";
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function safeNum(value: any, fallback = 0) {
@@ -165,6 +162,10 @@ function weekdayLabel(date: Date) {
   return date.toLocaleString(undefined, { weekday: "short" });
 }
 
+function shortDateLabel(date: Date) {
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 function relativeTime(ms: number | null) {
   if (!ms) return "—";
   const diff = Date.now() - ms;
@@ -182,19 +183,6 @@ function isStudentActive(student: StudentDoc) {
 function isAttemptCompleted(status?: string) {
   const normalized = String(status || "").toLowerCase();
   return normalized === "submitted" || normalized === "completed" || normalized === "finished";
-}
-
-function normalizeAccuracy(attempt: AttemptDoc) {
-  const direct = Number(attempt.accuracy);
-  if (Number.isFinite(direct)) {
-    const pct = direct <= 1.01 ? direct * 100 : direct;
-    return Math.max(0, Math.min(100, Math.round(pct)));
-  }
-
-  const score = safeNum(attempt.score, 0);
-  const maxScore = safeNum(attempt.maxScore, 0);
-  if (!maxScore) return 0;
-  return Math.max(0, Math.min(100, Math.round((score / maxScore) * 100)));
 }
 
 function average(values: number[]) {
@@ -215,34 +203,6 @@ function countInWindow<T>(items: T[], getMillis: (item: T) => number | null, sta
   }).length;
 }
 
-function meanInWindow<T>(items: T[], getMillis: (item: T) => number | null, getValue: (item: T) => number | null, startMs: number, endMs: number) {
-  const values = items
-    .filter((item) => {
-      const value = getMillis(item);
-      return value != null && value >= startMs && value < endMs;
-    })
-    .map((item) => getValue(item))
-    .filter((value): value is number => value != null && Number.isFinite(value));
-
-  return average(values);
-}
-
-function completionRateInWindow(items: AttemptDoc[], startMs: number, endMs: number) {
-  const relevant = items.filter((item) => {
-    const createdAt = toMillis(item.createdAt || item.submittedAt || item.updatedAt);
-    return createdAt != null && createdAt >= startMs && createdAt < endMs;
-  });
-  if (!relevant.length) return 0;
-  const completed = relevant.filter((item) => isAttemptCompleted(item.status)).length;
-  return Math.round((completed / relevant.length) * 100);
-}
-
-function formatMinutes(totalSeconds: number) {
-  if (!totalSeconds) return "0 min";
-  const mins = Math.round(totalSeconds / 60);
-  return `${mins} min`;
-}
-
 function accessCodeStatus(code: AccessCodeDoc) {
   const maxUses = safeNum(code.maxUses, 0);
   const used = safeNum(code.usesUsed, 0);
@@ -258,6 +218,7 @@ export default function EducatorDashboard() {
   const { firebaseUser, profile, loading: authLoading } = useAuth();
 
   const uid = firebaseUser?.uid || null;
+  const educatorId = profile?.educatorId || uid;
 
   const [educatorDoc, setEducatorDoc] = useState<EducatorProfileDoc | null>(null);
   const [students, setStudents] = useState<StudentDoc[]>([]);
@@ -276,9 +237,16 @@ export default function EducatorDashboard() {
   const [seatsLoaded, setSeatsLoaded] = useState(false);
   const [seatTxLoaded, setSeatTxLoaded] = useState(false);
   const [threadsLoaded, setThreadsLoaded] = useState(false);
+  const [topPerformerFilter, setTopPerformerFilter] = useState<TopPerformerFilter>("overall");
+  const [selectedTopSubject, setSelectedTopSubject] = useState("all");
+  const [selectedTopTest, setSelectedTopTest] = useState("all");
+  const [topPerformerLimit, setTopPerformerLimit] = useState("10");
+  const [copiedCoachingUrl, setCopiedCoachingUrl] = useState(false);
+  const [studentGrowthPeriod, setStudentGrowthPeriod] = useState("30");
+  const [attemptsPeriod, setAttemptsPeriod] = useState("30");
 
   useEffect(() => {
-    if (!uid) {
+    if (!educatorId) {
       setEducatorDoc(null);
       setStudents([]);
       setTests([]);
@@ -299,7 +267,7 @@ export default function EducatorDashboard() {
     }
 
     const unsubProfile = onSnapshot(
-      doc(db, "educators", uid),
+      doc(db, "educators", educatorId),
       (snap) => {
         setEducatorDoc(snap.exists() ? (snap.data() as EducatorProfileDoc) : null);
         setProfileLoaded(true);
@@ -311,7 +279,7 @@ export default function EducatorDashboard() {
     );
 
     const unsubStudents = onSnapshot(
-      collection(db, "educators", uid, "students"),
+      collection(db, "educators", educatorId, "students"),
       (snap) => {
         setStudents(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
         setStudentsLoaded(true);
@@ -323,7 +291,7 @@ export default function EducatorDashboard() {
     );
 
     const unsubTests = onSnapshot(
-      collection(db, "educators", uid, "my_tests"),
+      collection(db, "educators", educatorId, "my_tests"),
       (snap) => {
         setTests(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
         setTestsLoaded(true);
@@ -335,7 +303,7 @@ export default function EducatorDashboard() {
     );
 
     const unsubAttempts = onSnapshot(
-      query(collection(db, "attempts"), where("educatorId", "==", uid)),
+      query(collection(db, "attempts"), where("educatorId", "==", educatorId)),
       (snap) => {
         setAttempts(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
         setAttemptsLoaded(true);
@@ -347,7 +315,7 @@ export default function EducatorDashboard() {
     );
 
     const unsubAccessCodes = onSnapshot(
-      collection(db, "educators", uid, "accessCodes"),
+      collection(db, "educators", educatorId, "accessCodes"),
       (snap) => {
         setAccessCodes(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
         setAccessCodesLoaded(true);
@@ -359,7 +327,7 @@ export default function EducatorDashboard() {
     );
 
     const unsubSeats = onSnapshot(
-      collection(db, "educators", uid, "billingSeats"),
+      collection(db, "educators", educatorId, "billingSeats"),
       (snap) => {
         setSeats(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
         setSeatsLoaded(true);
@@ -371,7 +339,7 @@ export default function EducatorDashboard() {
     );
 
     const unsubSeatTx = onSnapshot(
-      collection(db, "educators", uid, "seatTransactions"),
+      collection(db, "educators", educatorId, "seatTransactions"),
       (snap) => {
         setSeatTransactions(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
         setSeatTxLoaded(true);
@@ -383,7 +351,7 @@ export default function EducatorDashboard() {
     );
 
     const unsubThreads = onSnapshot(
-      query(collection(db, "support_threads"), where("educatorId", "==", uid)),
+      query(collection(db, "support_threads"), where("educatorId", "==", educatorId)),
       (snap) => {
         setThreads(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
         setThreadsLoaded(true);
@@ -404,7 +372,7 @@ export default function EducatorDashboard() {
       unsubSeatTx();
       unsubThreads();
     };
-  }, [uid]);
+  }, [educatorId]);
 
   const ready =
     profileLoaded &&
@@ -416,17 +384,6 @@ export default function EducatorDashboard() {
     seatTxLoaded &&
     threadsLoaded;
 
-  const displayName = useMemo(() => {
-    return (
-      educatorDoc?.displayName ||
-      educatorDoc?.fullName ||
-      educatorDoc?.name ||
-      profile?.displayName ||
-      firebaseUser?.displayName ||
-      "Educator"
-    );
-  }, [educatorDoc, profile, firebaseUser]);
-
   const studentNameMap = useMemo(() => {
     const out: Record<string, string> = {};
     students.forEach((student) => {
@@ -435,27 +392,11 @@ export default function EducatorDashboard() {
     return out;
   }, [students]);
 
-  const seatLimit = Math.max(0, safeNum(educatorDoc?.seatLimit, 0));
-  const usedSeats = useMemo(
-    () => seats.filter((seat) => String(seat.status || "").toLowerCase() === "active").length,
-    [seats]
-  );
-  const seatUtilization = seatLimit > 0 ? Math.round((usedSeats / seatLimit) * 100) : 0;
-
   const totalStudents = students.length;
   const activeStudents = students.filter(isStudentActive).length;
   const totalTests = tests.length;
-  const totalAttempts = attempts.length;
   const completedAttempts = attempts.filter((attempt) => isAttemptCompleted(attempt.status));
-  const completionRate = totalAttempts > 0 ? Math.round((completedAttempts.length / totalAttempts) * 100) : 0;
-  const avgScore = Math.round(average(completedAttempts.map((a) => safeNum(a.score, 0))));
-  const avgTimeSec = Math.round(average(completedAttempts.map((attempt) => safeNum(attempt.timeTakenSec, 0)).filter(Boolean)));
-  const pendingReviews = completedAttempts.filter((attempt) => {
-    const status = String(attempt.aiReviewStatus || "queued").toLowerCase();
-    return status === "queued" || status === "in-progress";
-  }).length;
   const activeAccessCodes = accessCodes.filter((code) => accessCodeStatus(code) === "active").length;
-  const unreadMessages = threads.reduce((sum, thread) => sum + safeNum(thread.unreadCountEducator, 0), 0);
 
   const currentPeriodStart = Date.now() - 30 * DAY_MS;
   const previousPeriodStart = Date.now() - 60 * DAY_MS;
@@ -472,70 +413,75 @@ export default function EducatorDashboard() {
     countInWindow(tests, (test) => toMillis(test.createdAt), previousPeriodStart, previousPeriodEnd)
   );
 
-  const deltaAttempts = percentChange(
-    countInWindow(attempts, (attempt) => toMillis(attempt.createdAt), currentPeriodStart, currentPeriodEnd),
-    countInWindow(attempts, (attempt) => toMillis(attempt.createdAt), previousPeriodStart, previousPeriodEnd)
-  );
+  const coachingName =
+    String(
+      educatorDoc?.coachingName ||
+        educatorDoc?.displayName ||
+        educatorDoc?.name ||
+        profile?.displayName ||
+        "Your Coaching"
+    ).trim() || "Your Coaching";
 
-  const deltaAvgScore = percentChange(
-    meanInWindow(
-      completedAttempts,
-      (attempt) => toMillis(attempt.submittedAt || attempt.updatedAt || attempt.createdAt),
-      (attempt) => safeNum(attempt.score, 0),
-      currentPeriodStart,
-      currentPeriodEnd
-    ),
-    meanInWindow(
-      completedAttempts,
-      (attempt) => toMillis(attempt.submittedAt || attempt.updatedAt || attempt.createdAt),
-      (attempt) => safeNum(attempt.score, 0),
-      previousPeriodStart,
-      previousPeriodEnd
-    )
-  );
+  const coachingSlug = String(educatorDoc?.tenantSlug || profile?.tenantSlug || "").trim();
+  const coachingUrl = coachingSlug ? buildTenantUrl(coachingSlug, "/") : "";
+  const seatLimit = Math.max(0, safeNum(educatorDoc?.seatLimit, 0));
+  const activeSeatCount = seats.filter((seat) => String(seat.status || "").toLowerCase() === "active").length;
 
-  const deltaCompletionRate = percentChange(
-    completionRateInWindow(attempts, currentPeriodStart, currentPeriodEnd),
-    completionRateInWindow(attempts, previousPeriodStart, previousPeriodEnd)
-  );
+  async function handleCopyCoachingUrl() {
+    if (!coachingUrl) return;
 
-  const last6Months = useMemo(() => {
+    try {
+      await navigator.clipboard.writeText(coachingUrl);
+      setCopiedCoachingUrl(true);
+      setTimeout(() => setCopiedCoachingUrl(false), 1800);
+    } catch {
+      // no-op: clipboard permission may be blocked
+    }
+  }
+
+  const growthDays = useMemo(() => {
     const rows: Date[] = [];
-    const now = new Date();
-    for (let offset = 5; offset >= 0; offset -= 1) {
-      rows.push(new Date(now.getFullYear(), now.getMonth() - offset, 1));
+    const totalDays = Math.max(1, safeNum(studentGrowthPeriod, 30));
+    for (let offset = totalDays - 1; offset >= 0; offset -= 1) {
+      rows.push(startOfDay(daysAgo(offset)));
     }
     return rows;
-  }, []);
+  }, [studentGrowthPeriod]);
 
   const studentGrowthData = useMemo(() => {
     const bucket: Record<string, number> = {};
+    growthDays.forEach((date) => {
+      bucket[date.toISOString()] = 0;
+    });
+
     students.forEach((student) => {
       const ms = toMillis(student.joinedAt || student.createdAt);
       if (ms == null) return;
-      const key = monthKey(new Date(ms));
-      bucket[key] = (bucket[key] || 0) + 1;
+      const key = startOfDay(new Date(ms)).toISOString();
+      if (!(key in bucket)) return;
+      bucket[key] += 1;
     });
 
     let cumulative = 0;
-    return last6Months.map((date) => {
-      cumulative += bucket[monthKey(date)] || 0;
+    return growthDays.map((date) => {
+      cumulative += bucket[date.toISOString()] || 0;
       return {
-        month: monthLabel(date),
+        month: growthDays.length <= 7 ? weekdayLabel(date) : shortDateLabel(date),
         students: cumulative,
       };
     });
-  }, [students, last6Months]);
+  }, [students, growthDays]);
 
-  const last7Days = useMemo(() => {
+  const attemptsDays = useMemo(() => {
     const rows: Date[] = [];
-    for (let offset = 6; offset >= 0; offset -= 1) rows.push(startOfDay(daysAgo(offset)));
+    const totalDays = Math.max(1, safeNum(attemptsPeriod, 30));
+    for (let offset = totalDays - 1; offset >= 0; offset -= 1) rows.push(startOfDay(daysAgo(offset)));
     return rows;
-  }, []);
+  }, [attemptsPeriod]);
 
   const attemptsData = useMemo(() => {
     const bucket: Record<string, { attempts: number; scores: number[] }> = {};
-    last7Days.forEach((date) => {
+    attemptsDays.forEach((date) => {
       bucket[date.toISOString()] = { attempts: 0, scores: [] };
     });
 
@@ -548,16 +494,16 @@ export default function EducatorDashboard() {
       if (isAttemptCompleted(attempt.status)) bucket[key].scores.push(safeNum(attempt.score, 0));
     });
 
-    return last7Days.map((date) => {
+    return attemptsDays.map((date) => {
       const key = date.toISOString();
       const row = bucket[key] || { attempts: 0, scores: [] };
       return {
-        day: weekdayLabel(date),
+        day: attemptsDays.length <= 7 ? weekdayLabel(date) : shortDateLabel(date),
         attempts: row.attempts,
         avgScore: Math.round(average(row.scores)),
       };
     });
-  }, [attempts, last7Days]);
+  }, [attempts, attemptsDays]);
 
   const subjectPerformanceData = useMemo(() => {
     const bucket: Record<string, { weak: number; moderate: number; strong: number }> = {};
@@ -607,26 +553,125 @@ export default function EducatorDashboard() {
       .slice(0, 5);
   }, [completedAttempts]);
 
-  const subjectAverages = useMemo(() => {
-    const bucket: Record<string, number[]> = {};
-    completedAttempts.forEach((attempt) => {
-      const subject = String(attempt.subject || "General");
-      if (!bucket[subject]) bucket[subject] = [];
-      bucket[subject].push(safeNum(attempt.score, 0));
-    });
-    return Object.entries(bucket)
-      .map(([subject, values]) => ({ subject, avg: Math.round(average(values)), attempts: values.length }))
-      .sort((a, b) => b.avg - a.avg);
+  const topPerformerSubjects = useMemo(() => {
+    return Array.from(
+      new Set(
+        completedAttempts
+          .map((attempt) => String(attempt.subject || "General").trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b));
   }, [completedAttempts]);
 
-  const bestSubject = subjectAverages[0];
-  const weakestSubject = subjectAverages[subjectAverages.length - 1];
+  const topPerformerTests = useMemo(() => {
+    const out = new Map<string, string>();
+    completedAttempts.forEach((attempt) => {
+      const title = String(attempt.testTitle || "Untitled Test").trim() || "Untitled Test";
+      const key = attempt.testId ? `id:${attempt.testId}` : `title:${title}`;
+      if (!out.has(key)) out.set(key, title);
+    });
 
-  const mostActiveDay = useMemo(() => {
-    const counts = attemptsData.map((row) => ({ day: row.day, attempts: row.attempts }));
-    const sorted = [...counts].sort((a, b) => b.attempts - a.attempts);
-    return sorted[0]?.attempts ? sorted[0] : null;
-  }, [attemptsData]);
+    return Array.from(out.entries())
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [completedAttempts]);
+
+  useEffect(() => {
+    if (topPerformerFilter === "subject" && selectedTopSubject !== "all" && !topPerformerSubjects.includes(selectedTopSubject)) {
+      setSelectedTopSubject("all");
+    }
+  }, [topPerformerFilter, selectedTopSubject, topPerformerSubjects]);
+
+  useEffect(() => {
+    if (topPerformerFilter === "test" && selectedTopTest !== "all" && !topPerformerTests.some((test) => test.value === selectedTopTest)) {
+      setSelectedTopTest("all");
+    }
+  }, [topPerformerFilter, selectedTopTest, topPerformerTests]);
+
+  const filteredTopPerformerAttempts = useMemo(() => {
+    if (topPerformerFilter === "subject" && selectedTopSubject !== "all") {
+      return completedAttempts.filter(
+        (attempt) => String(attempt.subject || "General").trim() === selectedTopSubject
+      );
+    }
+
+    if (topPerformerFilter === "test" && selectedTopTest !== "all") {
+      if (selectedTopTest.startsWith("id:")) {
+        return completedAttempts.filter((attempt) => `id:${attempt.testId || ""}` === selectedTopTest);
+      }
+
+      const title = selectedTopTest.replace("title:", "");
+      return completedAttempts.filter((attempt) => String(attempt.testTitle || "Untitled Test").trim() === title);
+    }
+
+    return completedAttempts;
+  }, [topPerformerFilter, selectedTopSubject, selectedTopTest, completedAttempts]);
+
+  const topPerformers = useMemo(() => {
+    const byStudent: Record<
+      string,
+      {
+        studentId: string;
+        totalScore: number;
+        totalAccuracy: number;
+        attempts: number;
+        bestScore: number;
+        latestMs: number;
+      }
+    > = {};
+
+    filteredTopPerformerAttempts.forEach((attempt) => {
+      const studentId = attempt.studentId;
+      if (!studentId) return;
+
+      const score = safeNum(attempt.score, 0);
+      const maxScore = safeNum(attempt.maxScore, 0);
+      const accuracy =
+        attempt.accuracy != null
+          ? safeNum(attempt.accuracy, 0)
+          : maxScore > 0
+            ? (score / maxScore) * 100
+            : 0;
+      const attemptMs = toMillis(attempt.submittedAt || attempt.updatedAt || attempt.createdAt) || 0;
+
+      if (!byStudent[studentId]) {
+        byStudent[studentId] = {
+          studentId,
+          totalScore: 0,
+          totalAccuracy: 0,
+          attempts: 0,
+          bestScore: 0,
+          latestMs: 0,
+        };
+      }
+
+      byStudent[studentId].attempts += 1;
+      byStudent[studentId].totalScore += score;
+      byStudent[studentId].totalAccuracy += accuracy;
+      byStudent[studentId].bestScore = Math.max(byStudent[studentId].bestScore, score);
+      byStudent[studentId].latestMs = Math.max(byStudent[studentId].latestMs, attemptMs);
+    });
+
+    const limit = Math.max(1, safeNum(topPerformerLimit, 10));
+
+    return Object.values(byStudent)
+      .map((row) => {
+        const avgAccuracy = row.attempts > 0 ? row.totalAccuracy / row.attempts : 0;
+
+        return {
+          ...row,
+          name: studentNameMap[row.studentId] || "Learner",
+          avgAccuracy,
+        };
+      })
+      .sort((a, b) => {
+        if (b.bestScore !== a.bestScore) return b.bestScore - a.bestScore;
+        if (b.avgAccuracy !== a.avgAccuracy) return b.avgAccuracy - a.avgAccuracy;
+        if (b.attempts !== a.attempts) return b.attempts - a.attempts;
+        return b.latestMs - a.latestMs;
+      })
+      .slice(0, limit);
+  }, [filteredTopPerformerAttempts, studentNameMap, topPerformerLimit]);
 
   const recentActivities = useMemo<EducatorActivity[]>(() => {
     const items: Array<EducatorActivity & { sortMs: number }> = [];
@@ -704,11 +749,11 @@ export default function EducatorDashboard() {
     return items.sort((a, b) => b.sortMs - a.sortMs).slice(0, 8).map(({ sortMs, ...rest }) => rest);
   }, [students, attempts, accessCodes, seatTransactions, threads, studentNameMap]);
 
-  if (authLoading || (!ready && uid)) {
+  if (authLoading || (!ready && educatorId)) {
     return <div className="py-12 text-center text-muted-foreground">Loading dashboard…</div>;
   }
 
-  if (!uid) {
+  if (!educatorId) {
     return (
       <EmptyState
         icon={FileText}
@@ -734,109 +779,90 @@ export default function EducatorDashboard() {
 
   return (
     <div className="space-y-6">
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="gradient-bg rounded-2xl p-6 text-white relative overflow-hidden"
-      >
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4xIj48cGF0aCBkPSJNMzYgMzRoLTJ2LTRoMnYyaDR2MmgtNHYtMnoiLz48L2c+PC9nPjwvc3ZnPg==')] opacity-30" />
-        <div className="relative z-10">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-display font-bold mb-2">Welcome back, {displayName}! 👋</h1>
-              <p className="text-white/85 text-sm sm:text-base max-w-2xl">
-                You currently have <span className="font-semibold text-white">{activeStudents}</span> active learners,
-                <span className="font-semibold text-white"> {pendingReviews}</span> pending AI reviews, and a
-                <span className="font-semibold text-white"> {completionRate}%</span> completion rate across your tests.
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <Button size="sm" variant="secondary" className="border-0" onClick={() => navigate("/educator/messages")}>
-                Learner Messages
-                {unreadMessages > 0 ? <Badge className="ml-2 bg-primary text-primary-foreground">{unreadMessages}</Badge> : null}
-              </Button>
+
+      <div className="gradient-bg rounded-2xl p-4 md:p-6 space-y-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between text-white">
+          <div>
+            <h2 className="text-xl md:text-2xl font-bold">Welcome back, {coachingName}! 👋</h2>
+            <p className="text-sm text-white/90 mt-1">Here is a quick snapshot of your coaching today.</p>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+              <span className="rounded-full border border-white/30 bg-white/15 px-3 py-1">
+                Seats: {activeSeatCount}/{seatLimit || "-"}
+              </span>
+              <span className="rounded-full border border-white/30 bg-white/15 px-3 py-1">
+                Learners: {totalStudents}
+              </span>
+              <span className="rounded-full border border-white/30 bg-white/15 px-3 py-1">
+                Tests: {totalTests}
+              </span>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-5">
-            <div className="rounded-xl bg-white/10 px-4 py-3 backdrop-blur-sm">
-              <div className="text-xs uppercase tracking-wide text-white/70">New learners (30d)</div>
-              <div className="text-xl font-bold">{countInWindow(students, (student) => toMillis(student.joinedAt || student.createdAt), currentPeriodStart, currentPeriodEnd)}</div>
-            </div>
-            <div className="rounded-xl bg-white/10 px-4 py-3 backdrop-blur-sm">
-              <div className="text-xs uppercase tracking-wide text-white/70">Avg completion time</div>
-              <div className="text-xl font-bold">{formatMinutes(avgTimeSec)}</div>
-            </div>
-            <div className="rounded-xl bg-white/10 px-4 py-3 backdrop-blur-sm">
-              <div className="text-xs uppercase tracking-wide text-white/70">Seat usage</div>
-              <div className="text-xl font-bold">{seatLimit > 0 ? `${usedSeats}/${seatLimit}` : "Not assigned"}</div>
-            </div>
-            <div className="rounded-xl bg-white/10 px-4 py-3 backdrop-blur-sm">
-              <div className="text-xs uppercase tracking-wide text-white/70">Unread messages</div>
-              <div className="text-xl font-bold">{unreadMessages}</div>
-            </div>
-          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full md:w-auto bg-white/15 hover:bg-white/25 text-white border border-white/30"
+            onClick={handleCopyCoachingUrl}
+            disabled={!coachingUrl}
+          >
+            {copiedCoachingUrl ? (
+              <>
+                <Check className="h-4 w-4 mr-2" />
+                Copied
+              </>
+            ) : (
+              <>
+                <Copy className="h-4 w-4 mr-2" />
+                Copy Coaching URL
+              </>
+            )}
+          </Button>
         </div>
-      </motion.div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7 gap-4">
-        <MetricCard
-          title="Total Students"
-          value={totalStudents.toLocaleString()}
-          change={{ value: Math.abs(deltaStudents), type: deltaStudents >= 0 ? "increase" : "decrease" }}
-          icon={Users}
-          iconColor="text-blue-500"
-          delay={0}
-        />
-        <MetricCard
-          title="Active Students"
-          value={activeStudents.toLocaleString()}
-          icon={UserCheck}
-          iconColor="text-green-500"
-          delay={0.05}
-        />
-        <MetricCard
-          title="Test Series"
-          value={totalTests.toLocaleString()}
-          change={{ value: Math.abs(deltaTests), type: deltaTests >= 0 ? "increase" : "decrease" }}
-          icon={FileText}
-          iconColor="text-purple-500"
-          delay={0.1}
-        />
-        <MetricCard
-          title="Total Attempts"
-          value={totalAttempts.toLocaleString()}
-          change={{ value: Math.abs(deltaAttempts), type: deltaAttempts >= 0 ? "increase" : "decrease" }}
-          icon={Target}
-          iconColor="text-orange-500"
-          delay={0.15}
-        />
-        <MetricCard
-          title="Completion Rate"
-          value={`${completionRate}%`}
-          change={{ value: Math.abs(deltaCompletionRate), type: deltaCompletionRate >= 0 ? "increase" : "decrease" }}
-          icon={ClipboardCheck}
-          iconColor="text-emerald-500"
-          delay={0.25}
-        />
-        <MetricCard
-          title="Seat Utilization"
-          value={seatLimit > 0 ? `${seatUtilization}%` : "—"}
-          icon={Layers3}
-          iconColor="text-fuchsia-500"
-          delay={0.3}
-        />
-        <MetricCard
-          title="Active Codes"
-          value={activeAccessCodes.toLocaleString()}
-          icon={KeyRound}
-          iconColor="text-amber-500"
-          delay={0.35}
-        />
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8 gap-4">
+          <MetricCard
+            title="Total Students"
+            value={totalStudents.toLocaleString()}
+            icon={Users}
+            iconColor="text-white"
+            blendWithGradient
+            delay={0}
+          />
+          <MetricCard
+            title="Active Students"
+            value={activeStudents.toLocaleString()}
+            icon={UserCheck}
+            iconColor="text-white"
+            blendWithGradient
+            delay={0.05}
+          />
+          <MetricCard
+            title="Test Series"
+            value={totalTests.toLocaleString()}
+            icon={FileText}
+            iconColor="text-white"
+            blendWithGradient
+            delay={0.1}
+          />
+          <MetricCard
+            title="Active Codes"
+            value={activeAccessCodes.toLocaleString()}
+            icon={KeyRound}
+            iconColor="text-white"
+            blendWithGradient
+            delay={0.35}
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ChartCard title="Student Growth" showPeriodSelect delay={0.2}>
+        <ChartCard
+          title="Student Growth"
+          showPeriodSelect
+          periodValue={studentGrowthPeriod}
+          onPeriodChange={setStudentGrowthPeriod}
+          delay={0.2}
+        >
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={studentGrowthData}>
@@ -862,7 +888,13 @@ export default function EducatorDashboard() {
           </div>
         </ChartCard>
 
-        <ChartCard title="Attempts & Scores" showPeriodSelect delay={0.25}>
+        <ChartCard
+          title="Attempts"
+          showPeriodSelect
+          periodValue={attemptsPeriod}
+          onPeriodChange={setAttemptsPeriod}
+          delay={0.25}
+        >
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={attemptsData}>
@@ -884,15 +916,140 @@ export default function EducatorDashboard() {
         </ChartCard>
       </div>
 
+      <div className="rounded-2xl border bg-card p-4 md:p-5 shadow-sm space-y-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h3 className="text-base md:text-lg font-semibold flex items-center gap-2">
+              <Trophy className="h-5 w-5 text-amber-500" />
+              Top Performers
+            </h3>
+            <p className="text-xs md:text-sm text-muted-foreground">
+              Ranked by best score first, then average accuracy based on selected filters.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
+            <Select
+              value={topPerformerFilter}
+              onValueChange={(value) => setTopPerformerFilter(value as TopPerformerFilter)}
+            >
+              <SelectTrigger className="w-full sm:w-56">
+                <SelectValue placeholder="Select ranking type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="overall">Overall Toppers</SelectItem>
+                <SelectItem value="subject">Subject-wise Toppers</SelectItem>
+                <SelectItem value="test">Particular Test Toppers</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={topPerformerLimit} onValueChange={setTopPerformerLimit}>
+              <SelectTrigger className="w-full sm:w-40">
+                <SelectValue placeholder="Top count" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="3">Top 3</SelectItem>
+                <SelectItem value="5">Top 5</SelectItem>
+                <SelectItem value="10">Top 10</SelectItem>
+                <SelectItem value="20">Top 20</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {topPerformerFilter === "subject" && (
+              <Select value={selectedTopSubject} onValueChange={setSelectedTopSubject}>
+                <SelectTrigger className="w-full sm:w-56">
+                  <SelectValue placeholder="Select subject" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All subjects</SelectItem>
+                  {topPerformerSubjects.map((subject) => (
+                    <SelectItem key={subject} value={subject}>
+                      {subject}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
+            {topPerformerFilter === "test" && (
+              <Select value={selectedTopTest} onValueChange={setSelectedTopTest}>
+                <SelectTrigger className="w-full sm:w-64">
+                  <SelectValue placeholder="Select test" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All tests</SelectItem>
+                  {topPerformerTests.map((test) => (
+                    <SelectItem key={test.value} value={test.value}>
+                      {test.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+        </div>
+
+        {topPerformers.length === 0 ? (
+          <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+            No completed attempts yet for this filter.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-muted-foreground">
+                  <th className="text-left py-2 pr-3 font-medium">Rank</th>
+                  <th className="text-left py-2 pr-3 font-medium">Learner</th>
+                  <th className="text-right py-2 pr-3 font-medium">Attempts</th>
+                  <th className="text-right py-2 pr-3 font-medium">Accuracy</th>
+                  <th className="text-right py-2 font-medium">Best Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topPerformers.map((performer, index) => {
+                  const rank = index + 1;
+                  const rankClass =
+                    rank === 1
+                      ? "text-amber-500"
+                      : rank === 2
+                        ? "text-slate-500"
+                        : rank === 3
+                          ? "text-orange-500"
+                          : "text-foreground";
+
+                  return (
+                    <tr key={performer.studentId} className="border-b last:border-0">
+                      <td className={`py-2 pr-3 font-semibold ${rankClass}`}>#{rank}</td>
+                      <td className="py-2 pr-3 font-medium">{performer.name}</td>
+                      <td className="py-2 pr-3 text-right">{performer.attempts}</td>
+                      <td className="py-2 pr-3 text-right">{performer.avgAccuracy.toFixed(1)}%</td>
+                      <td className="py-2 text-right">{performer.bestScore.toFixed(1)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
+        <div>
           <ChartCard title="Top Test Series by Attempts" delay={0.3}>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={topTestsData} layout="vertical" margin={{ left: 16, right: 16 }}>
+                <BarChart data={topTestsData} layout="vertical" margin={{ top: 6, right: 8, left: -20, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                   <XAxis type="number" tickLine={false} axisLine={false} className="text-xs fill-muted-foreground" />
-                  <YAxis dataKey="name" type="category" width={130} tickLine={false} axisLine={false} className="text-xs fill-muted-foreground" />
+                  <YAxis
+                    dataKey="name"
+                    type="category"
+                    width={88}
+                    tickMargin={6}
+                    tickLine={false}
+                    axisLine={false}
+                    className="text-xs fill-muted-foreground"
+                  />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "hsl(var(--card))",
@@ -906,56 +1063,8 @@ export default function EducatorDashboard() {
             </div>
           </ChartCard>
         </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base font-semibold">Performance Snapshot</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium">Best subject</p>
-                <p className="text-xs text-muted-foreground">Highest average score across completed attempts</p>
-              </div>
-              <Badge variant="secondary">{bestSubject ? `${bestSubject.subject} · ${bestSubject.avg}` : "No data"}</Badge>
-            </div>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium">Needs attention</p>
-                <p className="text-xs text-muted-foreground">Lowest average scoring subject right now</p>
-              </div>
-              <Badge variant="outline">{weakestSubject ? `${weakestSubject.subject} · ${weakestSubject.avg}` : "No data"}</Badge>
-            </div>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium">Most active day</p>
-                <p className="text-xs text-muted-foreground">Highest attempt volume in the last 7 days</p>
-              </div>
-              <Badge variant="secondary">{mostActiveDay ? `${mostActiveDay.day} · ${mostActiveDay.attempts}` : "No data"}</Badge>
-            </div>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium">Pending reviews</p>
-                <p className="text-xs text-muted-foreground">Submitted attempts waiting for AI analysis</p>
-              </div>
-              <Badge variant={pendingReviews > 0 ? "destructive" : "secondary"}>{pendingReviews}</Badge>
-            </div>
-            <div className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
-              <div className="flex items-center gap-2 text-foreground font-medium mb-2">
-                <Clock3 className="h-4 w-4" /> Quick read
-              </div>
-              <ul className="space-y-1.5 list-disc pl-5">
-                <li>{activeAccessCodes} active access codes are currently usable by learners.</li>
-                <li>{seatLimit > 0 ? `${usedSeats} of ${seatLimit}` : "No"} seats are allocated right now.</li>
-                <li>{avgTimeSec ? `Average attempt completion time is ${formatMinutes(avgTimeSec)}.` : "Attempt timing will appear after more submissions."}</li>
-              </ul>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
+        
+        <div>
           <ChartCard title="Subject Performance Heatmap" delay={0.35}>
             <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
@@ -984,8 +1093,11 @@ export default function EducatorDashboard() {
           </ChartCard>
         </div>
 
-        <ActivityFeed activities={recentActivities} delay={0.4} />
+        <div className="h-full min-h-0">
+          <ActivityFeed activities={recentActivities} delay={0.4} />
+        </div>
       </div>
+
     </div>
   );
 }

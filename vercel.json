@@ -17,7 +17,7 @@
       "destination": "https://drippr-seller-serverless.vercel.app/api/admin/assign-pickup"
     },
 
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!api(?:/|$)).*)", "destination": "/index.html" }
   ]
 }
 

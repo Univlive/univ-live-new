@@ -60,15 +60,10 @@ function mapQuestion(id: string, data: any): AttemptQuestion {
     0
   );
 
-  const positive = safeNumber(
-    data.marks ?? data.positiveMarks,
-    4
-  );
+  // Always normalize to +5 marks and -1 negative marks
+  const positive = 5;
 
-  const negative = safeNumber(
-    data.negativeMarks,
-    1
-  );
+  const negative = 1;
 
   return {
     id,

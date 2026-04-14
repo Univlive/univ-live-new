@@ -3,10 +3,33 @@ import { auth } from "@/lib/firebase";
 
 export type ImageKitScope = "question-bank" | "website";
 
-async function getIdToken(): Promise<string> {
-  const u = auth.currentUser;
-  if (!u) throw new Error("Not logged in");
-  return await u.getIdToken();
+type ImageKitAuthParams = {
+  token: string;
+  expire: number;
+  signature: string;
+};
+
+function getIdToken(forceRefresh: boolean = false): Promise<string> {
+  return new Promise((resolve, reject) => {
+    // onAuthStateChanged ensures we wait for Firebase to initialize on app launch
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      unsubscribe(); // Prevent memory leaks and duplicate calls
+      
+      if (!user) {
+        console.error("[getIdToken] User not logged in");
+        return reject(new Error("Not logged in - please sign in first"));
+      }
+      
+      try {
+        // Defaults to cached token unless forceRefresh is explicitly true
+        const token = await user.getIdToken(forceRefresh); 
+        resolve(token);
+      } catch (e: any) {
+        console.error("[getIdToken] Failed to get token:", e?.message);
+        reject(new Error(`Failed to get auth token: ${e?.message}`));
+      }
+    });
+  });
 }
 
 export async function uploadToImageKit(
@@ -20,22 +43,61 @@ export async function uploadToImageKit(
 
   const idToken = await getIdToken();
 
-  // IMPORTANT: Fetch fresh auth params for every upload
-  const authRes = await fetch(`/api/imagekit-auth?scope=${encodeURIComponent(scope)}`, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${idToken}` },
-  });
+  async function fetchAuthParams(authScope: ImageKitScope): Promise<ImageKitAuthParams> {
+    const url = `/api/imagekit-auth?scope=${encodeURIComponent(authScope)}`;
 
-  if (!authRes.ok) {
-    const txt = await authRes.text().catch(() => "");
-    throw new Error(`Failed to get ImageKit auth: ${authRes.status} ${txt}`);
+    const authRes = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${idToken}` },
+    });
+
+    const rawText = await authRes.text();
+
+    if (!authRes.ok) {
+      let parsedError = rawText;
+      try {
+        const json = JSON.parse(rawText);
+        parsedError = String(json?.error || rawText);
+      } catch {
+        // Keep raw response text when it is not JSON.
+      }
+
+      const shortError = parsedError.length > 250 ? `${parsedError.substring(0, 250)}...` : parsedError;
+      throw new Error(`ImageKit auth failed (${authScope}) [${authRes.status}]: ${shortError}`);
+    }
+    let parsed: ImageKitAuthParams;
+    try {
+      parsed = JSON.parse(rawText) as ImageKitAuthParams;
+    } catch (parseErr: any) {
+      const parseMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+      throw new Error(`Invalid auth response format (${authScope}): ${parseMsg}`);
+    }
+
+    if (!parsed?.token || !parsed?.signature || typeof parsed?.expire !== "number") {
+      throw new Error(`Invalid auth payload (${authScope}): missing token/signature/expire`);
+    }
+    return parsed;
   }
 
-  const { token, expire, signature } = (await authRes.json()) as {
-    token: string;
-    expire: number;
-    signature: string;
-  };
+  let authParams: ImageKitAuthParams;
+  try {
+    authParams = await fetchAuthParams(scope);
+  } catch (err: any) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const shouldFallback =
+      scope === "question-bank" &&
+      (msg.includes("[403]") || msg.toLowerCase().includes("forbidden"));
+
+    if (!shouldFallback) {
+      throw err;
+    }
+
+    // Some educator paths may still call the default scope; retry with educator-allowed scope.
+    console.warn("[uploadToImageKit] question-bank scope forbidden; retrying with website scope");
+    authParams = await fetchAuthParams("website");
+  }
+
+  const { token, expire, signature } = authParams;
 
   const form = new FormData();
   form.append("file", file);
@@ -54,7 +116,8 @@ export async function uploadToImageKit(
 
   if (!uploadRes.ok) {
     const txt = await uploadRes.text().catch(() => "");
-    throw new Error(`ImageKit upload failed: ${uploadRes.status} ${txt}`);
+    console.error(`[uploadToImageKit] Upload failed (${uploadRes.status}):`, txt.substring(0, 300));
+    throw new Error(`ImageKit upload failed: ${uploadRes.status}`);
   }
 
   const json = await uploadRes.json();

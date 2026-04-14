@@ -1,76 +1,149 @@
 // api/imagekit-auth.ts
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import ImageKit from "imagekit";
-import { requireUser } from "./_lib/requireUser.js";
 
-const imagekit = new ImageKit({
-  publicKey: process.env.IMAGEKIT_PUBLIC_KEY || "",
-  privateKey: process.env.IMAGEKIT_PRIVATE_KEY || "",
-  urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT || "",
-});
+// Wrap everything in try-catch at module level to prevent unhandled errors
+let ImageKitModule: any = null;
+let imagekitInstance: any = null;
+
+async function getImageKitInstance() {
+  try {
+    if (!ImageKitModule) {
+      ImageKitModule = await import("imagekit");
+    }
+    
+    if (!imagekitInstance) {
+      const publicKey = process.env.IMAGEKIT_PUBLIC_KEY;
+      const privateKey = process.env.IMAGEKIT_PRIVATE_KEY;
+      const urlEndpoint = process.env.IMAGEKIT_URL_ENDPOINT;
+      
+      if (!publicKey || !privateKey || !urlEndpoint) {
+        throw new Error(`ImageKit vars missing: pub=${!!publicKey}, priv=${!!privateKey}, url=${!!urlEndpoint}`);
+      }
+      
+      const ImageKit = ImageKitModule.default || ImageKitModule;
+      imagekitInstance = new ImageKit({ publicKey, privateKey, urlEndpoint });
+    }
+    
+    return imagekitInstance;
+  } catch (e: any) {
+    const msg = e?.message || String(e);
+    console.error("[imagekit-auth] Failed to initialize ImageKit:", msg);
+    throw new Error(msg);
+  }
+}
+
+let requireUserModule: any = null;
+
+async function getRequireUser() {
+  try {
+    if (!requireUserModule) {
+      const imported = await import("./_lib/requireUser.js");
+      requireUserModule = imported.requireUser;
+    }
+    return requireUserModule;
+  } catch (e: any) {
+    const msg = e?.message || String(e);
+    console.error("[imagekit-auth] Failed to import requireUser:", msg);
+    throw new Error(msg);
+  }
+}
 
 function setCors(req: VercelRequest, res: VercelResponse) {
-  const origin = String(req.headers.origin || "");
-  if (!origin) return;
+  try {
+    const origin = String(req.headers.origin || "");
+    if (!origin) return;
 
-  const allow = new Set(
-    String(process.env.CORS_ALLOW_ORIGINS || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-  );
+    const allow = new Set(
+      String(process.env.CORS_ALLOW_ORIGINS || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
 
-  const isAllowed =
-    allow.has(origin) ||
-    origin.includes("localhost") ||
-    origin.endsWith(".univ.live") ||
-    origin.endsWith("univ.live");
+    const isAllowed =
+      allow.has(origin) ||
+      origin.includes("localhost") ||
+      origin.endsWith(".univ.live") ||
+      origin.endsWith("univ.live");
 
-  if (isAllowed) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (isAllowed) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+      res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    }
+  } catch (e) {
+    console.error("[imagekit-auth] CORS error:", e);
   }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // CRITICAL: Set JSON response type FIRST, BEFORE anything else
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  
   try {
     setCors(req, res);
 
-    if (req.method === "OPTIONS") return res.status(204).end();
-    if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
-
-    if (
-      !process.env.IMAGEKIT_PUBLIC_KEY ||
-      !process.env.IMAGEKIT_PRIVATE_KEY ||
-      !process.env.IMAGEKIT_URL_ENDPOINT
-    ) {
-      return res.status(500).json({ error: "ImageKit env not configured" });
+    if (req.method === "OPTIONS") {
+      return res.status(204).end();
+    }
+    
+    if (req.method !== "GET") {
+      return res.status(405).json({ error: "Method not allowed" });
     }
 
-    // ✅ scope controls who can request signature
-    // - question-bank => ADMIN only (default for safety)
-    // - website       => ADMIN + EDUCATOR
     const scope = String((req.query?.scope as string) || "question-bank").toLowerCase();
+    const method = req.method;
 
-    if (scope === "website") {
-      await requireUser(req, { roles: ["ADMIN", "EDUCATOR"] });
-    } else {
-      await requireUser(req, { roles: ["ADMIN"] });
+    // Get requireUser function
+    const requireUser = await getRequireUser();
+
+    // Authenticate user
+    let user;
+    try {
+      if (scope === "website") {
+        user = await requireUser(req, { roles: ["ADMIN", "EDUCATOR"] });
+      } else {
+        user = await requireUser(req, { roles: ["ADMIN"] });
+      }
+    } catch (authErr: any) {
+      const authMsg = String(authErr?.message || "Auth failed");
+      console.error(`[imagekit-auth] ❌ Auth error:`, authMsg);
+      
+      if (authMsg.includes("Missing Authorization token")) {
+        return res.status(401).json({ error: "Missing Authorization token" });
+      }
+      if (authMsg.includes("Forbidden")) {
+        return res.status(403).json({ error: "Forbidden for scope: " + scope });
+      }
+      return res.status(401).json({ error: authMsg });
     }
 
-    const authParams = imagekit.getAuthenticationParameters();
-    return res.status(200).json(authParams);
+    // Get ImageKit instance
+    const imageKit = await getImageKitInstance();
+
+    // Generate auth params
+    let authParams;
+    try {
+      authParams = imageKit.getAuthenticationParameters();
+      return res.status(200).json(authParams);
+    } catch (paramErr: any) {
+      const paramMsg = String(paramErr?.message || "Failed to generate params");
+      console.error(`[imagekit-auth] ❌ Param error:`, paramMsg);
+      return res.status(500).json({ error: paramMsg });
+    }
+    
   } catch (e: any) {
-    const msg = String(e?.message || "Error");
-    if (msg.includes("Missing Authorization token")) {
-      return res.status(401).json({ error: "Missing Authorization token" });
+    // Final safety net - ALWAYS return JSON
+    const msg = String(e?.message || String(e) || "Unknown error");
+    console.error("[imagekit-auth] 🔴 UNHANDLED ERROR:", msg, e);
+    
+    try {
+      return res.status(500).json({ error: msg });
+    } catch {
+      // If even this fails, send plain text as last resort
+      res.status(500);
+      res.end(JSON.stringify({ error: "Internal server error" }));
     }
-    if (msg === "Forbidden") {
-      return res.status(403).json({ error: "Forbidden" });
-    }
-    console.error("imagekit-auth error:", e);
-    return res.status(500).json({ error: msg });
   }
 }

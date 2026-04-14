@@ -10,6 +10,7 @@ import { auth, db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { registerStudentForTenant } from "@/lib/studentRegistration";
 
 type RoleUI = "student" | "educator";
 
@@ -56,15 +57,6 @@ export default function Signup() {
     return effectiveRole === "educator" ? "Educator Signup" : "Student Signup";
   }, [tenantLoading, isTenantDomain, tenantSlug, effectiveRole]);
 
-  async function callRegisterStudent(token: string) {
-    if (!tenantSlug) return;
-    await fetch("/api/tenant/register-student", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ tenantSlug }),
-    });
-  }
-
   async function checkSlugAvailable(slug: string) {
     const s = await getDoc(doc(db, "tenants", slug));
     return !s.exists();
@@ -103,7 +95,14 @@ export default function Signup() {
           );
 
           const token = await cred.user.getIdToken();
-          await callRegisterStudent(token).catch(() => {});
+          try {
+            await registerStudentForTenant(token, tenantSlug);
+          } catch (apiErr: any) {
+            console.error("[Signup] Sync error:", apiErr);
+            if (apiErr.message.includes("<!DOCTYPE html>")) {
+              console.warn("API server not detected. Please ensure 'vercel dev' is running.");
+            }
+          }
           toast.success("Account created!");
           nav("/student");
           return;
@@ -124,7 +123,11 @@ export default function Signup() {
               );
 
               const token = await cred2.user.getIdToken();
-              await callRegisterStudent(token).catch(() => {});
+              try {
+                await registerStudentForTenant(token, tenantSlug);
+              } catch (apiErr: any) {
+                console.error("[Signup] Sync error (re-join):", apiErr);
+              }
               toast.success("Signed in and enrolled!");
               nav("/student");
               return;

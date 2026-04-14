@@ -4,6 +4,8 @@ import {
   SchemaType,
   type GenerationConfig,
 } from "@google/generative-ai";
+import { initializeStreaming, sendStreamEvent, endStreaming, streamError } from "../_lib/aiStreamingUtils.js";
+import { getGeminiModelNameFromEnv } from "../_lib/geminiModel.js";
 
 // ---------------------------------------------------------------------------
 // Request types (from frontend)
@@ -281,7 +283,7 @@ async function analyzeWithGemini(
   };
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: getGeminiModelNameFromEnv(),
     generationConfig,
     systemInstruction: SYSTEM_INSTRUCTION,
   });
@@ -318,9 +320,10 @@ export default async function handler(
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const isDev = process.env.NODE_ENV !== "production";
-
   try {
+    // Initialize streaming response
+    initializeStreaming(res);
+
     const {
       questions,
       responses,
@@ -333,24 +336,21 @@ export default async function handler(
 
     // ---- Input Validation ----
     if (!questions || !Array.isArray(questions) || !questions.length) {
-      return res
-        .status(400)
-        .json({ error: "Missing or empty required field: questions" });
+      return streamError(res, new Error("Missing or empty required field: questions"));
     }
 
     if (!responses || !Array.isArray(responses)) {
-      return res
-        .status(400)
-        .json({ error: "Missing required field: responses" });
+      return streamError(res, new Error("Missing required field: responses"));
     }
 
     if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({
-        error: isDev
-          ? "GEMINI_API_KEY not configured. Add it to Vercel environment variables."
-          : "API configuration error",
-      });
+      return streamError(res, new Error("GEMINI_API_KEY is not configured"));
     }
+
+    sendStreamEvent(res, {
+      type: "progress",
+      message: `Analyzing your performance on ${testTitle || "this test"}...`,
+    });
 
     // ---- Build prompt with full test data ----
     // Gemini 1.5 Flash handles 1M tokens — no chunking/batching needed
@@ -364,24 +364,33 @@ export default async function handler(
       accuracy ?? 0
     );
 
-    console.log(
-      `[analyze-performance] Analyzing "${testTitle}" — ${questions.length} questions, score ${totalScore}/${maxScore}`
-    );
+    sendStreamEvent(res, {
+      type: "progress",
+      message: "Identifying weak areas and strong concepts...",
+    });
 
     // ---- Call Gemini ----
     const analysis = await analyzeWithGemini(prompt);
 
-    console.log(
-      `[analyze-performance] Analysis complete — ${analysis.weakAreas.length} weak areas, ` +
-        `${analysis.prerequisites.length} prerequisites, ` +
-        `projection ${analysis.marksProjection.currentScore} → ${analysis.marksProjection.potentialScore}`
-    );
+    sendStreamEvent(res, {
+      type: "progress",
+      message: "Generating personalized study recommendations...",
+    });
 
-    return res.status(200).json(analysis);
+    // Send the complete analysis
+    sendStreamEvent(res, {
+      type: "complete",
+      data: analysis,
+    });
+
+    endStreaming(res);
   } catch (error) {
     console.error("[analyze-performance] Unhandled error:", error);
-    return res.status(500).json({
-      error: isDev ? String(error) : "Failed to analyze performance",
-    });
+    try {
+      streamError(res, error);
+    } catch (streamErr) {
+      console.error("[analyze-performance] Failed to send error response:", streamErr);
+      // Response is likely already closed, just log it
+    }
   }
 }

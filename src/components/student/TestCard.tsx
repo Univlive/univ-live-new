@@ -28,7 +28,18 @@ const subjectColors: Record<string, string> = {
 };
 
 export function TestCard({ test, onView, onStart, onUnlock }: TestCardProps) {
-  const attemptsRemaining = test.attemptsAllowed - test.attemptsUsed;
+  const parseNum = (value: unknown, fallback: number) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  };
+
+  // Firestore docs may miss attempts fields on some tests; use safe defaults.
+  const attemptsAllowed = Math.max(
+    1,
+    parseNum((test as any).attemptsAllowed ?? (test as any).maxAttempts, 3)
+  );
+  const attemptsUsed = Math.max(0, parseNum((test as any).attemptsUsed, 0));
+  const attemptsRemaining = Math.max(0, attemptsAllowed - attemptsUsed);
 
   return (
     <Card className={cn(
@@ -107,7 +118,7 @@ export function TestCard({ test, onView, onStart, onUnlock }: TestCardProps) {
             <Button 
               className="flex-1 rounded-xl gradient-bg"
               onClick={() => onStart(test.id)}
-              disabled={attemptsRemaining === 0}
+              disabled={attemptsRemaining <= 0}
             >
               <Play className="h-4 w-4 mr-2" />
               Start

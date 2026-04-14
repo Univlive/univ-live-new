@@ -40,9 +40,12 @@ interface AIReviewPanelProps {
   status: "queued" | "in-progress" | "completed" | "failed";
   review?: ExtendedAIReview | AIReview;
   className?: string;
+  progress?: string | null;
+  error?: string | null;
+  onCancel?: () => void;
 }
 
-export function AIReviewPanel({ status, review, className }: AIReviewPanelProps) {
+export function AIReviewPanel({ status, review, className, progress, error, onCancel }: AIReviewPanelProps) {
   if (status === "queued") {
     return (
       <Card className={cn("card-soft border-0 bg-pastel-lavender", className)}>
@@ -65,21 +68,37 @@ export function AIReviewPanel({ status, review, className }: AIReviewPanelProps)
   if (status === "in-progress") {
     return (
       <Card className={cn("card-soft border-0 bg-pastel-yellow", className)}>
-        <CardContent className="p-6 text-center space-y-4">
-          <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
-            className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto"
-          >
-            <Loader2 className="h-8 w-8 text-primary" />
-          </motion.div>
-          <div>
-            <h3 className="font-semibold text-lg">AI Analyzing Your Performance</h3>
-            <p className="text-sm text-muted-foreground mt-1">
-              Our AI is reviewing your answers and preparing personalized feedback...
-            </p>
+        <CardContent className="p-6 space-y-4">
+          <div className="text-center">
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
+              className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto"
+            >
+              <Loader2 className="h-8 w-8 text-primary" />
+            </motion.div>
+            <div className="mt-4">
+              <h3 className="font-semibold text-lg">AI Analyzing Your Performance</h3>
+              {progress ? (
+                <p className="text-sm text-muted-foreground mt-2">{progress}</p>
+              ) : (
+                <p className="text-sm text-muted-foreground mt-1">
+                  Our AI is reviewing your answers and preparing personalized feedback...
+                </p>
+              )}
+            </div>
           </div>
           <Progress value={65} className="h-2" />
+          {onCancel && (
+            <div className="text-center pt-2">
+              <button
+                onClick={onCancel}
+                className="text-sm text-muted-foreground hover:text-foreground underline"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </CardContent>
       </Card>
     );
@@ -94,9 +113,13 @@ export function AIReviewPanel({ status, review, className }: AIReviewPanelProps)
           </div>
           <div>
             <h3 className="font-semibold text-lg">Analysis Failed</h3>
-            <p className="text-sm text-muted-foreground mt-1">
-              Something went wrong. Please try again later.
-            </p>
+            {error ? (
+              <p className="text-sm text-destructive mt-2">{error}</p>
+            ) : (
+              <p className="text-sm text-muted-foreground mt-1">
+                Something went wrong. Please try again later.
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>

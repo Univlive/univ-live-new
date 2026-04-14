@@ -4,6 +4,8 @@ import {
   SchemaType,
   type GenerationConfig,
 } from "@google/generative-ai";
+import { initializeStreaming, sendStreamEvent, endStreaming, streamError, getUserFriendlyErrorMessage } from "../_lib/aiStreamingUtils.js";
+import { getGeminiModelNameFromEnv } from "../_lib/geminiModel.js";
 
 // ---------------------------------------------------------------------------
 // Request type (from frontend WebsiteSettings.tsx)
@@ -217,7 +219,7 @@ async function generateWithGemini(prompt: string): Promise<Record<string, any>> 
   };
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: getGeminiModelNameFromEnv(),
     generationConfig,
     systemInstruction: SYSTEM_INSTRUCTION,
   });
@@ -254,9 +256,10 @@ export default async function handler(
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const isDev = process.env.NODE_ENV !== "production";
-
   try {
+    // Initialize streaming response
+    initializeStreaming(res);
+
     const {
       coachingName,
       educatorName,
@@ -268,25 +271,21 @@ export default async function handler(
 
     // ---- Input Validation ----
     if (!coachingName || !educatorName || !subjects || !description) {
-      return res.status(400).json({
-        error:
-          "Missing required fields: coachingName, educatorName, subjects, description",
-      });
+      return streamError(res, new Error("Missing required fields: coachingName, educatorName, subjects, description"));
     }
 
     if (!Array.isArray(subjects) || subjects.length === 0) {
-      return res.status(400).json({
-        error: "subjects must be a non-empty array of strings",
-      });
+      return streamError(res, new Error("subjects must be a non-empty array of strings"));
     }
 
     if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({
-        error: isDev
-          ? "GEMINI_API_KEY not configured. Add it to Vercel environment variables."
-          : "API configuration error",
-      });
+      return streamError(res, new Error("GEMINI_API_KEY is not configured"));
     }
+
+    sendStreamEvent(res, {
+      type: "progress",
+      message: `Preparing content generation for ${coachingName}...`,
+    });
 
     // ---- Build prompt ----
     const prompt = buildPrompt(
@@ -298,28 +297,33 @@ export default async function handler(
       studentCount
     );
 
-    console.log(
-      `[generate-website-content] Generating content for "${coachingName}" — subjects: ${subjects.join(", ")}`
-    );
+    sendStreamEvent(res, {
+      type: "progress",
+      message: `Generating creative content for ${subjects.join(", ")}...`,
+    });
 
     // ---- Call Gemini ----
     const content = await generateWithGemini(prompt);
 
-    console.log(
-      `[generate-website-content] Generated: ${content.stats?.length || 0} stats, ` +
-        `${content.achievements?.length || 0} achievements, ` +
-        `${content.testimonials?.length || 0} testimonials, ` +
-        `${content.faculty?.length || 0} faculty`
-    );
+    sendStreamEvent(res, {
+      type: "progress",
+      message: "Processing and finalizing content...",
+    });
 
-    // Return the full response — frontend reads stats, achievements,
-    // testimonials, faculty directly. heroTagline and aboutUs are bonus
-    // fields that can be used for tagline / about sections.
-    return res.status(200).json(content);
+    // Send the complete content
+    sendStreamEvent(res, {
+      type: "complete",
+      data: content,
+    });
+
+    endStreaming(res);
   } catch (error) {
     console.error("[generate-website-content] Unhandled error:", error);
-    return res.status(500).json({
-      error: isDev ? String(error) : "Failed to generate website content",
-    });
+    try {
+      streamError(res, error);
+    } catch (streamErr) {
+      console.error("[generate-website-content] Failed to send error response:", streamErr);
+      // Response is likely already closed, just log it
+    }
   }
 }

@@ -13,6 +13,7 @@ interface MetricCardProps {
   icon: LucideIcon;
   iconColor?: string;
   delay?: number;
+  blendWithGradient?: boolean;
 }
 
 export default function MetricCard({
@@ -22,36 +23,33 @@ export default function MetricCard({
   icon: Icon,
   iconColor = "text-primary",
   delay = 0,
+  blendWithGradient = false,
 }: MetricCardProps) {
   return (
     <motion.div
+      className="h-full"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay }}
     >
-      <Card className="card-hover">
-        <CardContent className="p-6">
+      <Card
+        className={cn(
+          "card-hover h-full",
+          blendWithGradient && "border-white/30 bg-white/10 text-white backdrop-blur-sm"
+        )}
+      >
+        <CardContent className="p-5 h-full">
           <div className="flex items-start justify-between">
             <div className="space-y-2">
-              <p className="text-sm text-muted-foreground font-medium">{title}</p>
+              <p className={cn("text-sm font-medium", blendWithGradient ? "text-white/85" : "text-muted-foreground")}>{title}</p>
               <p className="text-2xl sm:text-3xl font-bold font-display">{value}</p>
-              {change && (
-                <div className="flex items-center gap-1">
-                  <span
-                    className={cn(
-                      "text-sm font-medium",
-                      change.type === "increase" ? "text-green-500" : "text-destructive"
-                    )}
-                  >
-                    {change.type === "increase" ? "+" : "-"}{change.value}%
-                  </span>
-                  <span className="text-xs text-muted-foreground">vs last month</span>
-                </div>
-              )}
+              {/* Kept prop for backward compatibility; hidden by request to remove percentage strip */}
+              {change && null}
             </div>
             <div
               className={cn(
-                "p-3 rounded-xl bg-muted",
+                "p-3 rounded-xl",
+                blendWithGradient ? "bg-white/15" : "bg-muted",
                 iconColor
               )}
             >

@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useTenant } from "@/contexts/TenantProvider";
 import { useAuth } from "@/contexts/AuthProvider";
+import { registerStudentForTenant } from "@/lib/studentRegistration";
 import logo from "../assets/univ-logo.png";
 import {
   Dialog,
@@ -73,16 +74,6 @@ export default function Login() {
     if (isTenantDomain) return `Login to ${tenantSlug || "your coaching"}`;
     return effectiveRole === "educator" ? "Educator Login" : "Student Login";
   }, [tenantLoading, isTenantDomain, tenantSlug, effectiveRole]);
-
-  async function registerStudent(token: string) {
-    if (!tenantSlug) return;
-    await fetch("/api/tenant/register-student", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ tenantSlug }),
-    });
-  }
-
 
   async function handleForgotPassword() {
     const targetEmail = resetEmail.trim();
@@ -150,7 +141,17 @@ export default function Login() {
         }
 
         const token = await cred.user.getIdToken();
-        await registerStudent(token).catch(() => { });
+        try {
+          await registerStudentForTenant(token, tenantSlug);
+        } catch (apiErr: any) {
+          console.error("[Login] Sync error:", apiErr);
+          // We don't necessarily block login if sync fails, but we inform the user
+          // if it's a critical error. 404 HTML means the API is just not running.
+          if (apiErr.message.includes("<!DOCTYPE html>")) {
+            console.warn("API server not detected. Please ensure 'vercel dev' is running.");
+          }
+        }
+
         toast.success("Welcome back!");
         await refreshProfile();
         nav("/student", { replace: true });
@@ -200,7 +201,11 @@ export default function Login() {
       <div className="flex flex-col min-h-screen p-6 lg:p-12 relative">
         {/* Header / Nav */}
         <div className="flex justify-between items-center mb-8">
-          <img src={logo} className="w-25 h-10" alt="UNIV.LIVE Logo" />
+          {effectiveRole === "educator" ? (
+            <img src={logo} className="w-25 h-10" alt="UNIV.LIVE Logo" />
+          ) : (
+            <div />
+          )}
           <Link
             to="/"
             className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"

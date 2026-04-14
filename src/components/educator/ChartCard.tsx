@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -13,6 +14,8 @@ interface ChartCardProps {
   children: React.ReactNode;
   showPeriodSelect?: boolean;
   delay?: number;
+  periodValue?: string;
+  onPeriodChange?: (value: string) => void;
 }
 
 export default function ChartCard({
@@ -20,7 +23,20 @@ export default function ChartCard({
   children,
   showPeriodSelect = false,
   delay = 0,
+  periodValue,
+  onPeriodChange,
 }: ChartCardProps) {
+  const [localPeriod, setLocalPeriod] = useState("30");
+  const selectedPeriod = periodValue ?? localPeriod;
+
+  function handlePeriodChange(value: string) {
+    if (onPeriodChange) {
+      onPeriodChange(value);
+      return;
+    }
+    setLocalPeriod(value);
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -31,7 +47,7 @@ export default function ChartCard({
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <CardTitle className="text-base font-semibold">{title}</CardTitle>
           {showPeriodSelect && (
-            <Select defaultValue="30">
+            <Select value={selectedPeriod} onValueChange={handlePeriodChange}>
               <SelectTrigger className="w-32 h-8 text-xs">
                 <SelectValue placeholder="Select period" />
               </SelectTrigger>
