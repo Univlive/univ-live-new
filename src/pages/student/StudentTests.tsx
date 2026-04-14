@@ -319,7 +319,7 @@ export default function StudentTests() {
 
       <div className="space-y-8">
         {Object.entries(groupedTests).map(([groupId, group]) => {
-          const isExpanded = expandedFolders[groupId] !== false;
+          const isExpanded = !!expandedFolders[groupId];
           return (
             <div key={groupId} className="space-y-4">
               <div
