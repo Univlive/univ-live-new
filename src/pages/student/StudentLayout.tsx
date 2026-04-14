@@ -179,7 +179,6 @@ export default function StudentLayout() {
       { icon: FileText, label: "Tests", href: "/student/tests" },
       { icon: History, label: "My Attempts", href: "/student/attempts" },
       { icon: Trophy, label: "Rankings", href: "/student/rankings" },
-      { icon: BarChart3, label: "Analytics", href: "/student/analytics" },
       {
         icon: MessageSquare,
         label: "Messages",
@@ -237,15 +236,12 @@ export default function StudentLayout() {
         )}
       >
         <div className="flex flex-col h-full overflow-hidden">
-          {/* Logo */}
+          {/* Logo Section */}
           <div className="h-16 flex items-center justify-between px-4 border-b border-border shrink-0">
-            {/* <Link to="/" className="flex items-center gap-2">
-              <img src={univLogo} alt="UNIV.LIVE" className="h-8 w-auto" />
-              <span className="font-display font-bold text-lg">
-                <span className="gradient-text">UNIV</span>
-                <span className="text-foreground">.LIVE</span>
-              </span>
-            </Link> */}
+            <div className="flex items-center gap-2">
+              
+              {/* <span className="font-display font-bold text-lg tracking-tight">Student Portal</span> */}
+            </div>
 
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(false)}>
               <X className="h-5 w-5" />
@@ -334,15 +330,6 @@ export default function StudentLayout() {
               <span className="font-medium text-foreground capitalize">
                 {location.pathname.split("/").pop()?.replace("-", " ") || "Dashboard"}
               </span>
-            </div>
-
-            {/* Quick Search */}
-            <div className="hidden md:flex items-center relative">
-              <Search className="absolute left-3 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search tests..."
-                className="pl-9 w-64 h-9 rounded-xl bg-muted/50 border-0 focus-visible:ring-1"
-              />
             </div>
           </div>
 

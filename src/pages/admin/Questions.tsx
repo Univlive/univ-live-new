@@ -1188,9 +1188,6 @@ export default function Questions() {
           <TabsTrigger value="questions" className="rounded-lg">
             Question Bank
           </TabsTrigger>
-          <TabsTrigger value="analytics" className="rounded-lg">
-            Analytics
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="questions" className="pt-4">
