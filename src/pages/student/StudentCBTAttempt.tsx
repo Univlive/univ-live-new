@@ -41,6 +41,8 @@ type AttemptQuestion = {
   explanation?: string;
   marks: { correct: number; incorrect: number };
   passage?: { title: string; content: string } | null;
+  /** Used for display ordering; not shown to students */
+  sortOrder: number;
 };
 
 type TestMeta = {
@@ -98,6 +100,7 @@ const mapQuestion = (id: string, data: any): AttemptQuestion => {
     explanation: data.explanation || "",
     marks: { correct: positive, incorrect: negative },
     passage: null,
+    sortOrder: safeNumber(data.questionOrder, Number.MAX_SAFE_INTEGER),
   };
 };
 
@@ -269,7 +272,8 @@ export default function StudentCBTAttempt() {
           const qSnap = await getDocs(s.qCol);
           qs = qSnap.docs
             .filter((q) => q.data()?.isActive !== false)
-            .map((q) => mapQuestion(q.id, q.data()));
+            .map((q) => mapQuestion(q.id, q.data()))
+            .sort((a, b) => a.sortOrder - b.sortOrder);
           break;
         }
 

@@ -45,6 +45,8 @@ type AttemptQuestion = {
   explanation?: string;
   marks: { correct: number; incorrect: number }; // incorrect as positive penalty
   passage?: { title: string; content: string } | null;
+  /** Used for display ordering */
+  sortOrder: number;
 };
 
 function safeNumber(v: any, fallback: number) {
@@ -75,6 +77,7 @@ function mapQuestion(id: string, data: any): AttemptQuestion {
     explanation: data.explanation || "",
     marks: { correct: positive, incorrect: Math.abs(negative) },
     passage: data.passage || null,
+    sortOrder: safeNumber(data.questionOrder, Number.MAX_SAFE_INTEGER),
   };
 }
 
@@ -156,7 +159,9 @@ export default function StudentAttemptDetails() {
           if (!tSnap.exists()) continue;
 
           const qSnap = await getDocs(s.qCol);
-          qs = qSnap.docs.map((d) => mapQuestion(d.id, d.data()));
+          qs = qSnap.docs
+            .map((d) => mapQuestion(d.id, d.data()))
+            .sort((a, b) => a.sortOrder - b.sortOrder);
           found = true;
           break;
         }
