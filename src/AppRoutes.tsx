@@ -37,7 +37,7 @@ import EducatorLayout from "@/components/educator/EducatorLayout";
 import EducatorDashboard from "@/pages/educator/Dashboard";
 import Learners from "@/pages/educator/Learners";
 import LearnerDetails from "@/pages/educator/LearnerDetails";
-import TestSeries from "@/pages/educator/TestSeries";
+import TestSeries from "@/pages/educator/TestSeries/TestSeries";
 import AccessCodes from "@/pages/educator/AccessCodes";
 import Messages from "@/pages/educator/Messages";
 import WebsiteSettings from "@/pages/educator/WebsiteSettings";
