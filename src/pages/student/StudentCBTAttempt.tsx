@@ -76,6 +76,8 @@ const safeNumber = (v: any, fallback: number) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+const isAnswered = (val: any) => val !== null && val !== undefined && String(val).trim().length > 0;
+
 const buildInitResponses = (qs: AttemptQuestion[]) => {
   const init: Record<string, AttemptResponse> = {};
   qs.forEach((q) => (init[q.id] = { answer: null, markedForReview: false, visited: false, answered: false }));
