@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { registerStudentForTenant } from "@/lib/studentRegistration";
+import logo from "../assets/univ-logo.png";
 
 type RoleUI = "student" | "educator";
 
@@ -209,7 +210,11 @@ export default function Signup() {
       <div className="flex flex-col min-h-screen p-6 lg:p-12 relative">
         {/* Header / Nav */}
         <div className="flex justify-between items-center mb-6">
-          <div className="font-bold text-2xl tracking-tighter">UNIV.LIVE</div>
+           {effectiveRole === "educator" ? (
+            <img src={logo} className="w-25 h-10" alt="UNIV.LIVE Logo" />
+          ) : (
+            <div />
+          )}
           <Link
             to="/"
             className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
