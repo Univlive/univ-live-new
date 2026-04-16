@@ -159,7 +159,10 @@ export default function StudentTestDetails() {
           sumSectionQuestions(sections);
 
         const price = Math.max(0, safeNum(data?.price, 0));
-        const attemptsAllowed = Math.max(1, safeNum(data?.attemptsAllowed ?? data?.maxAttempts, 3));
+        const attemptsAllowed = Math.max(
+          1,
+          safeNum(data?.attemptsAllowed ?? data?.maxAttempts, tenant?.testDefaults?.attemptsAllowed ?? 3)
+        );
 
         const markingScheme = data?.markingScheme
           ? {
