@@ -47,6 +47,7 @@ import { cn } from "@/lib/utils";
 import EmptyState from "@/components/educator/EmptyState";
 import AiQuestionImportOverlay from "@/components/educator/AiQuestionImportOverlay";
 import InlineStatusTracker from "@/components/educator/InlineStatusTracker";
+import ImageTextarea from "@/components/educator/ImageTextarea";
 import {
   buildImportedQuestionPayload,
   formatNegativeMarksDisplay,
@@ -57,6 +58,10 @@ import {
 } from "@/lib/aiQuestionImport";
 import { aiFeatureFlags, getAiFeatureDisabledMessage } from "@/lib/aiFeatureFlags";
 import { uploadToImageKit } from "@/lib/imagekitUpload";
+
+// Component
+import CreateCustomTest from "./CreateCustomTest";
+import NewFolderButton from "./NewFolder";
 
 // Firebase
 import { onAuthStateChanged } from "firebase/auth";
@@ -74,6 +79,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
+import MoveTest from "./MoveTest";
 
 type Difficulty = "easy" | "medium" | "hard";
 
@@ -188,7 +194,6 @@ function pruneUndefined<T extends Record<string, any>>(obj: T): T {
   });
   return obj;
 }
-
 
 async function pickImageFile(): Promise<File | null> {
   return await new Promise((resolve) => {
@@ -501,6 +506,15 @@ export default function TestSeries() {
     return groups;
   }, [bankTests, search]);
 
+  const folderState = {
+    createFolderOpen,
+    setCreateFolderOpen,
+    newFolderName,
+    setNewFolderName,
+    folderCreating,
+    handleCreateFolder
+  };
+
   const handleSaveGlobalAttempts = async (val: number) => {
     if (!currentUser) return;
     setSavingGlobalAttempts(true);
@@ -664,6 +678,21 @@ export default function TestSeries() {
     }
   };
 
+  const creatCustomTestState = {
+    createOpen,
+    setCreateOpen,
+    handleCreateCustom,
+    creating
+  }
+
+  const moveTestState = {
+    moveTestOpen,
+    setMoveTestOpen,
+    testToMove,
+    handleMoveTest,
+    folders
+  }
+
   if (loading) {
     return (
       <div className="flex h-[50vh] items-center justify-center">
@@ -709,6 +738,34 @@ export default function TestSeries() {
           </Select>
         </div>
 
+        <div className="hidden lg:flex items-center gap-4 bg-muted/30 border border-border/50 rounded-full px-4 py-1.5 transition-all hover:bg-muted/50 group">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-full bg-primary/10 text-primary group-hover:scale-110 transition-transform">
+              <Award className="h-3.5 w-3.5" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[9px] uppercase font-black text-muted-foreground tracking-widest leading-none">Default</span>
+              <span className="text-[11px] font-bold text-foreground/80">Attempts</span>
+            </div>
+          </div>
+          <div className="h-6 w-px bg-border/60" />
+          <Select
+            value={String(globalAttemptsAllowed)}
+            onValueChange={(v) => handleSaveGlobalAttempts(Number(v))}
+            disabled={savingGlobalAttempts}
+          >
+            <SelectTrigger className="h-8 w-[60px] rounded-full border-none bg-background shadow-sm hover:bg-muted transition-colors text-xs font-black focus:ring-0">
+              {savingGlobalAttempts ? <Loader2 className="h-3 w-3 animate-spin text-primary" /> : <SelectValue />}
+            </SelectTrigger>
+            <SelectContent className="rounded-xl border-none shadow-2xl overflow-hidden p-1">
+              <SelectItem value="1" className="rounded-lg text-xs font-bold py-2">1 Attempt</SelectItem>
+              <SelectItem value="2" className="rounded-lg text-xs font-bold py-2">2 Attempts</SelectItem>
+              <SelectItem value="3" className="rounded-lg text-xs font-bold py-2">3 Attempts</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        
         <div className="flex gap-2">
           <div className="relative w-full sm:w-[320px]">
             <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
@@ -720,59 +777,9 @@ export default function TestSeries() {
             />
           </div>
 
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button className="gradient-bg text-white shadow-lg">
-                <Plus className="mr-2 h-4 w-4" /> Create Custom Test
-              </Button>
-            </DialogTrigger>
+          {/* Create Custom Test */}
+          <CreateCustomTest {...creatCustomTestState} />
 
-            <DialogContent className="max-w-xl rounded-2xl">
-              <DialogHeader>
-                <DialogTitle>Create New Test</DialogTitle>
-              </DialogHeader>
-
-              <form onSubmit={handleCreateCustom} className="space-y-4 mt-2">
-                <div className="space-y-2">
-                  <Label>Title</Label>
-                  <Input name="title" required placeholder="e.g. Weekly Biology Mock" className="rounded-xl" />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Description</Label>
-                  <Textarea
-                    name="description"
-                    placeholder="Short instructions / overview..."
-                    className="rounded-xl min-h-[90px]"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Subject</Label>
-                    <Input name="subject" required className="rounded-xl" placeholder="e.g. Maths" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Level</Label>
-                    <Input name="level" className="rounded-xl" placeholder="e.g. Medium" />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Duration (minutes)</Label>
-                  <Input name="duration" required type="number" min={1} defaultValue={60} className="rounded-xl" />
-                </div>
-
-                <Button type="submit" className="w-full rounded-xl" disabled={creating}>
-                  {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create Test"}
-                </Button>
-
-                <p className="text-xs text-muted-foreground">
-                  Note: Educators cannot import from the global question bank. Add questions manually inside the test.
-                </p>
-              </form>
-            </DialogContent>
-          </Dialog>
         </div>
       </div>
 
@@ -786,42 +793,8 @@ export default function TestSeries() {
               Admin Bank
             </TabsTrigger>
           </TabsList>
-          <Dialog open={createFolderOpen} onOpenChange={setCreateFolderOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" className="rounded-xl border-dashed">
-                <FolderPlus className="mr-2 h-4 w-4" /> New Folder
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="rounded-2xl">
-              <DialogHeader>
-                <DialogTitle>Create Folder</DialogTitle>
-                <DialogDescription>Folders help you organize your tests beyond just subjects.</DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label>Folder Name</Label>
-                  <Input
-                    value={newFolderName}
-                    onChange={(e) => setNewFolderName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        if (!folderCreating) void handleCreateFolder();
-                      }
-                    }}
-                    placeholder="e.g. Revision Tests"
-                    className="rounded-xl"
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setCreateFolderOpen(false)}>Cancel</Button>
-                <Button className="gradient-bg text-white" onClick={handleCreateFolder} disabled={folderCreating || !newFolderName.trim()}>
-                  {folderCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create Folder"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+
+          <NewFolderButton {...folderState} />
         </div>
 
         {/* Library */}
@@ -976,53 +949,8 @@ export default function TestSeries() {
           )}
 
           {/* Move Test Dialog */}
-          <Dialog open={moveTestOpen} onOpenChange={setMoveTestOpen}>
-            <DialogContent className="rounded-2xl">
-              <DialogHeader>
-                <DialogTitle>Move to Folder</DialogTitle>
-                <DialogDescription>Select a folder to move "{testToMove?.title}" into.</DialogDescription>
-              </DialogHeader>
-              <div className="space-y-2 py-4">
-                <div
-                  className={cn(
-                    "flex items-center gap-3 p-3 rounded-xl border cursor-pointer hover:bg-accent transition-colors",
-                    !testToMove?.folderId && "border-primary bg-primary/5"
-                  )}
-                  onClick={() => handleMoveTest(testToMove.id, null)}
-                >
-                  <div className="p-2 rounded-lg bg-muted">
-                    <BookOpen className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="font-medium text-sm">Subject Folder (Default)</p>
-                    <p className="text-xs text-muted-foreground">Move back to auto-subject grouping</p>
-                  </div>
-                </div>
-
-                {folders.map(f => (
-                  <div
-                    key={f.id}
-                    className={cn(
-                      "flex items-center gap-3 p-3 rounded-xl border cursor-pointer hover:bg-accent transition-colors",
-                      testToMove?.folderId === f.id && "border-primary bg-primary/5"
-                    )}
-                    onClick={() => handleMoveTest(testToMove.id, f.id)}
-                  >
-                    <div className="p-2 rounded-lg bg-primary/10">
-                      <Folder className="h-4 w-4 text-primary" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-sm">{f.name}</p>
-                    </div>
-                  </div>
-                ))}
-
-                {folders.length === 0 && (
-                  <p className="text-center text-sm text-muted-foreground py-4 italic">No custom folders created yet.</p>
-                )}
-              </div>
-            </DialogContent>
-          </Dialog>
+          <MoveTest {...moveTestState}/>
+          
         </TabsContent>
 
         {/* Admin Bank */}
@@ -1139,7 +1067,7 @@ function QuestionsManager({
   const [formActive, setFormActive] = useState(true);
 
   const [saving, setSaving] = useState(false);
-  const [imgBusy, setImgBusy] = useState<null | "q" | "e" | 0 | 1 | 2 | 3>(null);
+  // Image upload state is now handled internally by ImageTextarea
 
   const [importPreviewOpen, setImportPreviewOpen] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
@@ -1806,87 +1734,29 @@ function QuestionsManager({
 
               <div className="space-y-6">
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label>Question (text or HTML)</Label>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="rounded-xl"
-                      disabled={imgBusy !== null}
-                      onClick={async () => {
-                        setImgBusy("q");
-                        try {
-                          const { next } = await appendImageToField(formQuestion, "/test-questions");
-                          setFormQuestion(next);
-                          toast.success("Image added");
-                        } catch (e) {
-                          const msg = e instanceof Error ? e.message : "Image upload failed";
-                          console.error("[Image upload error]", msg);
-                          toast.error(msg);
-                        } finally {
-                          setImgBusy(null);
-                        }
-                      }}
-                    >
-                      {imgBusy === "q" ? <Loader2 className="h-4 w-4 animate-spin" /> : <><ImageIcon className="h-4 w-4 mr-2" /> Add Image</>}
-                    </Button>
-                  </div>
-                  <Textarea
+                  <Label>Question (text or HTML)</Label>
+                  <ImageTextarea
                     value={formQuestion}
-                    onChange={(e) => setFormQuestion(e.target.value)}
-                    className="rounded-xl min-h-[140px]"
-                    placeholder="You can type plain text, or HTML like <b>bold</b> and <img src='...' />"
+                    onChange={setFormQuestion}
+                    folder="/test-questions"
+                    placeholder="Type text, or paste / drag & drop images. Supports HTML like <b>bold</b>"
+                    minHeight="140px"
                   />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {[0, 1, 2, 3].map((idx) => (
                     <div key={idx} className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label>
-                          Option {String.fromCharCode(65 + idx)}
-                          {formCorrect === idx ? <span className="ml-2 text-green-600 inline-flex items-center gap-1 text-xs"><CheckCircle2 className="h-3 w-3" /> Correct</span> : null}
-                        </Label>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="rounded-xl"
-                          disabled={imgBusy !== null}
-                          onClick={async () => {
-                            setImgBusy(idx as any);
-                            try {
-                              const { next } = await appendImageToField(formOptions[idx] || "", "/test-options");
-                              setFormOptions((prev) => prev.map((v, i) => (i === idx ? next : v)));
-                              toast.success("Image added");
-                            } catch (e) {
-                              const msg = e instanceof Error ? e.message : "Image upload failed";
-                              console.error("[Image upload error]", msg);
-                              toast.error(msg);
-                            } finally {
-                              setImgBusy(null);
-                            }
-                          }}
-                        >
-                          {imgBusy === idx ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <>
-                              <ImageIcon className="h-4 w-4 mr-2" /> Img
-                            </>
-                          )}
-                        </Button>
-                      </div>
-
-                      <Textarea
+                      <Label>
+                        Option {String.fromCharCode(65 + idx)}
+                        {formCorrect === idx ? <span className="ml-2 text-green-600 inline-flex items-center gap-1 text-xs"><CheckCircle2 className="h-3 w-3" /> Correct</span> : null}
+                      </Label>
+                      <ImageTextarea
                         value={formOptions[idx] || ""}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setFormOptions((prev) => prev.map((x, i) => (i === idx ? v : x)));
-                        }}
-                        className="rounded-xl min-h-[90px]"
+                        onChange={(v) => setFormOptions((prev) => prev.map((x, i) => (i === idx ? v : x)))}
+                        folder="/test-options"
                         placeholder="Option text or HTML"
+                        minHeight="90px"
                       />
                     </div>
                   ))}
@@ -1955,43 +1825,13 @@ function QuestionsManager({
                 </div>
 
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label>Explanation (optional)</Label>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="rounded-xl"
-                      disabled={imgBusy !== null}
-                      onClick={async () => {
-                        setImgBusy("e");
-                        try {
-                          const { next } = await appendImageToField(formExplanation, "/test-explanations");
-                          setFormExplanation(next);
-                          toast.success("Image added");
-                        } catch (e) {
-                          const msg = e instanceof Error ? e.message : "Image upload failed";
-                          console.error("[Image upload error]", msg);
-                          toast.error(msg);
-                        } finally {
-                          setImgBusy(null);
-                        }
-                      }}
-                    >
-                      {imgBusy === "e" ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <>
-                          <ImageIcon className="h-4 w-4 mr-2" /> Add Image
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                  <Textarea
+                  <Label>Explanation (optional)</Label>
+                  <ImageTextarea
                     value={formExplanation}
-                    onChange={(e) => setFormExplanation(e.target.value)}
-                    className="rounded-xl min-h-[120px]"
-                    placeholder="Optional explanation (text or HTML)"
+                    onChange={setFormExplanation}
+                    folder="/test-explanations"
+                    placeholder="Optional explanation (text or HTML). Drag & drop or paste images here."
+                    minHeight="120px"
                   />
                 </div>
 

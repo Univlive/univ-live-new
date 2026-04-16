@@ -61,6 +61,7 @@ type QuestionDoc = {
   positiveMarks?: number;
   negativeMarks?: number;
   marks?: number;
+  questionOrder?: number;
 };
 
 type TestDoc = {
@@ -317,7 +318,13 @@ export default function StudentResults() {
 
           testData = tSnap.data() as TestDoc;
           const qSnap = await getDocs(s.qCol);
-          qs = qSnap.docs.map((d) => ({ id: d.id, data: d.data() as QuestionDoc }));
+          qs = qSnap.docs
+            .map((d) => ({ id: d.id, data: d.data() as QuestionDoc }))
+            .sort((a, b) => {
+              const aOrder = safeNumber(a.data.questionOrder, Number.MAX_SAFE_INTEGER);
+              const bOrder = safeNumber(b.data.questionOrder, Number.MAX_SAFE_INTEGER);
+              return aOrder - bOrder;
+            });
           break;
         }
 
