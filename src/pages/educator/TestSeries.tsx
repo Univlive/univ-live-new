@@ -22,6 +22,7 @@ import {
   ChevronDown,
   MoreVertical,
   Move,
+  Award,
 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
@@ -681,23 +682,29 @@ export default function TestSeries() {
           </p>
         </div>
 
-        <div className="flex items-center gap-4 bg-muted/30 p-2 px-4 rounded-2xl border border-dashed">
-          <div className="flex flex-col">
-            <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Default Attempts</span>
-            <span className="text-xs text-muted-foreground">Applies to new imports</span>
+        <div className="hidden lg:flex items-center gap-4 bg-muted/30 border border-border/50 rounded-full px-4 py-1.5 transition-all hover:bg-muted/50 group">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-full bg-primary/10 text-primary group-hover:scale-110 transition-transform">
+              <Award className="h-3.5 w-3.5" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[9px] uppercase font-black text-muted-foreground tracking-widest leading-none">Default</span>
+              <span className="text-[11px] font-bold text-foreground/80">Attempts</span>
+            </div>
           </div>
+          <div className="h-6 w-px bg-border/60" />
           <Select
             value={String(globalAttemptsAllowed)}
             onValueChange={(v) => handleSaveGlobalAttempts(Number(v))}
             disabled={savingGlobalAttempts}
           >
-            <SelectTrigger className="w-[80px] h-9 rounded-xl bg-background shadow-sm border-none">
-              <SelectValue />
+            <SelectTrigger className="h-8 w-[60px] rounded-full border-none bg-background shadow-sm hover:bg-muted transition-colors text-xs font-black focus:ring-0">
+              {savingGlobalAttempts ? <Loader2 className="h-3 w-3 animate-spin text-primary" /> : <SelectValue />}
             </SelectTrigger>
-            <SelectContent className="rounded-xl">
-              <SelectItem value="1">1</SelectItem>
-              <SelectItem value="2">2</SelectItem>
-              <SelectItem value="3">3</SelectItem>
+            <SelectContent className="rounded-xl border-none shadow-2xl overflow-hidden p-1">
+              <SelectItem value="1" className="rounded-lg text-xs font-bold py-2">1 Attempt</SelectItem>
+              <SelectItem value="2" className="rounded-lg text-xs font-bold py-2">2 Attempts</SelectItem>
+              <SelectItem value="3" className="rounded-lg text-xs font-bold py-2">3 Attempts</SelectItem>
             </SelectContent>
           </Select>
         </div>
