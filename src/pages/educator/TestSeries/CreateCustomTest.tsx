@@ -54,12 +54,6 @@ const CreateCustomTest = ({createOpen, setCreateOpen, handleCreateCustom ,creati
                         <Input name="duration" required type="number" min={1} defaultValue={60} className="rounded-xl" />
                     </div>
 
-                    <div className="space-y-2">
-                        <Label>Access Window (minutes, 0 = no limit)</Label>
-                        <Input name="accessWindowMinutes" type="number" min={0} defaultValue={0} className="rounded-xl" />
-                        <p className="text-xs text-muted-foreground">Students can only unlock within this time after code is generated. 0 means no limit.</p>
-                    </div>
-
                     <Button type="submit" className="w-full rounded-xl" disabled={creating}>
                         {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create Test"}
                     </Button>

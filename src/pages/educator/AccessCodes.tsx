@@ -62,6 +62,7 @@ interface AccessCode {
 
   usesUsed?: number;
   expiresAtTs?: Timestamp | null;
+  windowMinutes?: number;
 }
 
 type TestSeriesOption = { id: string; title: string };
@@ -122,6 +123,7 @@ export default function AccessCodes() {
   const [selectedTestSeriesId, setSelectedTestSeriesId] = useState<string>("");
   const [maxUses, setMaxUses] = useState<string>("100");
   const [expiryDate, setExpiryDate] = useState<string>("");
+  const [windowMinutes, setWindowMinutes] = useState<string>("0");
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -202,6 +204,7 @@ export default function AccessCodes() {
             createdAt: toDateLabel(createdAt),
             usesUsed: used,
             expiresAtTs: expiresAt,
+            windowMinutes: Number(data?.windowMinutes ?? 0),
           };
         });
 
@@ -242,6 +245,7 @@ export default function AccessCodes() {
     setSelectedTestSeriesId("");
     setMaxUses("100");
     setExpiryDate("");
+    setWindowMinutes("0");
   };
 
   const openCreate = () => {
@@ -255,6 +259,7 @@ export default function AccessCodes() {
     setSelectedTestSeriesId(item.testSeriesId || "");
     setMaxUses(String(item.maxUses || 0));
     setExpiryDate(item.expiresAtTs ? item.expiresAtTs.toDate().toISOString().slice(0, 10) : "");
+    setWindowMinutes(String(item.windowMinutes ?? 0));
     setIsCreateOpen(true);
   };
 
@@ -314,6 +319,7 @@ export default function AccessCodes() {
           maxUses: max,
           usesUsed: 0,
           expiresAt: expiresAt ?? null,
+          windowMinutes: Number(windowMinutes) || 0,
           createdAt: serverTimestamp(),
         });
 
@@ -334,6 +340,7 @@ export default function AccessCodes() {
           testSeriesTitle: testTitle,
           maxUses: max,
           expiresAt: expiresAt ?? null,
+          windowMinutes: Number(windowMinutes) || 0,
           updatedAt: serverTimestamp(),
         });
 
@@ -539,6 +546,19 @@ export default function AccessCodes() {
                 <Label>Expiry Date</Label>
                 <Input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} />
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Access Window (minutes, 0 = no limit)</Label>
+              <Input
+                type="number"
+                min={0}
+                value={windowMinutes}
+                onChange={(e) => setWindowMinutes(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Students can only unlock within this many minutes after this code was generated. 0 = no limit.
+              </p>
             </div>
 
             <Button

@@ -227,8 +227,7 @@ export default function StudentTests() {
         const newUsed = used + 1;
         tx.update(codeRef, { usesUsed: newUsed });
 
-        const foundTest = tests.find((t) => t.id === testId);
-        const windowMinutes = Number(foundTest?.accessWindowMinutes || 0);
+        const windowMinutes = Number(data.windowMinutes || 0);
         let windowExpiresAt = null;
         if (windowMinutes > 0) {
           const codeCreatedMs =
@@ -369,7 +368,7 @@ export default function StudentTests() {
                     return (
                       <TestCard
                         key={t.id}
-                        test={{ ...t, isLocked: locked }}
+                        test={{ ...t, isLocked: locked, windowExpiresAt: unlockEntry ?? null }}
                         onView={() => nav(`/student/tests/${t.id}`)}
                         onStart={() => nav(`/student/tests/${t.id}`)}
                         onUnlock={(testId: string) => {

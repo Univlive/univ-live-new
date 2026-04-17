@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Clock, FileText, Award, ArrowLeft, Play, Lock } from "lucide-react";
+import { Clock, FileText, Award, ArrowLeft, Play, Lock, Timer } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -41,7 +41,6 @@ type Test = {
   difficulty: "Easy" | "Medium" | "Hard";
   price: number;
   attemptsAllowed: number;
-  accessWindowMinutes: number;
   sections: { id: string; name: string; questionsCount: number }[];
   syllabus: string[];
   markingScheme: { correct: number; incorrect: number; unanswered: number };
@@ -79,6 +78,16 @@ function accuracyFrom(score: number, maxScore: number) {
   if (!maxScore || maxScore <= 0) return 0;
   return Math.max(0, Math.min(100, Math.round((score / maxScore) * 100)));
 }
+function formatWindowTime(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
 function isExpired(expiresAt: any) {
   if (!expiresAt) return false;
   const ts = expiresAt as Timestamp;
@@ -100,6 +109,7 @@ export default function StudentTestDetails() {
   const [test, setTest] = useState<Test | null>(null);
   const [unlocked, setUnlocked] = useState(false);
   const [unlockWindowExpiresAt, setUnlockWindowExpiresAt] = useState<number | null>(null);
+  const [windowTimeLeft, setWindowTimeLeft] = useState<number | null>(null);
   const [attempts, setAttempts] = useState<AttemptRow[]>([]);
 
   // unlock dialog
@@ -162,7 +172,6 @@ export default function StudentTestDetails() {
 
         const price = Math.max(0, safeNum(data?.price, 0));
         const attemptsAllowed = Math.max(1, safeNum(data?.attemptsAllowed ?? data?.maxAttempts, 3));
-        const accessWindowMinutes = safeNum(data?.accessWindowMinutes, 0);
 
         const markingScheme = data?.markingScheme
           ? {
@@ -189,7 +198,6 @@ export default function StudentTestDetails() {
           difficulty,
           price,
           attemptsAllowed,
-          accessWindowMinutes,
           sections,
           syllabus,
           markingScheme,
@@ -239,6 +247,15 @@ export default function StudentTestDetails() {
 
     return () => unsub();
   }, [canLoad, firebaseUser, educatorId, testId]);
+
+  // 2b) Live countdown for access window
+  useEffect(() => {
+    if (!unlockWindowExpiresAt) { setWindowTimeLeft(null); return; }
+    const tick = () => setWindowTimeLeft(Math.max(0, unlockWindowExpiresAt - Date.now()));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [unlockWindowExpiresAt]);
 
   // 3) Listen attempts for this test
   useEffect(() => {
@@ -335,7 +352,7 @@ export default function StudentTestDetails() {
         const already = await tx.get(unlockRef);
         if (already.exists()) return; // don't consume again
 
-        const windowMinutes = safeNum(test?.accessWindowMinutes, 0);
+        const windowMinutes = safeNum(codeData?.windowMinutes, 0);
         let windowExpiresAt = null;
         if (windowMinutes > 0) {
           const codeCreatedMs =
@@ -450,14 +467,25 @@ export default function StudentTestDetails() {
                 Unlock (₹{test.price})
               </Button>
             ) : (
-              <Button
-                className={cn("gradient-bg rounded-xl", attemptsLeft <= 0 && "opacity-60")}
-                onClick={startTest}
-                disabled={attemptsLeft <= 0}
-              >
-                <Play className="h-4 w-4 mr-2" />
-                Start Test
-              </Button>
+              <div className="flex flex-col items-end gap-2">
+                <Button
+                  className={cn("gradient-bg rounded-xl", attemptsLeft <= 0 && "opacity-60")}
+                  onClick={startTest}
+                  disabled={attemptsLeft <= 0}
+                >
+                  <Play className="h-4 w-4 mr-2" />
+                  Start Test
+                </Button>
+                {windowTimeLeft !== null && (
+                  <span className={cn(
+                    "flex items-center gap-1 text-xs font-medium",
+                    windowTimeLeft < 5 * 60 * 1000 ? "text-red-600" : "text-amber-600"
+                  )}>
+                    <Timer className="h-3 w-3" />
+                    Access expires in {windowTimeLeft <= 0 ? "—" : formatWindowTime(windowTimeLeft)}
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </CardContent>
