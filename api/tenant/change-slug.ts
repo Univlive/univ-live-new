@@ -91,6 +91,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (owner && owner !== uid) throw new Error("This subdomain slug is already taken.");
       }
 
+      // Firestore transaction rule: all reads must finish before any writes.
+      const oldTenantRef = db.doc(`tenants/${oldSlug}`);
+      const oldTenantSnap = await tx.get(oldTenantRef);
+
       // Ensure new slug mapping exists
       const newTenantPayload: any = {
         educatorId: uid,
@@ -101,8 +105,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       tx.set(newTenantRef, newTenantPayload, { merge: true });
 
       // Keep old slug reserved (prevents hijacking; keeps old links working)
-      const oldTenantRef = db.doc(`tenants/${oldSlug}`);
-      const oldTenantSnap = await tx.get(oldTenantRef);
       const oldTenantPayload: any = {
         educatorId: uid,
         tenantSlug: oldSlug,
