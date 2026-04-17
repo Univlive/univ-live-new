@@ -29,19 +29,23 @@ const subjectColors: Record<string, string> = {
   "Biology": "bg-pastel-cream",
 };
 
+function safeNum(v: any, fallback: number) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 export function TestCard({ test, attemptsUsed = 0, onView, onStart, onUnlock }: TestCardProps) {
   const { tenant } = useTenant();
-  const parseNum = (value: unknown, fallback: number) => {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : fallback;
-  };
 
   // Firestore docs may miss attempts fields on some tests; use safe defaults.
   const attemptsAllowed = Math.max(
     1,
-    parseNum((test as any).attemptsAllowed ?? (test as any).maxAttempts, tenant?.testDefaults?.attemptsAllowed ?? 3)
+    safeNum(
+      (test as any).attemptsAllowed ?? (test as any).maxAttempts,
+      tenant?.testDefaults?.attemptsAllowed ?? 3
+    )
   );
-  const attemptsUsedSafe = Math.max(0, parseNum(attemptsUsed, 0));
+  const attemptsUsedSafe = Math.max(0, safeNum(attemptsUsed, 0));
   const attemptsRemaining = Math.max(0, attemptsAllowed - attemptsUsedSafe);
 
   return (
