@@ -1,15 +1,34 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+    ArrowLeft,
+    GripVertical,
     Search,
     Plus,
     Trash2,
     Loader2,
     X,
     Copy,
-    Image as ImageIcon,
     CheckCircle2,
     FileUp,
 } from "lucide-react";
+
+import {
+    DndContext,
+    PointerSensor,
+    KeyboardSensor,
+    closestCenter,
+    useSensor,
+    useSensors,
+    type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+    SortableContext,
+    arrayMove,
+    sortableKeyboardCoordinates,
+    useSortable,
+    verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -21,8 +40,8 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 
 import AiQuestionImportOverlay from "@/components/educator/AiQuestionImportOverlay";
-import InlineStatusTracker from "@/components/educator/InlineStatusTracker";
 import ImageTextarea from "@/components/educator/ImageTextarea";
+import InlineStatusTracker from "@/components/educator/InlineStatusTracker";
 import {
     buildImportedQuestionPayload,
     formatNegativeMarksDisplay,
@@ -32,6 +51,7 @@ import {
     type PageProgressUpdate,
 } from "@/lib/aiQuestionImport";
 import { aiFeatureFlags, getAiFeatureDisabledMessage } from "@/lib/aiFeatureFlags";
+import { HtmlView } from "@/lib/safeHtml";
 
 // Firebase
 import {
@@ -87,21 +107,194 @@ type TestQuestion = {
     updatedAt?: any;
 };
 
+function stripHtml(input: string) {
+    if (!input) return "";
+    return input.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+const IMG_TAG_REGEX = /<img[^>]+src\s*=\s*["']([^"']+)["'][^>]*\/?>/gi;
+
+function splitPreviewContent(raw: string): { text: string; imageUrls: string[] } {
+    if (!raw) return { text: "", imageUrls: [] };
+
+    const imageUrls: string[] = [];
+    let match: RegExpExecArray | null;
+    const regex = new RegExp(IMG_TAG_REGEX.source, "gi");
+
+    while ((match = regex.exec(raw)) !== null) {
+        if (match[1]) imageUrls.push(match[1]);
+    }
+
+    const text = raw
+        .replace(new RegExp(IMG_TAG_REGEX.source, "gi"), "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+
+    return { text, imageUrls };
+}
+
+function hasPreviewContent(raw: string) {
+    if (!raw) return false;
+    const imageRegex = new RegExp(IMG_TAG_REGEX.source, "gi");
+    if (imageRegex.test(raw)) return true;
+    return raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().length > 0;
+}
+
+function isQuestionPublished(isActive?: boolean) {
+    return isActive !== false;
+}
+
+function getPublishStatusLabel(isActive?: boolean) {
+    return isQuestionPublished(isActive) ? "Published" : "Draft";
+}
+
+type SortableQuestionListItemProps = {
+    q: TestQuestion;
+    displayOrder: number;
+    dragDisabled: boolean;
+    onOpenEdit: (q: TestQuestion) => void;
+    onDuplicate: (q: TestQuestion) => void;
+    onDelete: (id: string) => void;
+    onToggleActive: (q: TestQuestion, next: boolean) => void;
+};
+
+function SortableQuestionListItem({
+    q,
+    displayOrder,
+    dragDisabled,
+    onOpenEdit,
+    onDuplicate,
+    onDelete,
+    onToggleActive,
+}: SortableQuestionListItemProps) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+        id: q.id,
+        disabled: dragDisabled,
+    });
+
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+    };
+    const isPublished = isQuestionPublished(q.isActive);
+    const publishLabel = getPublishStatusLabel(q.isActive);
+
+    return (
+        <div
+            ref={setNodeRef}
+            style={style}
+            onClick={() => onOpenEdit(q)}
+            className={`p-3 rounded-xl border cursor-pointer text-sm hover:bg-accent transition-colors bg-card ${isDragging ? "opacity-70" : ""}`}
+        >
+            <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex items-start gap-2">
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 rounded-lg text-muted-foreground mt-0.5 cursor-grab active:cursor-grabbing"
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="Drag to reorder"
+                        {...attributes}
+                        {...listeners}
+                        disabled={dragDisabled}
+                    >
+                        <GripVertical className="h-4 w-4" />
+                    </Button>
+
+                    <div className="min-w-0">
+                        <div className="font-medium">
+                            <span className="text-muted-foreground">Q{displayOrder}:</span>
+                            {hasPreviewContent(q.question || "") ? (
+                                <HtmlView
+                                    html={q.question || ""}
+                                    className="mt-0.5 text-sm break-words line-clamp-2 [&_p]:my-0 [&_img]:hidden"
+                                />
+                            ) : (
+                                <p className="text-sm text-muted-foreground">(empty)</p>
+                            )}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                            <Badge variant="secondary" className="text-[10px] rounded-full">
+                                {(q.difficulty || "medium").toUpperCase()}
+                            </Badge>
+                            <Badge variant="outline" className="text-[10px] rounded-full">
+                                +{q.marks ?? "-"} / {formatNegativeMarksDisplay(q.negativeMarks)}
+                            </Badge>
+                            {q.source === "ai_import" ? (
+                                <Badge variant="outline" className="text-[10px] rounded-full">AI</Badge>
+                            ) : q.source === "ai_import_partial" ? (
+                                <Badge variant="outline" className="text-[10px] rounded-full">AI Draft</Badge>
+                            ) : null}
+                            {isPublished ? (
+                                <Badge className="text-[10px] rounded-full">Published</Badge>
+                            ) : (
+                                <Badge variant="destructive" className="text-[10px] rounded-full">
+                                    Draft
+                                </Badge>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-1">
+                    {/* <Button
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-xl"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onDuplicate(q);
+                        }}
+                    >
+                        <Copy className="h-4 w-4" />
+                    </Button> */}
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-xl text-destructive"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(q.id);
+                        }}
+                    >
+                        <Trash2 className="h-4 w-4" />
+                    </Button>
+                </div>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between">
+                <div className="text-xs text-muted-foreground">
+                    {/* {q.subject || "-"} {q.topic ? `• ${q.topic}` : ""} */}
+                </div>
+                <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+                    <span className="text-xs text-muted-foreground">{publishLabel}</span>
+                    <Switch checked={isPublished} onCheckedChange={(checked) => onToggleActive(q, checked)} />
+                </div>
+            </div>
+        </div>
+    );
+}
+
 const QuestionsManager = ({
     testId,
     testTitle,
     testSubject,
     educatorUid,
     onClose,
+    mode = "modal",
 }: {
     testId: string;
     testTitle?: string;
     testSubject?: string;
     educatorUid: string;
     onClose: () => void;
+    mode?: "modal" | "page";
 }) => {
+    const isPageMode = mode === "page";
     const [questions, setQuestions] = useState<TestQuestion[]>([]);
     const [loading, setLoading] = useState(true);
+    const [reordering, setReordering] = useState(false);
 
     const [searchQ, setSearchQ] = useState("");
     const [editorOpen, setEditorOpen] = useState(false);
@@ -110,7 +303,6 @@ const QuestionsManager = ({
     const [formQuestion, setFormQuestion] = useState("");
     const [formOptions, setFormOptions] = useState<string[]>(["", "", "", ""]);
     const [formCorrect, setFormCorrect] = useState(0);
-    const [formExplanation, setFormExplanation] = useState("");
     const [formDifficulty, setFormDifficulty] = useState<Difficulty>("medium");
     const [formSubject, setFormSubject] = useState("");
     const [formTopic, setFormTopic] = useState("");
@@ -119,7 +311,6 @@ const QuestionsManager = ({
     const [formActive, setFormActive] = useState(true);
 
     const [saving, setSaving] = useState(false);
-    // Image upload state is now handled internally by ImageTextarea
 
     const [importPreviewOpen, setImportPreviewOpen] = useState(false);
     const [importBusy, setImportBusy] = useState(false);
@@ -133,6 +324,14 @@ const QuestionsManager = ({
     const pdfInputRef = useRef<HTMLInputElement | null>(null);
     const importAbortControllerRef = useRef<AbortController | null>(null);
     const isAiPdfImportEnabled = aiFeatureFlags.pdfImport;
+    const sensors = useSensors(
+        useSensor(PointerSensor, {
+            activationConstraint: { distance: 6 },
+        }),
+        useSensor(KeyboardSensor, {
+            coordinateGetter: sortableKeyboardCoordinates,
+        })
+    );
 
     const qCol = useMemo(
         () => collection(db, "educators", educatorUid, "my_tests", testId, "questions"),
@@ -144,7 +343,7 @@ const QuestionsManager = ({
             const snap = await getDocs(qCol);
             let activeCount = 0;
             snap.forEach((item) => {
-                if (item.data()?.isActive !== false) activeCount += 1;
+                if (isQuestionPublished(item.data()?.isActive)) activeCount += 1;
             });
             await updateDoc(doc(db, "educators", educatorUid, "my_tests", testId), {
                 questionsCount: activeCount,
@@ -196,6 +395,13 @@ const QuestionsManager = ({
         };
     }, [importBusy]);
 
+    useEffect(() => {
+        if (!editingId) return;
+        const current = questions.find((q) => q.id === editingId);
+        if (!current) return;
+        setFormActive(isQuestionPublished(current.isActive));
+    }, [editingId, questions]);
+
     const filteredQuestions = useMemo(() => {
         const q = searchQ.trim().toLowerCase();
         if (!q) return questions;
@@ -204,6 +410,16 @@ const QuestionsManager = ({
             return hay.includes(q);
         });
     }, [questions, searchQ]);
+
+    const previewOptions = useMemo(
+        () =>
+            formOptions
+                .map((option, index) => ({ index, option }))
+                .filter(({ option }) => hasPreviewContent(option || "")),
+        [formOptions]
+    );
+
+    const dndEnabled = searchQ.trim().length === 0;
 
     const questionNumberById = useMemo(() => {
         const numberMap = new Map<string, number>();
@@ -283,18 +499,91 @@ const QuestionsManager = ({
         }
     }
 
+    async function persistDraggedOrder(reordered: TestQuestion[]) {
+        try {
+            setReordering(true);
+
+            const updates = reordered
+                .map((q, index) => {
+                    const nextOrder = index + 1;
+                    const currentOrder = Number(q.questionOrder);
+                    return {
+                        id: q.id,
+                        nextOrder,
+                        currentOrder: Number.isFinite(currentOrder) ? currentOrder : null,
+                    };
+                })
+                .filter((item) => item.currentOrder !== item.nextOrder);
+
+            if (!updates.length) return;
+
+            const CHUNK_SIZE = 450;
+            for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
+                const batch = writeBatch(db);
+                const chunk = updates.slice(i, i + CHUNK_SIZE);
+                chunk.forEach((item) => {
+                    batch.update(doc(qCol, item.id), {
+                        questionOrder: item.nextOrder,
+                        updatedAt: serverTimestamp(),
+                    });
+                });
+                await batch.commit();
+            }
+        } catch (e) {
+            console.error(e);
+            toast.error("Failed to save question order");
+        } finally {
+            setReordering(false);
+        }
+    }
+
+    async function handleDragEnd(event: DragEndEvent) {
+        if (!dndEnabled || reordering) return;
+
+        const { active, over } = event;
+        if (!over || active.id === over.id) return;
+
+        const oldIndex = questions.findIndex((q) => q.id === String(active.id));
+        const newIndex = questions.findIndex((q) => q.id === String(over.id));
+        if (oldIndex < 0 || newIndex < 0) return;
+
+        const reordered = arrayMove(questions, oldIndex, newIndex).map((q, index) => ({
+            ...q,
+            questionOrder: index + 1,
+        }));
+
+        setQuestions(reordered);
+        await persistDraggedOrder(reordered);
+    }
+
     function resetEditor() {
         setEditingId(null);
         setFormQuestion("");
         setFormOptions(["", "", "", ""]);
         setFormCorrect(0);
-        setFormExplanation("");
         setFormDifficulty("medium");
         setFormSubject("");
         setFormTopic("");
         setFormMarks("");
         setFormNegMarks("");
         setFormActive(true);
+    }
+
+    function addOptionField() {
+        setFormOptions((prev) => (prev.length >= 6 ? prev : [...prev, ""]));
+    }
+
+    function removeOptionField(index: number) {
+        setFormOptions((prev) => {
+            if (prev.length <= 2) return prev;
+            const next = prev.filter((_, i) => i !== index);
+            setFormCorrect((current) => {
+                if (current === index) return 0;
+                if (current > index) return current - 1;
+                return Math.min(current, next.length - 1);
+            });
+            return next;
+        });
     }
 
     function openNew() {
@@ -305,20 +594,17 @@ const QuestionsManager = ({
     function openEdit(q: TestQuestion) {
         setEditingId(q.id);
         setFormQuestion(q.question || "");
-        setFormOptions([
-            q.options?.[0] || "",
-            q.options?.[1] || "",
-            q.options?.[2] || "",
-            q.options?.[3] || "",
-        ]);
-        setFormCorrect(Number.isFinite(q.correctOption) ? q.correctOption : 0);
-        setFormExplanation(q.explanation || "");
+        const existingOptions = (q.options || []).slice(0, 6).map((opt) => opt || "");
+        while (existingOptions.length < 4) existingOptions.push("");
+        setFormOptions(existingOptions);
+        const parsedCorrect = Number.isFinite(q.correctOption) ? q.correctOption : 0;
+        setFormCorrect(Math.min(Math.max(0, parsedCorrect), existingOptions.length - 1));
         setFormDifficulty(q.difficulty || "medium");
         setFormSubject(q.subject || "");
         setFormTopic(q.topic || "");
         setFormMarks(q.marks != null ? String(q.marks) : "");
         setFormNegMarks(q.negativeMarks != null ? String(q.negativeMarks) : "");
-        setFormActive(q.isActive !== false);
+        setFormActive(isQuestionPublished(q.isActive));
         setEditorOpen(true);
     }
 
@@ -326,7 +612,7 @@ const QuestionsManager = ({
         if (saving) return;
 
         const trimmedQuestion = formQuestion.trim();
-        const normalizedOptions = formOptions.map((value) => value ?? "");
+        const normalizedOptions = formOptions.slice(0, 6).map((value) => value ?? "");
         const nonEmptyOptions = normalizedOptions.filter((value) => value.trim() !== "");
 
         if (!trimmedQuestion) {
@@ -346,7 +632,6 @@ const QuestionsManager = ({
             question: formQuestion,
             options: normalizedOptions,
             correctOption: Number(formCorrect) || 0,
-            explanation: formExplanation || "",
             difficulty: formDifficulty || "medium",
             subject: formSubject || "",
             topic: formTopic || "",
@@ -422,7 +707,7 @@ const QuestionsManager = ({
                 topic: q.topic || "",
                 marks: q.marks ?? null,
                 negativeMarks: q.negativeMarks ?? null,
-                isActive: q.isActive !== false,
+                isActive: isQuestionPublished(q.isActive),
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
                 source: "manual",
@@ -436,14 +721,35 @@ const QuestionsManager = ({
         }
     }
 
-    async function toggleActive(q: TestQuestion, next: boolean) {
+    async function updateQuestionPublishState(questionId: string, next: boolean, previous: boolean, showToast = true) {
+        setQuestions((prev) => prev.map((item) => (item.id === questionId ? { ...item, isActive: next } : item)));
+        if (editingId === questionId) setFormActive(next);
+
         try {
-            await updateDoc(doc(qCol, q.id), { isActive: next, updatedAt: serverTimestamp() });
+            await updateDoc(doc(qCol, questionId), { isActive: next, updatedAt: serverTimestamp() });
             await syncTestQuestionCount();
+            if (showToast) {
+                toast.success(next ? "Question published" : "Question moved to draft");
+            }
         } catch (e) {
+            setQuestions((prev) => prev.map((item) => (item.id === questionId ? { ...item, isActive: previous } : item)));
+            if (editingId === questionId) setFormActive(previous);
             console.error(e);
-            toast.error("Failed to update");
+            toast.error("Failed to update publish status");
         }
+    }
+
+    async function toggleActive(q: TestQuestion, next: boolean) {
+        const previous = isQuestionPublished(q.isActive);
+        await updateQuestionPublishState(q.id, next, previous, true);
+    }
+
+    function handleEditorPublishChange(next: boolean) {
+        const previous = formActive;
+        setFormActive(next);
+
+        if (!editingId) return;
+        void updateQuestionPublishState(editingId, next, previous, false);
     }
 
     // Upload pdf starts here....
@@ -495,7 +801,7 @@ const QuestionsManager = ({
                 sortImportItemsBySourceIndex(
                     (result.items || []).map((item) => ({
                         ...item,
-                        include: item.status === "ready",
+                        include: item.status !== "rejected",
                     }))
                 )
             );
@@ -585,11 +891,6 @@ const QuestionsManager = ({
         );
     }
 
-    function stripHtml(input: string) {
-        if (!input) return "";
-        return input.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-    }
-
     function normalizeQuestionDoc(id: string, data: any): TestQuestion {
         const question = String(data?.question ?? data?.text ?? "");
         const optionsRaw = Array.isArray(data?.options) ? data.options : [];
@@ -617,7 +918,7 @@ const QuestionsManager = ({
             topic: data?.topic ? String(data.topic) : "",
             marks: marks,
             negativeMarks: negativeMarks,
-            isActive: data?.isActive !== false,
+            isActive: isQuestionPublished(data?.isActive),
             createdAt: data?.createdAt,
             updatedAt: data?.updatedAt,
         };
@@ -670,317 +971,350 @@ const QuestionsManager = ({
     }
 
     return (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="relative bg-background w-full max-w-6xl h-[92vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl">
-                <div className="p-4 border-b flex items-center justify-between bg-muted/30">
+        <div className={isPageMode ? "w-full bg-gradient-to-b from-background to-muted/10" : "fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 backdrop-blur-sm"}>
+            <div
+                className={
+                    isPageMode
+                        ? "relative bg-background w-full h-[calc(100vh-8rem)] flex flex-col overflow-hidden"
+                        : "relative bg-background w-full max-w-6xl h-[92vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl"
+                }
+            >
+                <div className="p-4 border-b flex items-center justify-between">
                     <div className="min-w-0">
                         <h2 className="font-bold text-lg">Manage Questions</h2>
                         <p className="text-xs text-muted-foreground">
                             Add questions manually or import them from a PDF with AI. Saved questions stay in the same Firestore path.
                         </p>
                     </div>
-                    <Button variant="ghost" size="icon" onClick={onClose} className="rounded-xl">
-                        <X className="h-5 w-5" />
-                    </Button>
+                    {isPageMode ? (
+                        <Button variant="outline" onClick={onClose} className="rounded-xl">
+                            <ArrowLeft className="h-4 w-4 mr-2" /> Back
+                        </Button>
+                    ) : (
+                        <Button variant="ghost" size="icon" onClick={onClose} className="rounded-xl">
+                            <X className="h-5 w-5" />
+                        </Button>
+                    )}
                 </div>
 
-                <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-                    <div className="w-full md:w-[380px] h-1/3 md:h-auto border-b md:border-b-0 md:border-r flex flex-col bg-muted/10 shrink-0">
-                        <div className="p-4 border-b space-y-3">
-                            <Button className="w-full rounded-xl" onClick={openNew}>
-                                <Plus className="mr-2 h-4 w-4" /> Add Question
-                            </Button>
+                <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
+                    <div className="order-1 flex-1 min-h-0 overflow-y-auto overscroll-y-contain">
+                        <div className="p-6 lg:p-8">
+                            <div className="max-w-4xl mx-auto space-y-5">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="min-w-0">
+                                        <h3 className="text-lg font-semibold">
+                                            {editingId ? "Edit Question" : "Question Workspace"}
+                                        </h3>
+                                        <p className="text-xs text-muted-foreground">
+                                            Basic text editor for quick question entry.
+                                        </p>
+                                    </div>
 
-                            <Button
-                                variant="outline"
-                                className="w-full rounded-xl"
-                                onClick={() => pdfInputRef.current?.click()}
-                                disabled={importBusy || !isAiPdfImportEnabled}
-                                title={!isAiPdfImportEnabled ? getAiFeatureDisabledMessage("pdfImport") : undefined}
-                            >
-                                {importBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
-                                Import PDF with AI
-                            </Button>
-                            {!isAiPdfImportEnabled ? (
-                                <p className="text-xs text-muted-foreground">
-                                    {getAiFeatureDisabledMessage("pdfImport")}
-                                </p>
-                            ) : null}
-                            <input
-                                ref={pdfInputRef}
-                                type="file"
-                                accept="application/pdf"
-                                className="hidden"
-                                onChange={async (event) => {
-                                    const file = event.target.files?.[0] || null;
-                                    event.currentTarget.value = "";
-                                    if (!file) return;
-                                    setPendingPdfFile(file);
-                                    setConfirmPdfOpen(true);
-                                }}
-                            />
+                                    <div className="flex items-center gap-2">
+                                        <Button variant="outline" className="rounded-xl" onClick={openNew}>
+                                            <Plus className="h-4 w-4 mr-2" /> New
+                                        </Button>
+                                        {editorOpen ? (
+                                            <Button
+                                                variant="outline"
+                                                className="rounded-xl"
+                                                onClick={() => {
+                                                    setEditorOpen(false);
+                                                    resetEditor();
+                                                }}
+                                            >
+                                                Cancel
+                                            </Button>
+                                        ) : null}
+                                    </div>
+                                </div>
 
-                            {importBusy && importProgressUpdates.length > 0 && (
-                                <InlineStatusTracker updates={importProgressUpdates} isProcessing={importBusy} />
-                            )}
+                                {!editorOpen ? (
+                                    <div className="rounded-2xl border border-dashed border-border bg-muted/15 px-6 py-12 text-center">
+                                        <p className="text-base font-medium">Select a question from the list or create a new one</p>
+                                        <p className="text-sm text-muted-foreground mt-1">
+                                            Compose questions with plain text and keep editing simple.
+                                        </p>
+                                        <Button className="rounded-xl mt-4" onClick={openNew}>
+                                            <Plus className="h-4 w-4 mr-2" /> Start Writing
+                                        </Button>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="space-y-5">
+                                            <div className="space-y-2">
+                                                <Label>Question Content</Label>
+                                                <ImageTextarea
+                                                    value={formQuestion}
+                                                    onChange={setFormQuestion}
+                                                    folder="/test-questions"
+                                                    placeholder="Type your question here..."
+                                                    minHeight="140px"
+                                                    className="rounded-xl"
+                                                />
+                                            </div>
 
-                            <div className="relative">
-                                <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
-                                <Input
-                                    value={searchQ}
-                                    onChange={(e) => setSearchQ(e.target.value)}
-                                    placeholder="Search questions..."
-                                    className="pl-9 rounded-xl"
-                                />
+                                            <div className="space-y-3">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <Label>Answers</Label>
+                                                    <span className="text-xs text-muted-foreground">{formOptions.length} / 6 options</span>
+                                                </div>
+
+                                                <div className="space-y-3">
+                                                    {formOptions.map((opt, idx) => (
+                                                        <div key={idx} className="space-y-2">
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <Label>
+                                                                    Choice {String.fromCharCode(65 + idx)}
+                                                                    {formCorrect === idx ? <span className="ml-2 text-green-600 inline-flex items-center gap-1 text-xs"><CheckCircle2 className="h-3 w-3" /> Correct</span> : null}
+                                                                </Label>
+                                                                {formOptions.length > 2 ? (
+                                                                    <Button type="button" variant="ghost" size="icon" className="h-7 w-7 rounded-lg text-muted-foreground hover:text-destructive" onClick={() => removeOptionField(idx)}>
+                                                                        <Trash2 className="h-3.5 w-3.5" />
+                                                                    </Button>
+                                                                ) : null}
+                                                            </div>
+                                                            <ImageTextarea
+                                                                value={opt || ""}
+                                                                onChange={(value) => {
+                                                                    setFormOptions((prev) => prev.map((x, i) => (i === idx ? value : x)));
+                                                                }}
+                                                                folder="/test-options"
+                                                                placeholder={`Type choice ${String.fromCharCode(65 + idx)}...`}
+                                                                minHeight="50px"
+                                                                className="rounded-xl"
+                                                                hideControls
+                                                            />
+                                                        </div>
+                                                    ))}
+                                                </div>
+
+                                                <Button type="button" variant="outline" className="rounded-xl" onClick={addOptionField} disabled={formOptions.length >= 6}>
+                                                    <Plus className="h-4 w-4 mr-2" /> Add Option
+                                                </Button>
+                                            </div>
+
+                                            <div className="space-y-4 rounded-xl border border-border bg-muted/15 p-4">
+                                                <p className="text-sm font-semibold">Question Settings</p>
+                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                                    <div className="space-y-2">
+                                                        <Label>Mark as Correct Option</Label>
+                                                        <Select value={String(formCorrect)} onValueChange={(v) => setFormCorrect(Number(v))}>
+                                                            <SelectTrigger className="rounded-xl">
+                                                                <SelectValue />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {formOptions.map((_, i) => (
+                                                                    <SelectItem key={i} value={String(i)}>
+                                                                        Choice {String.fromCharCode(65 + i)}
+                                                                    </SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+
+                                                    <div className="space-y-2">
+                                                        <Label>Difficulty</Label>
+                                                        <Select value={formDifficulty} onValueChange={(v: any) => setFormDifficulty(v)}>
+                                                            <SelectTrigger className="rounded-xl">
+                                                                <SelectValue />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="easy">Easy</SelectItem>
+                                                                <SelectItem value="medium">Medium</SelectItem>
+                                                                <SelectItem value="hard">Hard</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+
+                                                    <div className="flex items-center justify-between p-3 rounded-xl bg-background border border-border mt-0 sm:mt-6">
+                                                        <div className="min-w-0">
+                                                            <p className="text-sm font-medium">{getPublishStatusLabel(formActive)}</p>
+                                                            <p className="text-xs text-muted-foreground">
+                                                                {formActive ? "Visible in published list" : "Saved as draft until published"}
+                                                            </p>
+                                                        </div>
+                                                        <Switch checked={formActive} onCheckedChange={handleEditorPublishChange} />
+                                                    </div>
+                                                </div>
+
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                    {/* <div className="space-y-2">
+                                                        <Label>Subject</Label>
+                                                        <Input value={formSubject} onChange={(e) => setFormSubject(e.target.value)} className="rounded-xl" placeholder="e.g. Physics" />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <Label>Topic</Label>
+                                                        <Input value={formTopic} onChange={(e) => setFormTopic(e.target.value)} className="rounded-xl" placeholder="e.g. Kinematics" />
+                                                    </div> */}
+                                                    <div className="space-y-2">
+                                                        <Label>Marks</Label>
+                                                        <Input value={formMarks} onChange={(e) => setFormMarks(e.target.value)} className="rounded-xl" placeholder="e.g. 5" />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <Label>Negative Marks</Label>
+                                                        <Input value={formNegMarks} onChange={(e) => setFormNegMarks(e.target.value)} className="rounded-xl" placeholder="e.g. -1" />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="rounded-xl border border-border bg-muted/20 p-3">
+                                            <p className="text-xs font-medium text-muted-foreground mb-2">Question Preview</p>
+                                            {hasPreviewContent(formQuestion) ? (
+                                                <div className="space-y-3">
+                                                    <div className="rounded-lg border border-border/60 bg-background p-3">
+                                                        <HtmlView html={formQuestion} className="text-sm break-words" />
+                                                    </div>
+
+                                                    <div className="space-y-2">
+                                                        <p className="text-xs font-medium text-muted-foreground">Options Preview</p>
+                                                        {previewOptions.length ? (
+                                                            previewOptions.map(({ index, option }) => (
+                                                                <div key={index} className="rounded-lg border border-border/60 bg-background p-3">
+                                                                    <div className="flex items-start gap-2">
+                                                                        <span className="text-xs font-semibold text-muted-foreground mt-1">
+                                                                            {String.fromCharCode(65 + index)}.
+                                                                        </span>
+                                                                        <HtmlView html={option} className="text-sm break-words flex-1" />
+                                                                        {formCorrect === index ? (
+                                                                            <Badge className="rounded-full text-[10px]">Correct</Badge>
+                                                                        ) : null}
+                                                                    </div>
+                                                        </div>
+                                                            ))
+                                                        ) : (
+                                                            <p className="text-sm text-muted-foreground">Add options to preview formatted answers.</p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <p className="text-sm text-muted-foreground">Start typing to preview question content.</p>
+                                            )}
+                                        </div>
+
+                                        <div className="flex items-center justify-end">
+                                            <Button className="rounded-xl min-w-[160px]" disabled={saving} onClick={saveQuestion}>
+                                                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : editingId ? "Update Question" : "Save Question"}
+                                            </Button>
+                                        </div>
+                                    </>
+                                )}
                             </div>
                         </div>
+                    </div>
 
-                        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    <div className="order-2 w-full md:w-[380px] min-h-0 border-t md:border-t-0 md:border-l flex flex-col bg-muted/10 shrink-0">
+
+
+                        <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-4 space-y-3">
+                            <div className="p-4 border-b space-y-3 ">
+                                <div>
+                                    <p className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Questions List</p>
+                                </div>
+                                <Button className="w-full rounded-xl" onClick={openNew}>
+                                    <Plus className="mr-2 h-4 w-4" /> Add Question
+                                </Button>
+
+                                <Button
+                                    variant="outline"
+                                    className="w-full rounded-xl"
+                                    onClick={() => pdfInputRef.current?.click()}
+                                    disabled={importBusy || !isAiPdfImportEnabled}
+                                    title={!isAiPdfImportEnabled ? getAiFeatureDisabledMessage("pdfImport") : undefined}
+                                >
+                                    {importBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
+                                    Import PDF with AI
+                                </Button>
+                                {!isAiPdfImportEnabled ? (
+                                    <p className="text-xs text-muted-foreground">
+                                        {getAiFeatureDisabledMessage("pdfImport")}
+                                    </p>
+                                ) : null}
+                                <input
+                                    ref={pdfInputRef}
+                                    type="file"
+                                    accept="application/pdf"
+                                    className="hidden"
+                                    onChange={async (event) => {
+                                        const file = event.target.files?.[0] || null;
+                                        event.currentTarget.value = "";
+                                        if (!file) return;
+                                        setPendingPdfFile(file);
+                                        setConfirmPdfOpen(true);
+                                    }}
+                                />
+
+                                {importBusy && importProgressUpdates.length > 0 && (
+                                    <InlineStatusTracker updates={importProgressUpdates} isProcessing={importBusy} />
+                                )}
+
+                                <div className="relative">
+                                    <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                                    <Input
+                                        value={searchQ}
+                                        onChange={(e) => setSearchQ(e.target.value)}
+                                        placeholder="Search questions..."
+                                        className="pl-9 rounded-xl"
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-muted-foreground pb-1">
+                                <span>{dndEnabled ? "Drag with handle to reorder" : "Clear search to reorder questions"}</span>
+                                {reordering ? (
+                                    <span className="inline-flex items-center gap-1">
+                                        <Loader2 className="h-3 w-3 animate-spin" /> Saving order...
+                                    </span>
+                                ) : null}
+                            </div>
                             {loading ? (
                                 <div className="flex justify-center py-6">
                                     <Loader2 className="animate-spin text-muted-foreground" />
                                 </div>
                             ) : filteredQuestions.length === 0 ? (
                                 <p className="text-center text-sm text-muted-foreground py-10">No questions yet.</p>
+                            ) : dndEnabled ? (
+                                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                                    <SortableContext items={filteredQuestions.map((q) => q.id)} strategy={verticalListSortingStrategy}>
+                                        {filteredQuestions.map((q) => (
+                                            <SortableQuestionListItem
+                                                key={q.id}
+                                                q={q}
+                                                displayOrder={questionNumberById.get(q.id) ?? 0}
+                                                dragDisabled={!dndEnabled || reordering}
+                                                onOpenEdit={openEdit}
+                                                onDuplicate={duplicateQuestion}
+                                                onDelete={deleteQuestion}
+                                                onToggleActive={toggleActive}
+                                            />
+                                        ))}
+                                    </SortableContext>
+                                </DndContext>
                             ) : (
                                 filteredQuestions.map((q) => (
-                                    <div
+                                    <SortableQuestionListItem
                                         key={q.id}
-                                        onClick={() => openEdit(q)}
-                                        className="p-3 rounded-xl border cursor-pointer text-sm hover:bg-accent transition-colors bg-card"
-                                    >
-                                        <div className="flex items-start justify-between gap-2">
-                                            <div className="min-w-0">
-                                                <div className="font-medium line-clamp-2">
-                                                    Q{questionNumberById.get(q.id) ?? "-"}: {stripHtml(q.question) || "(empty)"}
-                                                </div>
-                                                <div className="mt-2 flex flex-wrap gap-1.5">
-                                                    <Badge variant="secondary" className="text-[10px] rounded-full">
-                                                        {(q.difficulty || "medium").toUpperCase()}
-                                                    </Badge>
-                                                    <Badge variant="outline" className="text-[10px] rounded-full">
-                                                        +{q.marks ?? "—"} / {formatNegativeMarksDisplay(q.negativeMarks)}
-                                                    </Badge>
-                                                    {q.source === "ai_import" ? (
-                                                        <Badge variant="outline" className="text-[10px] rounded-full">AI</Badge>
-                                                    ) : q.source === "ai_import_partial" ? (
-                                                        <Badge variant="outline" className="text-[10px] rounded-full">AI Draft</Badge>
-                                                    ) : null}
-                                                    {q.isActive !== false ? (
-                                                        <Badge className="text-[10px] rounded-full">Active</Badge>
-                                                    ) : (
-                                                        <Badge variant="destructive" className="text-[10px] rounded-full">
-                                                            Inactive
-                                                        </Badge>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            <div className="flex items-center gap-1">
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="rounded-xl"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        duplicateQuestion(q);
-                                                    }}
-                                                >
-                                                    <Copy className="h-4 w-4" />
-                                                </Button>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="rounded-xl text-destructive"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        deleteQuestion(q.id);
-                                                    }}
-                                                >
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
-                                            </div>
-                                        </div>
-
-                                        <div className="mt-3 flex items-center justify-between">
-                                            <div className="text-xs text-muted-foreground">
-                                                {q.subject || "—"} {q.topic ? `• ${q.topic}` : ""}
-                                            </div>
-                                            <Switch
-                                                checked={q.isActive !== false}
-                                                onCheckedChange={(checked) => toggleActive(q, checked)}
-                                            />
-                                        </div>
-                                    </div>
+                                        q={q}
+                                        displayOrder={questionNumberById.get(q.id) ?? 0}
+                                        dragDisabled={true}
+                                        onOpenEdit={openEdit}
+                                        onDuplicate={duplicateQuestion}
+                                        onDelete={deleteQuestion}
+                                        onToggleActive={toggleActive}
+                                    />
                                 ))
                             )}
                         </div>
                     </div>
-
-                    <div className="flex-1 overflow-y-auto">
-                        <div className="p-8 max-w-3xl mx-auto">
-                            <div className="flex items-center justify-between gap-2 mb-4">
-                                <div className="min-w-0">
-                                    <h3 className="text-lg font-semibold">
-                                        {editingId ? "Edit Question" : "Create Question"}
-                                    </h3>
-                                    <p className="text-xs text-muted-foreground">
-                                        Supports HTML + images. AI-imported draft questions can be fixed here before activating them.
-                                    </p>
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                    <Button
-                                        variant="outline"
-                                        className="rounded-xl"
-                                        onClick={() => {
-                                            if (editorOpen) {
-                                                setEditorOpen(false);
-                                                resetEditor();
-                                            } else {
-                                                openNew();
-                                            }
-                                        }}
-                                    >
-                                        {editorOpen ? "Cancel" : "New"}
-                                    </Button>
-                                    <Button className="rounded-xl" disabled={saving} onClick={saveQuestion}>
-                                        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
-                                    </Button>
-                                </div>
-                            </div>
-
-                            <div className="space-y-6">
-                                <div className="space-y-2">
-                                    <Label>Question (text or HTML)</Label>
-                                    <ImageTextarea
-                                        value={formQuestion}
-                                        onChange={setFormQuestion}
-                                        folder="/test-questions"
-                                        placeholder="Type text, or paste / drag & drop images. Supports HTML like <b>bold</b>"
-                                        minHeight="140px"
-                                    />
-                                </div>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    {[0, 1, 2, 3].map((idx) => (
-                                        <div key={idx} className="space-y-2">
-                                            <Label>
-                                                Option {String.fromCharCode(65 + idx)}
-                                                {formCorrect === idx ? <span className="ml-2 text-green-600 inline-flex items-center gap-1 text-xs"><CheckCircle2 className="h-3 w-3" /> Correct</span> : null}
-                                            </Label>
-                                            <ImageTextarea
-                                                value={formOptions[idx] || ""}
-                                                onChange={(v) => setFormOptions((prev) => prev.map((x, i) => (i === idx ? v : x)))}
-                                                folder="/test-options"
-                                                placeholder="Option text or HTML"
-                                                minHeight="90px"
-                                            />
-                                        </div>
-                                    ))}
-                                </div>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                    <div className="space-y-2">
-                                        <Label>Correct Option</Label>
-                                        <Select value={String(formCorrect)} onValueChange={(v) => setFormCorrect(Number(v))}>
-                                            <SelectTrigger className="rounded-xl">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {[0, 1, 2, 3].map((i) => (
-                                                    <SelectItem key={i} value={String(i)}>
-                                                        {String.fromCharCode(65 + i)}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <Label>Difficulty</Label>
-                                        <Select value={formDifficulty} onValueChange={(v: any) => setFormDifficulty(v)}>
-                                            <SelectTrigger className="rounded-xl">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="easy">Easy</SelectItem>
-                                                <SelectItem value="medium">Medium</SelectItem>
-                                                <SelectItem value="hard">Hard</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-
-                                    <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40 border border-border mt-0">
-                                        <div className="min-w-0">
-                                            <p className="text-sm font-medium">Active</p>
-                                            <p className="text-xs text-muted-foreground">Visible for students</p>
-                                        </div>
-                                        <Switch checked={formActive} onCheckedChange={setFormActive} />
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                        <Label>Subject</Label>
-                                        <Input value={formSubject} onChange={(e) => setFormSubject(e.target.value)} className="rounded-xl" placeholder="e.g. Physics" />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label>Topic</Label>
-                                        <Input value={formTopic} onChange={(e) => setFormTopic(e.target.value)} className="rounded-xl" placeholder="e.g. Kinematics" />
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                        <Label>Marks</Label>
-                                        <Input value={formMarks} onChange={(e) => setFormMarks(e.target.value)} className="rounded-xl" placeholder="e.g. 5" />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label>Negative Marks</Label>
-                                        <Input value={formNegMarks} onChange={(e) => setFormNegMarks(e.target.value)} className="rounded-xl" placeholder="e.g. -1" />
-                                    </div>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <Label>Explanation (optional)</Label>
-                                    <ImageTextarea
-                                        value={formExplanation}
-                                        onChange={setFormExplanation}
-                                        folder="/test-explanations"
-                                        placeholder="Optional explanation (text or HTML). Drag & drop or paste images here."
-                                        minHeight="120px"
-                                    />
-                                </div>
-
-                                <div className="text-xs text-muted-foreground flex items-start gap-2">
-                                    <div className="mt-0.5">
-                                        <CheckCircle2 className="h-4 w-4 text-green-600" />
-                                    </div>
-                                    <div>
-                                        <p className="font-medium text-foreground">AI import behavior</p>
-                                        <p>
-                                            Imported questions are saved in <span className="font-semibold">educators/{educatorUid}/my_tests/{testId}/questions</span>.
-                                            Partial AI questions stay inactive until you review and activate them.
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <Button className="w-full rounded-xl" disabled={saving} onClick={saveQuestion}>
-                                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : editingId ? "Update Question" : "Add Question"}
-                                </Button>
-                            </div>
-                        </div>
-                    </div>
                 </div>
 
-                <div className="p-3 border-t bg-muted/20 text-xs text-muted-foreground flex items-center justify-between">
-                    <span>Stored in: educators/{educatorUid}/my_tests/{testId}/questions</span>
+                {/* <div className="p-3 border-t bg-muted/20 text-xs text-muted-foreground flex items-center justify-end">
                     <span className="flex items-center gap-2">
                         <FileUp className="h-4 w-4" />
                         Manual + AI PDF Import
                     </span>
-                </div>
+                </div> */}
 
                 <AiQuestionImportOverlay
                     open={importPreviewOpen}

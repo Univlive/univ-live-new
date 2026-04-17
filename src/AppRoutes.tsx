@@ -38,6 +38,7 @@ import EducatorDashboard from "@/pages/educator/Dashboard";
 import Learners from "@/pages/educator/Learners";
 import LearnerDetails from "@/pages/educator/LearnerDetails";
 import TestSeries from "@/pages/educator/TestSeries/TestSeries";
+import ManageQuestionsPage from "@/pages/educator/TestSeries/ManageQuestionsPage";
 import AccessCodes from "@/pages/educator/AccessCodes";
 import Messages from "@/pages/educator/Messages";
 import WebsiteSettings from "@/pages/educator/WebsiteSettings";
@@ -84,6 +85,7 @@ export default function AppRoutes() {
           {/* --- Public Routes (Open to everyone) --- */}
           <Route path="/" element={<TenantHome />} />
           <Route path="/admin-test" element={<AdminTestManager />} />
+          <Route path="/admin-test/questions/:testId" element={<AdminQuestions />} />
           <Route path="/courses" element={<TenantCourses />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
@@ -103,6 +105,7 @@ export default function AppRoutes() {
             <Route path="learners" element={<Learners />} />
             <Route path="learners/:learnerId" element={<LearnerDetails />} />
             <Route path="test-series" element={<TestSeries />} />
+            <Route path="test-series/:testId/questions" element={<ManageQuestionsPage />} />
             <Route path="access-codes" element={<AccessCodes />} />
             <Route path="messages" element={<Messages />} />
             <Route path="website-settings" element={<WebsiteSettings />} />
@@ -159,6 +162,7 @@ export default function AppRoutes() {
             <Route path="learners" element={<Learners />} />
             <Route path="learners/:learnerId" element={<LearnerDetails />} />
             <Route path="test-series" element={<TestSeries />} />
+            <Route path="test-series/:testId/questions" element={<ManageQuestionsPage />} />
             <Route path="access-codes" element={<AccessCodes />} />
             <Route path="messages" element={<Messages />} />
             <Route path="website-settings" element={<WebsiteSettings />} />

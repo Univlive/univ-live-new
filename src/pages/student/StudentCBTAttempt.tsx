@@ -78,6 +78,27 @@ const safeNumber = (v: any, fallback: number) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+const parseMcqCorrectIndex = (value: any, optionCount: number): number | null => {
+  if (value === null || value === undefined) return null;
+
+  const asNumber = Number(value);
+  if (Number.isFinite(asNumber)) {
+    if (asNumber >= 0 && asNumber < optionCount) return Math.trunc(asNumber);
+    if (asNumber >= 1 && asNumber <= optionCount) return Math.trunc(asNumber - 1);
+  }
+
+  const raw = String(value).trim().toUpperCase();
+  if (!raw) return null;
+
+  const letterMatch = raw.match(/^(?:OPTION\s*)?([A-Z])$/);
+  if (letterMatch) {
+    const idx = letterMatch[1].charCodeAt(0) - 65;
+    if (idx >= 0 && idx < optionCount) return idx;
+  }
+
+  return null;
+};
+
 const buildInitResponses = (qs: AttemptQuestion[]) => {
   const init: Record<string, AttemptResponse> = {};
   qs.forEach((q) => (init[q.id] = { answer: null, markedForReview: false, visited: false, answered: false }));
@@ -86,7 +107,11 @@ const buildInitResponses = (qs: AttemptQuestion[]) => {
 
 const mapQuestion = (id: string, data: any): AttemptQuestion => {
   const opts: string[] = Array.isArray(data.options) ? data.options : [];
-  const correctIndex = safeNumber(data.correctOption, 0);
+  const parsedCorrectIndex = parseMcqCorrectIndex(
+    data.correctOption ?? data.correctOptionIndex ?? data.correctAnswer,
+    opts.length || 4
+  );
+  const correctIndex = parsedCorrectIndex ?? 0;
   // Always normalize to +5 marks and -1 negative marks
   const positive = 5;
   const negative = 1;
