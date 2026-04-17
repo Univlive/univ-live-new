@@ -220,8 +220,93 @@ function stripQuestionNumberPrefix(input: string) {
   return value;
 }
 
+function normalizeQuestionText(input: string) {
+  const lines = String(input || "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  if (!lines.length) return "";
+
+  const optionLinePattern = /^\s*(?:option|choice)?\s*[A-D1-4]\s*[)\].:\-]\s+/i;
+  const answerHintLinePattern = /^\s*(?:ans(?:wer)?|correct(?:\s+answer|\s+option|\s+choice)?|solution)\b/i;
+
+  const cleanedLines = lines.filter(
+    (line) => !optionLinePattern.test(line) && !answerHintLinePattern.test(line)
+  );
+
+  return cleanedLines.join("\n").trim();
+}
+
+function looksLikeInstructionOrMetaText(question: string) {
+  const q = question.trim().toLowerCase();
+  if (!q) return true;
+
+  return [
+    /^directions?\b/,
+    /^instruction\b/,
+    /^read\s+the\s+following\b/,
+    /^section\s+[a-z0-9]+\b/,
+    /^passage\b/,
+    /^comprehension\b/,
+    /^note\b/,
+    /^page\s*\d+\b/,
+  ].some((pattern) => pattern.test(q));
+}
+
+function hasLikelyQuestionSignal(question: string) {
+  const q = question.trim();
+  if (!q) return false;
+
+  if (/\?/.test(q)) return true;
+  if (/\b(find|determine|evaluate|calculate|compute|solve|identify|which|what|who|when|where|why|how)\b/i.test(q)) {
+    return true;
+  }
+  if (/_{2,}/.test(q)) return true;
+  if (/\b(true\s*\/\s*false|assertion|reason)\b/i.test(q)) return true;
+  return false;
+}
+
+function normalizeCorrectOptionValue(rawCorrectOption: any, optionCount: number) {
+  const toIndex = (value: number) => {
+    if (!Number.isFinite(value)) return null;
+    const n = Math.trunc(value);
+
+    // Preferred: already 0-based
+    if (n >= 0 && n < optionCount) return n;
+    // Fallback: 1-based coming from OCR/LLM output
+    if (n >= 1 && n <= optionCount) return n - 1;
+    return null;
+  };
+
+  if (typeof rawCorrectOption === "number") {
+    return toIndex(rawCorrectOption);
+  }
+
+  const rawText = String(rawCorrectOption ?? "").trim();
+  if (!rawText) return null;
+
+  // Common letter forms: "A", "Option B", "(C)", "Answer: D"
+  const letterMatch = rawText.match(/\b([A-D])\b/i);
+  if (letterMatch?.[1]) {
+    const idx = letterMatch[1].toUpperCase().charCodeAt(0) - 65;
+    if (idx >= 0 && idx < optionCount) return idx;
+  }
+
+  // Numeric forms: "2", "option 3", "correct option: 4"
+  const numberMatch = rawText.match(/-?\d+/);
+  if (numberMatch) {
+    const parsed = Number(numberMatch[0]);
+    const normalized = toIndex(parsed);
+    if (normalized != null) return normalized;
+  }
+
+  return null;
+}
+
 export function normalizeImportedItem(item: any, fallbackIndex: number): ImportedQuestionItem {
-  const question = stripQuestionNumberPrefix(String(item?.question || ""));
+  const rawQuestion = String(item?.question || "");
+  const question = normalizeQuestionText(stripQuestionNumberPrefix(rawQuestion));
   const options = (() => {
     if (Array.isArray(item?.options)) {
       return item.options
@@ -240,15 +325,7 @@ export function normalizeImportedItem(item: any, fallbackIndex: number): Importe
     return [];
   })();
 
-  const rawCorrectOption = item?.correctOption;
-  const correctOption =
-    typeof rawCorrectOption === "number" && Number.isFinite(rawCorrectOption)
-      ? rawCorrectOption
-      : rawCorrectOption == null || rawCorrectOption === ""
-        ? null
-        : Number.isFinite(Number(rawCorrectOption))
-          ? Number(rawCorrectOption)
-          : null;
+  const correctOption = normalizeCorrectOptionValue(item?.correctOption, options.length);
 
   const reasons = Array.isArray(item?.reasons)
     ? item.reasons.map((reason: any) => String(reason || "").trim()).filter(Boolean)
@@ -259,13 +336,25 @@ export function normalizeImportedItem(item: any, fallbackIndex: number): Importe
     : "partial";
 
   if (!question) reasons.push("Question text could not be extracted.");
+  if (question && looksLikeInstructionOrMetaText(question)) {
+    reasons.push("Extracted text appears to be instructions/metadata, not a standalone question.");
+  }
   if (options.length < 2) reasons.push("At least two options could not be identified.");
   if (correctOption == null || correctOption < 0 || correctOption >= options.length) {
     reasons.push("Correct option could not be identified confidently.");
   }
 
-  if (!question && !options.length) status = "rejected";
-  else if (!question || options.length < 2 || correctOption == null || correctOption < 0 || correctOption >= options.length) {
+  const isInstructionLike = question ? looksLikeInstructionOrMetaText(question) : false;
+  const lacksQuestionSignal = question ? !hasLikelyQuestionSignal(question) : true;
+  const hasCompleteOptionSet = options.length >= 4;
+  const shouldTreatAsQuestionLike = question && (!lacksQuestionSignal || hasCompleteOptionSet);
+
+  if (question && !shouldTreatAsQuestionLike) {
+    reasons.push("Extracted text does not clearly look like a question statement.");
+  }
+
+  if ((!question && !options.length) || isInstructionLike) status = "rejected";
+  else if (!question || !shouldTreatAsQuestionLike || options.length < 2 || correctOption == null || correctOption < 0 || correctOption >= options.length) {
     status = status === "rejected" ? "rejected" : "partial";
   } else {
     status = "ready";

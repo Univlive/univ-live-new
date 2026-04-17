@@ -57,14 +57,6 @@ export type QuestionsDetectedCallback = (
   pageNumber: number
 ) => void;
 
-function sortItemsBySourceIndex<T extends { sourceIndex: number }>(items: T[]) {
-  return [...items].sort((a, b) => {
-    const aIdx = Number.isFinite(Number(a.sourceIndex)) ? Number(a.sourceIndex) : Number.MAX_SAFE_INTEGER;
-    const bIdx = Number.isFinite(Number(b.sourceIndex)) ? Number(b.sourceIndex) : Number.MAX_SAFE_INTEGER;
-    return aIdx - bIdx;
-  });
-}
-
 function hasValidCorrectOption(item: Omit<AiImportPreviewItem, "include">) {
   return (
     typeof item.correctOption === "number" &&
@@ -73,39 +65,9 @@ function hasValidCorrectOption(item: Omit<AiImportPreviewItem, "include">) {
   );
 }
 
-function extractLeadingQuestionNumber(text: string): number | null {
-  const value = String(text || "").trim();
-  if (!value) return null;
-
-  const patterns = [
-    /^(?:q(?:uestion)?\s*)?(\d{1,4})\s*[:.)\]-]/i,
-    /^\(\s*(\d{1,4})\s*\)/,
-    /^\[\s*(\d{1,4})\s*\]/,
-  ];
-
-  for (const pattern of patterns) {
-    const match = value.match(pattern);
-    if (match?.[1]) return Number(match[1]);
-  }
-
-  return null;
-}
-
 function orderItemsAsPdfSequence(items: Omit<AiImportPreviewItem, "include">[]) {
-  // Gemini is instructed to number questions sequentially (sourceIndex 1, 2, 3…)
-  // in the order they appear on the page. Trust that order first.
-  // Fall back to the original array index if sourceIndex is missing/invalid.
-  return [...items].sort((a, b) => {
-    const aIdx = Number.isFinite(a.sourceIndex) ? a.sourceIndex : Number.MAX_SAFE_INTEGER;
-    const bIdx = Number.isFinite(b.sourceIndex) ? b.sourceIndex : Number.MAX_SAFE_INTEGER;
-    if (aIdx !== bIdx) return aIdx - bIdx;
-
-    // Tie-break: try extracting a leading question number from rawBlock
-    const aLead = extractLeadingQuestionNumber(a.rawBlock || "") ?? extractLeadingQuestionNumber(a.question || "");
-    const bLead = extractLeadingQuestionNumber(b.rawBlock || "") ?? extractLeadingQuestionNumber(b.question || "");
-    if (aLead != null && bLead != null && aLead !== bLead) return aLead - bLead;
-    return 0;
-  });
+  // Preserve exact sequence from backend response to match page processing order.
+  return [...items];
 }
 
 function extractQuestionNumber(text: string): number | null {
@@ -221,11 +183,11 @@ async function loadPdfJs(): Promise<PdfJsModule> {
   return pdfjs;
 }
 
-/** Hard cap on rendered canvas width (px). Keeps JPEG payloads small. */
-const MAX_CANVAS_WIDTH = 1500;
+/** Hard cap on rendered canvas width (px). Slightly higher for better OCR fidelity. */
+const MAX_CANVAS_WIDTH = 1800;
 
-/** JPEG quality used for canvas export (0.7 = 70%, sharp enough for OCR) */
-const JPEG_QUALITY = 0.7;
+/** JPEG quality used for canvas export (higher value improves OCR readability). */
+const JPEG_QUALITY = 0.82;
 
 /**
  * Render a single PDF page to a compressed JPEG base64 string.
@@ -237,7 +199,7 @@ const JPEG_QUALITY = 0.7;
 async function renderPageToImage(
   pdfDoc: any,
   pageNumber: number
-): Promise<{ base64: string; mimeType: string }> {
+): Promise<{ base64: string; mimeType: string; pageText: string }> {
   const page = await pdfDoc.getPage(pageNumber);
 
   // Get the page's native viewport at scale=1 to measure its dimensions
@@ -262,11 +224,26 @@ async function renderPageToImage(
   const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
   const base64 = dataUrl.replace(/^data:image\/jpeg;base64,/, "");
 
+  let pageText = "";
+  try {
+    const textContent = await page.getTextContent();
+    const joined = Array.isArray(textContent?.items)
+      ? textContent.items
+          .map((entry: any) => (typeof entry?.str === "string" ? entry.str : ""))
+          .filter(Boolean)
+          .join(" ")
+      : "";
+
+    pageText = joined.replace(/\s+/g, " ").trim().slice(0, 25000);
+  } catch {
+    pageText = "";
+  }
+
   // Clean up canvas memory immediately
   canvas.width = 0;
   canvas.height = 0;
 
-  return { base64, mimeType: "image/jpeg" };
+  return { base64, mimeType: "image/jpeg", pageText };
 }
 
 // ---------------------------------------------------------------------------
@@ -314,13 +291,14 @@ export async function importQuestionsFromPdf(
 
   const allItems: Omit<AiImportPreviewItem, "include">[] = [];
   let globalIndex = 0;
-  let consecutiveErrors = 0;
-  const MAX_CONSECUTIVE_ERRORS = 3;
   let cumulativeDetected = 0;
   let cumulativeAccepted = 0;
   let backoffDelay = 3000; // Start with 3 second delay between pages (increased from 1s)
   const MAX_BACKOFF = 15000; // Cap at 15 seconds (increased from 10s)
   let rateLimitCount = 0; // Track how many times we hit rate limit
+  const MAX_PAGE_RETRIES = 2;
+  const pageRetryCounts = new Map<number, number>();
+  const failedPages: number[] = [];
 
   // Helper to add delay between requests
   const delayMs = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -350,21 +328,24 @@ export async function importQuestionsFromPdf(
 
     // Check if import was cancelled by creating a fresh signal per page
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120_000);
+    const timeoutId = setTimeout(() => controller.abort(), 180_000);
 
     let res: Response;
     let pageData: AiImportResponse | null = null;
     let pageQuestionsDetected = 0;
     let pageQuestionsAccepted = 0;
+    let retryCurrentPage = false;
 
     try {
+      const renderedPage = await renderPageToImage(pdfDoc, pageNum);
       res = await fetch("/api/ai/import-test-questions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify({
-          imageBase64: await renderPageToImageBase64(pdfDoc, pageNum),
+          imageBase64: renderedPage.base64,
           imageMimeType: "image/jpeg",
+          pageText: renderedPage.pageText,
           fileName: file.name,
           pageNumber: pageNum,
           testTitle: context?.testTitle || "",
@@ -408,7 +389,7 @@ export async function importQuestionsFromPdf(
                 if (event.type === "complete" && event.data) {
                   pageData = event.data as AiImportResponse;
                   pageQuestionsDetected = pageData.items?.length ?? 0;
-                  consecutiveErrors = 0; // Reset error counter on success
+                  pageRetryCounts.delete(pageNum);
                   
                   // Report: Questions detected
                   if (pageQuestionsDetected > 0) {
@@ -426,7 +407,6 @@ export async function importQuestionsFromPdf(
                   }
                 } else if (event.type === "error") {
                   hasError = true;
-                  consecutiveErrors++;
                   throw new Error(event.error || "Unknown error from API");
                 }
               } catch (parseErr) {
@@ -444,7 +424,6 @@ export async function importQuestionsFromPdf(
         }
 
         if (!pageData || !res.ok) {
-          consecutiveErrors++;
           throw new Error(`API error: ${res.status}`);
         }
       } else {
@@ -452,7 +431,6 @@ export async function importQuestionsFromPdf(
         pageData = (await res.json().catch(() => ({}))) as AiImportResponse;
 
         if (!res.ok) {
-          consecutiveErrors++;
           throw new Error(`API error: ${res.status}`);
         }
 
@@ -473,7 +451,26 @@ export async function importQuestionsFromPdf(
       }
 
       // If we got here, processing was successful
-      if (pageData?.items) {
+      if (pageData && (pageData.items?.length ?? 0) <= 1) {
+        const retriesUsed = pageRetryCounts.get(pageNum) ?? 0;
+        if (retriesUsed < 1) {
+          pageRetryCounts.set(pageNum, retriesUsed + 1);
+          retryCurrentPage = true;
+          onPageProgress?.({
+            pageNumber: pageNum,
+            totalPages: numPages,
+            status: "complete",
+            message: `Page ${pageNum} returned too few questions. Retrying once...`,
+            pageQuestionsDetected: 0,
+            pageQuestionsAccepted: 0,
+            cumulativeDetected,
+            cumulativeAccepted,
+          });
+        }
+      }
+
+      if (pageData?.items && !retryCurrentPage) {
+        pageRetryCounts.delete(pageNum);
         const pageNewItems: AiImportPreviewItem[] = [];
         const pageItems = orderItemsAsPdfSequence(pageData.items || []);
         
@@ -491,7 +488,7 @@ export async function importQuestionsFromPdf(
           pageNewItems.push({
             ...item,
             sourceIndex: globalIndex,
-            include: item.status === "ready",
+              include: item.status !== "rejected",
           });
         }
         cumulativeAccepted += pageQuestionsAccepted;
@@ -535,45 +532,36 @@ export async function importQuestionsFromPdf(
         backoffDelay = Math.min(backoffDelay * 3, MAX_BACKOFF);
         console.warn(`[importQuestionsFromPdf] New backoff delay: ${backoffDelay}ms (rate limit count: ${rateLimitCount})`);
         
-        consecutiveErrors = 0; // Don't count rate limits as regular errors
-        
-        // Report the rate limit issue but continue
+      }
+
+      const retriesUsed = pageRetryCounts.get(pageNum) ?? 0;
+      if (retriesUsed < MAX_PAGE_RETRIES) {
+        pageRetryCounts.set(pageNum, retriesUsed + 1);
+        retryCurrentPage = true;
         onPageProgress?.({
           pageNumber: pageNum,
           totalPages: numPages,
           status: "complete",
-          message: `Page ${pageNum} paused (rate limited). Waiting ${Math.round(backoffDelay/1000)}s before retry...`,
+          message: `Page ${pageNum} failed (${retriesUsed + 1}/${MAX_PAGE_RETRIES + 1}). Retrying...`,
           pageQuestionsDetected: 0,
           pageQuestionsAccepted: 0,
           cumulativeDetected,
           cumulativeAccepted,
         });
-      } else if (pageErr instanceof Error && pageErr.message.includes("API error")) {
-        console.error(`Failed to process page ${pageNum}:`, pageErr);
-        consecutiveErrors++;
-        // Increase backoff slightly on other API errors too
-        backoffDelay = Math.min(backoffDelay * 1.5, MAX_BACKOFF);
-
-        // Stop if we have too many consecutive errors
-        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-          throw new Error(
-            `The AI service is experiencing issues. Failed to process page ${pageNum}. ` +
-            `Please try again later or contact support.`
-          );
-        }
       } else {
-        // For other errors, just log and continue
-        console.error(`Failed to process page ${pageNum}:`, pageErr);
-        consecutiveErrors++;
-        // Increase backoff slightly
-        backoffDelay = Math.min(backoffDelay * 1.3, MAX_BACKOFF);
-
-        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-          throw new Error(
-            `Unable to process the PDF. Multiple pages failed. ` +
-            `Please try uploading a clearer PDF or contact support.`
-          );
-        }
+        pageRetryCounts.delete(pageNum);
+        failedPages.push(pageNum);
+        console.error(`Failed to process page ${pageNum} after retries:`, pageErr);
+        onPageProgress?.({
+          pageNumber: pageNum,
+          totalPages: numPages,
+          status: "complete",
+          message: `Page ${pageNum} failed after retries. Continuing with next page...`,
+          pageQuestionsDetected: 0,
+          pageQuestionsAccepted: 0,
+          cumulativeDetected,
+          cumulativeAccepted,
+        });
       }
     } finally {
       clearTimeout(timeoutId);
@@ -584,15 +572,21 @@ export async function importQuestionsFromPdf(
       pageNumber: pageNum,
       totalPages: numPages,
       status: "complete",
-      message: `Page ${pageNum} complete. Total: ${cumulativeDetected} detected, ${cumulativeAccepted} accepted`,
+      message: retryCurrentPage
+        ? `Page ${pageNum} scheduled for retry. Total so far: ${cumulativeDetected} detected, ${cumulativeAccepted} accepted`
+        : `Page ${pageNum} complete. Total: ${cumulativeDetected} detected, ${cumulativeAccepted} accepted`,
       pageQuestionsDetected,
       pageQuestionsAccepted,
       cumulativeDetected,
       cumulativeAccepted,
     });
+
+    if (retryCurrentPage) {
+      pageNum -= 1;
+    }
   }
 
-  const reconciledItems = sortItemsBySourceIndex(reconcileTrailingAnswerKey(allItems));
+  const reconciledItems = reconcileTrailingAnswerKey(allItems);
 
   // Build aggregate summary
   const summary = reconciledItems.reduce(
@@ -616,20 +610,11 @@ export async function importQuestionsFromPdf(
     items: reconciledItems,
     meta: {
       fileName: file.name,
-      diagnostics: [],
+      diagnostics: failedPages.length
+        ? [`Failed pages after retries: ${failedPages.join(", ")}`]
+        : [],
     },
   };
-}
-
-/**
- * Helper to render a page and return base64 immediately
- */
-async function renderPageToImageBase64(
-  pdfDoc: any,
-  pageNumber: number
-): Promise<string> {
-  const { base64 } = await renderPageToImage(pdfDoc, pageNumber);
-  return base64;
 }
 
 // ---------------------------------------------------------------------------

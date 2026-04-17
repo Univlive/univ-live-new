@@ -5,7 +5,7 @@ import { VercelRequest, VercelResponse } from "@vercel/node";
 // so that large Base64-encoded page images are accepted without a 413 error.
 // ---------------------------------------------------------------------------
 export const config = {
-  maxDuration: 60, // Allow up to 60s for Gemini vision processing
+  maxDuration: 120, // Allow longer processing for dense pages with many questions
   api: {
     bodyParser: {
       sizeLimit: "10mb",
@@ -35,6 +35,8 @@ type ImportRequest = {
   imageBase64: string;
   /** Original MIME type of the image (default: image/png) */
   imageMimeType?: string;
+  /** Optional text extracted from the same PDF page for anti-hallucination checks */
+  pageText?: string;
   fileName?: string;
   /** Which page of the PDF this image represents (1-indexed) */
   pageNumber?: number;
@@ -199,42 +201,58 @@ async function buildMcqSchema() {
 function buildSystemInstruction(context: {
   testTitle?: string;
   subject?: string;
+  hasReferenceText?: boolean;
 }): string {
-  return [
-    "You are an expert MCQ extraction engine for educational test papers.",
-    "You will receive an image of a single page from a PDF exam paper.",
+  const lines = [
+    "You are an optical character recognition and data extraction engine.",
+    "Your sole purpose is to extract questions and multiple-choice options from one exam page image with strict fidelity.",
     "",
-    "Your task:",
-    "1. Identify every single-correct Multiple Choice Question (MCQ) visible on the page.",
-    "2. For each question, extract: the full question text (preserving math notation where possible),",
-    "   options as a JSON object exactly in this format:",
+    "CRITICAL RULES:",
+    "1. Zero hallucination: extract text exactly as visible.",
+    "   - Do NOT add missing words.",
+    "   - Do NOT generate your own filler text.",
+    "   - Do NOT guess missing options.",
+    "   - Do NOT answer the question.",
+    "   - If a question is cut off, extract only the visible portion.",
+    "2. Extract only actual MCQ question blocks.",
+    "   - Do NOT treat instructions, headings, section labels, directions, page footers/headers, or normal passage text as a question.",
+    "   - If a block is not a standalone MCQ, set status='rejected' and include reason(s).",
+    "3. Question text must contain only the question statement.",
+    "   - Do NOT append non-question notes, unrelated passage lines, answer keys, or commentary into question text.",
+    "4. For each valid item, extract options in this exact structure:",
     "   options: { \"a\": \"...\", \"b\": \"...\", \"c\": \"...\", \"d\": \"...\" }",
-    "   and the correct option index (0-based: A=0, B=1, C=2, D=3).",
-    "   IMPORTANT: option values must contain only answer text, not labels like 'A)', 'B.', or 'Option C'.",
-    "3. If a question contains an associated diagram, figure, graph, chart, or embedded image,",
-    "   return a bounding box in `questionImageBox` as [ymin, xmin, ymax, xmax] using Gemini's",
-    "   standard 1000×1000 coordinate grid (0 = top-left, 1000 = bottom-right).",
-    "   The bounding box MUST tightly enclose the diagram/figure itself.",
-    "   If no diagram exists for a question, return an empty array [].",
-    "4. Use answer hints visible on the page (like 'Ans: B', 'Correct option: 2', answer keys)",
-    "   to set correctOption. Map letter answers to 0-based indices: A=0, B=1, C=2, D=3.",
-    "5. If you cannot confidently determine the correct answer, set status to 'partial'",
-    "   and correctOption to null.",
-    "6. If a block is not a valid MCQ (e.g. instructions, headers, page numbers),",
-    "   set status to 'rejected'.",
-    "7. Do NOT invent or hallucinate any content. Only extract what is visually present.",
-    "8. CRITICAL: Number each question sequentially starting from sourceIndex 1,",
-    "   following the EXACT top-to-bottom visual order as they appear on the page.",
-    "   If the page shows Q5, Q6, Q7, use sourceIndex 1, 2, 3 respectively (not 5, 6, 7).",
-    "   The items array MUST be ordered the same way — first item = first question on page.",
-    "9. Keep rawBlock as a concise plain-text excerpt of the ORIGINAL question text",
-    "   INCLUDING its original question number prefix (e.g. '12. What is...' or 'Q5) The ratio...').",
-    "   Max ~100 chars.",
-    "10. Preserve mathematical expressions as closely as possible (use Unicode symbols",
-    "    or LaTeX-like notation if clear from the page).",
+    "   - Option values must be answer text only (remove labels like A), B., Option C).",
+    "5. Mathematics and science notation must use raw LaTeX when identifiable.",
+    "   - Inline math must be wrapped as \\( ... \\).",
+    "   - Block equations must be wrapped as $$ ... $$.",
+    "   - Prefer LaTeX forms for fractions/symbols (e.g., \\(\\frac{1}{2}\\) instead of 1/2).",
+    "6. Status classification:",
+    "   - Mark status='ready' only when question text and all four options are fully visible and fully extracted from this page.",
+    "   - If anything is missing/unclear, use status='partial' or 'rejected'.",
+    "7. Correct option:",
+    "   - Use visible answer hints only (Ans/B/Correct Option, etc.) to set correctOption.",
+    "   - Use 0-based index mapping A=0, B=1, C=2, D=3.",
+    "   - If not confidently visible, set correctOption=null.",
+    "8. Image coordinates:",
+    "   - Return questionImageBox only when a clear diagram/graph/geometric figure is required for that question.",
+    "   - Do NOT return coordinates for logos/backgrounds/text blocks.",
+    "   - If no required diagram, return an empty array [].",
+    "9. Ordering:",
+    "   - Number sourceIndex sequentially from 1 in exact top-to-bottom order on this page.",
+    "   - Scan the ENTIRE page top-to-bottom and do not stop early after first few questions.",
+    "   - If many questions exist on the page, you must still include all of them in items.",
+    "10. rawBlock:",
+    "   - Keep a concise excerpt of original question text including visible question number prefix.",
+    "   - Max ~100 chars.",
+    context.hasReferenceText ? "11. Grounding:" : null,
+    context.hasReferenceText
+      ? "   - Reference text from the same page is provided. Keep only questions supported by BOTH image and reference text."
+      : null,
     "",
     `Context — Test: "${context.testTitle || "Unknown"}", Subject: "${context.subject || "Unknown"}"`,
-  ].join("\n");
+  ];
+
+  return lines.filter(Boolean).join("\n");
 }
 
 function normalizeJsonCandidate(input: string) {
@@ -531,7 +549,7 @@ function getRequiredClosers(json: string): string | null {
 async function processWithGemini(
   imageBuffer: Buffer,
   mimeType: string,
-  context: { testTitle?: string; subject?: string }
+  context: { testTitle?: string; subject?: string; pageText?: string }
 ): Promise<GeminiResponse> {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -550,7 +568,7 @@ async function processWithGemini(
     const mcqSchema = await buildMcqSchema();
 
     const generationConfig: GenerationConfig = {
-      temperature: 0.1,
+      temperature: 0,
       maxOutputTokens: 16384,
       responseMimeType: "application/json",
       responseSchema: mcqSchema as any, // SDK typing requires cast
@@ -559,7 +577,11 @@ async function processWithGemini(
     const model = genAI.getGenerativeModel({
       model: modelName,
       generationConfig,
-      systemInstruction: buildSystemInstruction(context),
+      systemInstruction: buildSystemInstruction({
+        testTitle: context.testTitle,
+        subject: context.subject,
+        hasReferenceText: Boolean(context.pageText && context.pageText.trim().length > 0),
+      }),
     });
 
     // Build the multimodal content parts
@@ -570,13 +592,23 @@ async function processWithGemini(
       },
     };
 
-    const result = await model.generateContent([
+    const requestParts: any[] = [
       "Extract all MCQs from this exam page image. " +
       "For any question that has an associated diagram, figure, or graph, " +
       "return its bounding box in questionImageBox. " +
       "Return the results as structured JSON.",
-      imagePart,
-    ]);
+    ];
+
+    if (context.pageText && context.pageText.trim()) {
+      requestParts.push(
+        "Reference text extracted from the same page (use only for grounding; do not invent beyond it):\n" +
+          context.pageText.slice(0, 12000)
+      );
+    }
+
+    requestParts.push(imagePart);
+
+    const result = await model.generateContent(requestParts);
 
     const text = result.response.text();
     if (!text) {
@@ -734,6 +766,87 @@ function isValidBoundingBox(box: unknown): box is [number, number, number, numbe
   return ymax > ymin && xmax > xmin;
 }
 
+function isLikelyNecessaryDiagramBox(
+  box: [number, number, number, number],
+  normalized: ImportedQuestionItem
+) {
+  if (normalized.status === "rejected") return false;
+
+  const [ymin, xmin, ymax, xmax] = box;
+  const width = xmax - xmin;
+  const height = ymax - ymin;
+  const areaRatio = (width * height) / 1_000_000;
+
+  // Tiny boxes are usually icons/noise; huge boxes are often text regions.
+  if (areaRatio < 0.004) return false;
+  if (areaRatio > 0.45) return false;
+
+  // Near full-page width/height generally indicates non-diagram capture.
+  if (width > 980 || height > 980) return false;
+
+  return true;
+}
+
+function normalizeForPageVerification(input: string) {
+  return String(input || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\\\((.*?)\\\)/g, " $1 ")
+    .replace(/\\\[(.*?)\\\]/g, " $1 ")
+    .replace(/\$\$([\s\S]*?)\$\$/g, " $1 ")
+    .replace(/\$([^\n$]+?)\$/g, " $1 ")
+    .replace(/\\[a-zA-Z]+/g, " ")
+    .replace(/[^a-zA-Z0-9]+/g, " ")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenizeForPageVerification(input: string) {
+  return normalizeForPageVerification(input)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
+}
+
+function hasSufficientPageTextEvidence(item: ImportedQuestionItem, pageTextRaw: string) {
+  const pageText = normalizeForPageVerification(pageTextRaw);
+  if (!pageText || pageText.length < 80) return true;
+
+  const pageTokens = new Set(tokenizeForPageVerification(pageText));
+  if (pageTokens.size < 12) return true;
+
+  const candidateTokens = Array.from(
+    new Set(tokenizeForPageVerification(`${item.question} ${(item.options || []).join(" ")}`))
+  );
+
+  if (candidateTokens.length < 5) return true;
+
+  let matched = 0;
+  for (const token of candidateTokens) {
+    if (pageTokens.has(token)) matched += 1;
+  }
+
+  const ratio = matched / candidateTokens.length;
+  const minRatio =
+    candidateTokens.length >= 16 ? 0.55 : candidateTokens.length >= 10 ? 0.5 : 0.4;
+
+  if (ratio < minRatio) return false;
+
+  const rawBlock = normalizeForPageVerification(item.rawBlock || "");
+  if (rawBlock.length >= 20) {
+    const rawTokens = tokenizeForPageVerification(rawBlock);
+    if (rawTokens.length >= 4) {
+      let rawMatched = 0;
+      for (const token of rawTokens) {
+        if (pageTokens.has(token)) rawMatched += 1;
+      }
+      if (rawMatched / rawTokens.length < 0.5) return false;
+    }
+  }
+
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Retry logic for transient API failures
 // ---------------------------------------------------------------------------
@@ -779,7 +892,7 @@ function delayMs(ms: number): Promise<void> {
 async function processWithGeminiRetry(
   imageBuffer: Buffer,
   mimeType: string,
-  context: { testTitle?: string; subject?: string }
+  context: { testTitle?: string; subject?: string; pageText?: string }
 ): Promise<GeminiResponse> {
   const MAX_RETRIES = 3;
   let attempt = 0;
@@ -841,6 +954,7 @@ export default async function handler(
     const {
       imageBase64,
       imageMimeType,
+      pageText,
       fileName,
       pageNumber,
       testTitle,
@@ -889,35 +1003,10 @@ export default async function handler(
       geminiResult = await processWithGeminiRetry(imageBuffer, mimeType, {
         testTitle,
         subject,
+        pageText,
       });
     } catch (modelErr) {
-      const msg = (modelErr instanceof Error ? modelErr.message : String(modelErr)).toLowerCase();
-      const isMalformedJson =
-        msg.includes("invalid json") ||
-        msg.includes("unterminated string") ||
-        msg.includes("double-quoted property name") ||
-        msg.includes("could not be repaired");
-
-      if (!isMalformedJson) {
-        throw modelErr;
-      }
-
-      sendStreamEvent(res, {
-        type: "complete",
-        data: {
-          summary: { total: 0, ready: 0, partial: 0, rejected: 0 },
-          items: [],
-          meta: {
-            fileName,
-            pageNumber,
-            diagnostics: [
-              "AI returned malformed JSON for this page. Skipped this page and continued.",
-            ],
-          },
-        },
-      });
-      endStreaming(res);
-      return;
+      throw modelErr;
     }
 
     const rawItems = Array.isArray(geminiResult?.items)
@@ -951,13 +1040,26 @@ export default async function handler(
       questionImageUrl?: string;
     })[] = await Promise.all(
       rawItems.map(async (item, idx) => {
-        const normalized = normalizeImportedItem(item, idx + 1);
+        let normalized = normalizeImportedItem(item, idx + 1);
+
+        if (!hasSufficientPageTextEvidence(normalized, String(pageText || ""))) {
+          normalized = {
+            ...normalized,
+            status: "rejected",
+            reasons: Array.from(
+              new Set([
+                ...(normalized.reasons || []),
+                "Question not verified against PDF page text (removed to prevent hallucination).",
+              ])
+            ),
+          };
+        }
 
         // Check for a valid bounding box
         const box = item.questionImageBox;
         let questionImageUrl: string | undefined;
 
-        if (isValidBoundingBox(box)) {
+        if (isValidBoundingBox(box) && isLikelyNecessaryDiagramBox(box, normalized)) {
           try {
             const cropped = await extractAndCropImage(imageBuffer, box);
 
@@ -989,17 +1091,18 @@ export default async function handler(
       message: "Finalizing results...",
     });
 
-    // ---- Step 3: De-duplicate ----
+    // ---- Step 3: Conservative de-duplicate ----
+    // Keep repeated question text if sourceIndex differs (some papers intentionally repeat stems).
     const unique = processedItems.filter((item, index, arr) => {
       if (item.status === "rejected") return true;
-      const signature = `${item.question.toLowerCase()}__${item.options
+      const signature = `${item.sourceIndex}__${item.question.toLowerCase()}__${item.options
         .join("||")
         .toLowerCase()}`;
       return (
         arr.findIndex(
           (entry) =>
             entry.status !== "rejected" &&
-            `${entry.question.toLowerCase()}__${entry.options
+            `${entry.sourceIndex}__${entry.question.toLowerCase()}__${entry.options
               .join("||")
               .toLowerCase()}` === signature
         ) === index

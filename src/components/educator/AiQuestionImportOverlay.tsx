@@ -4,6 +4,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatNegativeMarksDisplay, type AiImportPreviewItem, type AiImportSummary } from "@/lib/aiQuestionImport";
+import { HtmlView } from "@/lib/safeHtml";
 import { AlertTriangle, CheckCircle2, FileSearch, Loader2, X } from "lucide-react";
 
 function statusTone(status: AiImportPreviewItem["status"]) {
@@ -206,9 +207,12 @@ export default function AiQuestionImportOverlay({
                               </Badge>
                             ) : null}
                           </div>
-                          <p className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap break-words">
-                            {item.question || "Question text could not be extracted clearly."}
-                          </p>
+                          <div className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap break-words">
+                            <HtmlView
+                              html={item.question || "Question text could not be extracted clearly."}
+                              className="text-sm break-words"
+                            />
+                          </div>
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
@@ -229,7 +233,9 @@ export default function AiQuestionImportOverlay({
                               <span className="font-medium text-muted-foreground">
                                 {String.fromCharCode(65 + index)}.
                               </span>
-                              <div className="min-w-0 flex-1 whitespace-pre-wrap break-words">{option || "—"}</div>
+                              <div className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+                                <HtmlView html={option || "—"} className="text-sm break-words" />
+                              </div>
                               {item.correctOption === index ? (
                                 <Badge className="rounded-full shrink-0">Correct</Badge>
                               ) : null}

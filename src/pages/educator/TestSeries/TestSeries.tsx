@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   Search,
@@ -61,7 +62,6 @@ import { uploadToImageKit } from "@/lib/imagekitUpload";
 // Component
 import CreateCustomTest from "./CreateCustomTest";
 import NewFolderButton from "./NewFolder";
-import QuestionsManager from "./QuestionsManager";
 
 // Firebase
 import { onAuthStateChanged } from "firebase/auth";
@@ -157,6 +157,7 @@ async function appendImageToField(current: string, folder = "/test-questions") {
 }
 
 export default function TestSeries() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"library" | "bank">("library");
   const [currentUser, setCurrentUser] = useState<any>(null);
 
@@ -168,8 +169,6 @@ export default function TestSeries() {
 
   // UI
   const [search, setSearch] = useState("");
-  const [isManageOpen, setIsManageOpen] = useState(false);
-  const [selectedTest, setSelectedTest] = useState<any>(null);
   const [importingId, setImportingId] = useState<string | null>(null);
 
   // Create custom test dialog fields
@@ -727,8 +726,7 @@ export default function TestSeries() {
                                       className="gradient-bg text-white rounded-xl shadow-sm"
                                       size="sm"
                                       onClick={() => {
-                                        setSelectedTest(test);
-                                        setIsManageOpen(true);
+                                        navigate(`/educator/test-series/${test.id}/questions`);
                                       }}
                                     >
                                       <Edit className="mr-2 h-3 w-3" /> Manage Questions
@@ -815,16 +813,6 @@ export default function TestSeries() {
         </TabsContent>
       </Tabs>
 
-      {/* Questions Manager Modal */}
-      {isManageOpen && selectedTest && currentUser && (
-        <QuestionsManager
-          testId={selectedTest.id}
-          testTitle={selectedTest.title}
-          testSubject={selectedTest.subject}
-          educatorUid={currentUser.uid}
-          onClose={() => setIsManageOpen(false)}
-        />
-      )}
     </div>
   );
 }

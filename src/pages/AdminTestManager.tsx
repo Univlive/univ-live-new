@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { 
-  Plus, Save, Trash2, Edit, List, Check, X, Loader2, LayoutGrid 
+  Plus, Trash2, List, Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,15 +15,15 @@ import { toast } from "sonner";
 
 // Firebase
 import { 
-  collection, addDoc, updateDoc, doc, deleteDoc, 
-  onSnapshot, query, where, serverTimestamp, getDocs, writeBatch 
+  collection, addDoc, updateDoc, doc, deleteDoc,
+  onSnapshot, query, where, serverTimestamp
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 export default function AdminTestManager() {
+  const navigate = useNavigate();
   const [tests, setTests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isManageOpen, setIsManageOpen] = useState(false);
   const [selectedTest, setSelectedTest] = useState<any>(null);
 
   // --- 1. Fetch Admin Tests ---
@@ -132,8 +133,7 @@ export default function AdminTestManager() {
                 
                 <div className="flex gap-2 pt-2">
                    <Button variant="outline" size="sm" className="flex-1" onClick={() => {
-                     setSelectedTest(test);
-                     setIsManageOpen(true);
+                     navigate(`/admin-test/questions/${test.id}`);
                    }}>
                      <List className="mr-2 h-4 w-4" /> Manage Questions
                    </Button>
@@ -146,148 +146,6 @@ export default function AdminTestManager() {
           ))}
         </div>
       )}
-
-      {/* Questions Manager Pop-up */}
-      {isManageOpen && selectedTest && (
-        <QuestionsManager 
-          testId={selectedTest.id} 
-          collectionPath="test_series" // Admin edits root
-          onClose={() => setIsManageOpen(false)} 
-        />
-      )}
-    </div>
-  );
-}
-
-// --- SUB-COMPONENT: Questions Manager (Reusable) ---
-function QuestionsManager({ testId, collectionPath, onClose }: { testId: string, collectionPath: string, onClose: () => void }) {
-  const [questions, setQuestions] = useState<any[]>([]);
-  const [editingQ, setEditingQ] = useState<any>(null); // Null = Create Mode
-
-  // Fetch Questions
-  useEffect(() => {
-    // Determine path based on collection (Root has subcollection 'questions', Nested might differ)
-    // We assume standard subcollection 'questions' for both
-    const qRef = collection(db, collectionPath, testId, "questions");
-    getDocs(qRef).then(snap => setQuestions(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  }, [testId, collectionPath]);
-
-  const handleSaveQuestion = async (e: any) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    
-    const qData = {
-      text: fd.get("text"),
-      options: [fd.get("opt1"), fd.get("opt2"), fd.get("opt3"), fd.get("opt4")],
-      correctOptionIndex: Number(fd.get("correctIdx")),
-      positiveMarks: Number(fd.get("pos")),
-      negativeMarks: Number(fd.get("neg")),
-    };
-
-    try {
-      const parentRef = collection(db, collectionPath, testId, "questions");
-      if (editingQ) {
-        await updateDoc(doc(parentRef, editingQ.id), qData);
-        setQuestions(questions.map(q => q.id === editingQ.id ? { ...q, ...qData } : q));
-        toast.success("Question updated");
-      } else {
-        const docRef = await addDoc(parentRef, qData);
-        setQuestions([...questions, { id: docRef.id, ...qData }]);
-        toast.success("Question added");
-      }
-      setEditingQ(null);
-      e.target.reset(); // Reset form
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to save question");
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-      <div className="bg-background w-full max-w-4xl h-[85vh] rounded-xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95">
-        
-        {/* Header */}
-        <div className="p-4 border-b flex justify-between items-center bg-muted/30">
-          <h2 className="font-bold text-lg">Manage Questions</h2>
-          <Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button>
-        </div>
-
-        <div className="flex-1 flex overflow-hidden">
-          
-          {/* Left: List */}
-          <div className="w-1/3 border-r overflow-y-auto p-4 space-y-3 bg-muted/10">
-             <Button className="w-full mb-4" onClick={() => setEditingQ(null)}>
-               <Plus className="mr-2 h-4 w-4" /> Add New Question
-             </Button>
-             {questions.map((q, idx) => (
-               <div key={q.id} 
-                 onClick={() => setEditingQ(q)}
-                 className={`p-3 rounded-lg border cursor-pointer text-sm hover:bg-accent ${editingQ?.id === q.id ? 'border-primary bg-accent' : ''}`}>
-                 <div className="font-medium line-clamp-1">Q{idx + 1}: {q.text}</div>
-                 <div className="text-xs text-muted-foreground mt-1 flex justify-between">
-                    <span>Marks: +{q.positiveMarks} / -{q.negativeMarks}</span>
-                 </div>
-               </div>
-             ))}
-          </div>
-
-          {/* Right: Form */}
-          <div className="flex-1 p-6 overflow-y-auto">
-             <form id="q-form" onSubmit={handleSaveQuestion} className="space-y-6 max-w-2xl mx-auto">
-                <div>
-                   <h3 className="text-lg font-semibold mb-4">{editingQ ? "Edit Question" : "New Question"}</h3>
-                   <Label>Question Text</Label>
-                   <Textarea name="text" defaultValue={editingQ?.text} className="mt-1.5" required placeholder="Type the question here..." />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  {[1, 2, 3, 4].map((i) => (
-                    <div key={i} className="space-y-1.5">
-                       <Label className="text-xs text-muted-foreground">Option {i}</Label>
-                       <Input name={`opt${i}`} defaultValue={editingQ?.options?.[i-1]} required placeholder={`Option ${i}`} />
-                    </div>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-3 gap-4 p-4 bg-muted/30 rounded-lg">
-                   <div className="space-y-1.5">
-                      <Label>Correct Option</Label>
-                      <Select name="correctIdx" defaultValue={editingQ ? String(editingQ.correctOptionIndex) : "0"}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="0">Option 1</SelectItem>
-                          <SelectItem value="1">Option 2</SelectItem>
-                          <SelectItem value="2">Option 3</SelectItem>
-                          <SelectItem value="3">Option 4</SelectItem>
-                        </SelectContent>
-                      </Select>
-                   </div>
-                   <div className="space-y-1.5">
-                      <Label className="text-green-600">Positive Marks</Label>
-                      <Input type="number" name="pos" defaultValue={editingQ?.positiveMarks || 5} min={0} />
-                   </div>
-                   <div className="space-y-1.5">
-                      <Label className="text-red-600">Negative Marks</Label>
-                      <Input type="number" name="neg" defaultValue={editingQ?.negativeMarks || 1} min={0} />
-                   </div>
-                </div>
-
-                <div className="flex justify-end gap-2 pt-4 border-t">
-                  {editingQ && (
-                    <Button type="button" variant="destructive" onClick={async () => {
-                       if(!confirm("Delete this question?")) return;
-                       await deleteDoc(doc(db, collectionPath, testId, "questions", editingQ.id));
-                       setQuestions(questions.filter(q => q.id !== editingQ.id));
-                       setEditingQ(null);
-                    }}>Delete</Button>
-                  )}
-                  <Button type="submit" className="min-w-[120px]">Save Question</Button>
-                </div>
-             </form>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

@@ -11,7 +11,7 @@
 // presented only as visual thumbnails below the textarea. This
 // prevents accidental corruption of HTML markup.
 
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,8 +52,7 @@ function splitContent(raw: string): { text: string; imageUrls: string[] } {
   // Strip all <img …> tags and collapse resulting blank lines
   const text = raw
     .replace(new RegExp(IMG_TAG_REGEX.source, "gi"), "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .replace(/\n{3,}/g, "\n\n");
 
   return { text, imageUrls };
 }
@@ -62,8 +61,8 @@ function splitContent(raw: string): { text: string; imageUrls: string[] } {
 function combineContent(text: string, imageUrls: string[]): string {
   if (imageUrls.length === 0) return text;
   const tags = imageUrls.map((url) => `<img src="${url}" alt="" />`).join("\n");
-  const trimmed = text.trimEnd();
-  return trimmed ? `${trimmed}\n${tags}` : tags;
+  if (!text) return tags;
+  return text.endsWith("\n") ? `${text}${tags}` : `${text}\n${tags}`;
 }
 
 // ─── Component ─────────────────────────────────────────────────────────
@@ -81,9 +80,27 @@ export default function ImageTextarea({
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const dragCounter = useRef(0);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Derive text (shown in textarea) and imageUrls (shown as previews)
   const { text, imageUrls } = useMemo(() => splitContent(value), [value]);
+
+  const resizeTextarea = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+
+    el.style.height = "auto";
+    const minPx = Number.parseFloat(minHeight);
+    if (Number.isFinite(minPx)) {
+      el.style.height = `${Math.max(el.scrollHeight, minPx)}px`;
+    } else {
+      el.style.height = `${el.scrollHeight}px`;
+    }
+  }, [minHeight]);
+
+  useEffect(() => {
+    resizeTextarea();
+  }, [text, resizeTextarea]);
 
   // ─── When the user edits the textarea, keep existing images ────────
   const handleTextChange = useCallback(
@@ -246,11 +263,12 @@ export default function ImageTextarea({
 
         {/* The textarea shows ONLY the text portion — no HTML img tags */}
         <Textarea
+          ref={textareaRef}
           value={text}
           onChange={(e) => handleTextChange(e.target.value)}
           onPaste={handlePaste}
           className={cn("rounded-xl", className)}
-          style={{ minHeight }}
+          style={{ minHeight, overflowY: "hidden" }}
           placeholder={
             placeholder ||
             "Type your text here. You can drag & drop or paste images too."
