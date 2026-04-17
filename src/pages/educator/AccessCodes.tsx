@@ -57,11 +57,12 @@ interface AccessCode {
   maxUses: number;
   usesLeft: number;
   expiry: string;
-  status: "active" | "expired" | "exhausted";
+  status: "active" | "expired" | "exhausted" | "window_expired";
   createdAt: string;
 
   usesUsed?: number;
   expiresAtTs?: Timestamp | null;
+  createdAtTs?: Timestamp | null;
   windowMinutes?: number;
 }
 
@@ -188,9 +189,17 @@ export default function AccessCodes() {
           const expiresAt = (data?.expiresAt as Timestamp) || null;
           const createdAt = (data?.createdAt as Timestamp) || null;
 
-          let status: "active" | "expired" | "exhausted" = "active";
+          const windowMins = Number(data?.windowMinutes ?? 0);
+          const windowExpiredMs =
+            windowMins > 0 && createdAt
+              ? createdAt.toMillis() + windowMins * 60 * 1000
+              : null;
+          const isWindowExpired = windowExpiredMs !== null && Date.now() > windowExpiredMs;
+
+          let status: "active" | "expired" | "exhausted" | "window_expired" = "active";
           if (left <= 0 && max > 0) status = "exhausted";
           else if (isExpired(expiresAt)) status = "expired";
+          else if (isWindowExpired) status = "window_expired";
 
           return {
             id: d.id,
@@ -204,7 +213,8 @@ export default function AccessCodes() {
             createdAt: toDateLabel(createdAt),
             usesUsed: used,
             expiresAtTs: expiresAt,
-            windowMinutes: Number(data?.windowMinutes ?? 0),
+            createdAtTs: createdAt,
+            windowMinutes: windowMins,
           };
         });
 
@@ -422,10 +432,12 @@ export default function AccessCodes() {
               ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
               : item.status === "expired"
               ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+              : item.status === "window_expired"
+              ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"
               : "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400"
           }
         >
-          {item.status}
+          {item.status === "window_expired" ? "window expired" : item.status}
         </Badge>
       ),
     },
