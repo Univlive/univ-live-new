@@ -84,6 +84,7 @@ type AccessCodeDoc = {
   usesUsed?: number;
   expiresAt?: any;
   createdAt?: any;
+  windowMinutes?: number;
 };
 
 type SeatDoc = {
@@ -209,8 +210,13 @@ function accessCodeStatus(code: AccessCodeDoc) {
   const used = safeNum(code.usesUsed, 0);
   const expiresAt = toMillis(code.expiresAt);
   const isExpired = expiresAt != null && expiresAt < Date.now();
+  const windowMins = safeNum(code.windowMinutes, 0);
+  const createdAtMs = toMillis(code.createdAt);
+  const isWindowExpired =
+    windowMins > 0 && createdAtMs != null && Date.now() > createdAtMs + windowMins * 60 * 1000;
   if (maxUses > 0 && used >= maxUses) return "exhausted";
   if (isExpired) return "expired";
+  if (isWindowExpired) return "window_expired";
   return "active";
 }
 
