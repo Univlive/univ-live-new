@@ -65,6 +65,7 @@ type AttemptDoc = {
   startedAtMs?: number;
   currentIndex?: number;
   responses?: Record<string, AttemptResponse>;
+  exitCount?: number;
   createdAt?: any;
   startedAt?: any;
   updatedAt?: any;
@@ -356,6 +357,7 @@ export default function StudentCBTAttempt() {
 
         if (foundAttempt) {
           setAttemptId(foundAttempt.id);
+          setExitCount(safeNumber(foundAttempt.exitCount, 0));
 
           const stored = (foundAttempt.responses || {}) as Record<string, AttemptResponse>;
           setResponses((prev) => {
@@ -382,6 +384,7 @@ export default function StudentCBTAttempt() {
         } else {
           setAttemptId(null);
           setAttemptStartedAtMs(null);
+          setExitCount(0);
           setIsStarted(false);
           setStartDialogOpen(true);
         }
@@ -502,6 +505,7 @@ export default function StudentCBTAttempt() {
           startedAtMs,
           currentIndex,
           responses: initialResponses,
+          exitCount: 0,
           createdAt: serverTimestamp(),
           startedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -739,13 +743,28 @@ export default function StudentCBTAttempt() {
     };
   }, [isStarted]);
 
+  // Use a ref to access latest values in the violation effect
+  const proctorStateRef = useRef({ isStarted, exitCount, submitDialogOpen, violationModalOpen, instructionsOpen });
+  useEffect(() => {
+    proctorStateRef.current = { isStarted, exitCount, submitDialogOpen, violationModalOpen, instructionsOpen };
+  }, [isStarted, exitCount, submitDialogOpen, violationModalOpen, instructionsOpen]);
+
+  const handleViolation = useCallback(() => {
+    const nextCount = proctorStateRef.current.exitCount + 1;
+    setExitCount(nextCount);
+    queueAttemptUpdate({ exitCount: nextCount });
+
+    if (nextCount > 3) {
+      toast.error("Maximum warnings exceeded. Submitting test automatically.");
+      handleSubmit(true);
+    } else {
+      setViolationModalOpen(true);
+    }
+  }, [queueAttemptUpdate, handleSubmit]);
+
   // Proctoring: Tab switch & Full-screen exit logic
   useEffect(() => {
     if (!isStarted) return;
-
-    const handleViolation = () => {
-      setViolationModalOpen(true);
-    };
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
@@ -754,8 +773,9 @@ export default function StudentCBTAttempt() {
     };
 
     const handleFullscreenChange = () => {
+      const { isStarted: started, submitDialogOpen: subOpen, violationModalOpen: violOpen, instructionsOpen: instOpen } = proctorStateRef.current;
       // If user exits fullscreen AND they are not currently in instructions or submitting or already warned
-      if (!document.fullscreenElement && isStarted && !submitDialogOpen && !violationModalOpen && !instructionsOpen) {
+      if (!document.fullscreenElement && started && !subOpen && !violOpen && !instOpen) {
         handleViolation();
       }
     };
@@ -767,7 +787,7 @@ export default function StudentCBTAttempt() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
-  }, [isStarted, submitDialogOpen, violationModalOpen, instructionsOpen, handleSubmit]);
+  }, [isStarted, handleViolation]);
 
   // Warn on reload/close while started
   useEffect(() => {
@@ -1251,15 +1271,22 @@ export default function StudentCBTAttempt() {
       {violationModalOpen && (
         <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, backdropFilter: "blur(5px)" }}>
           <div style={{ width: "100%", maxWidth: 480, borderRadius: 16, background: "#fff", boxShadow: "0 20px 60px rgba(0,0,0,0.4)", overflow: "hidden", textAlign: "center", padding: "35px 25px" }}>
-            <div style={{ color: "#f59e0b", marginBottom: 20 }}>
+            <div style={{ color: "#ef4444", marginBottom: 20 }}>
               <AlertTriangle size={64} style={{ margin: "0 auto" }} />
             </div>
             <h2 style={{ fontSize: 22, fontWeight: 800, color: "#111827", marginBottom: 12 }}>Proctoring Warning!</h2>
-            <p style={{ fontSize: 15, color: "#4b5563", marginBottom: 28, lineHeight: 1.6 }}>
-              You have left the test environment (Tab Switch or Full-screen Exit). <br />
-              This is a violation of the test rules. <br /><br />
-              <strong>Do you want to submit and exit the test?</strong>
-            </p>
+            <div style={{ marginBottom: 28 }}>
+              <p style={{ fontSize: 15, color: "#4b5563", lineHeight: 1.6 }}>
+                You have left the test environment (Tab Switch or Full-screen Exit). <br />
+                This is a violation of the test rules.
+              </p>
+              <div style={{ marginTop: 20, padding: "12px", background: "#fee2e2", borderRadius: 8, color: "#991b1b", fontWeight: 700 }}>
+                Warning {exitCount} of 3
+              </div>
+              <p style={{ fontSize: 13, color: "#6b7280", marginTop: 12 }}>
+                The test will be automatically submitted after the 3rd warning.
+              </p>
+            </div>
             <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
               <button
                 onClick={() => {
@@ -1268,7 +1295,7 @@ export default function StudentCBTAttempt() {
                 }}
                 style={{ flex: 1, padding: "12px 20px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer", boxShadow: "0 4px 10px rgba(239,68,68,0.2)" }}
               >
-                Yes, Submit &amp; Exit
+                Submit &amp; Exit
               </button>
               <button
                 onClick={async () => {
@@ -1277,7 +1304,7 @@ export default function StudentCBTAttempt() {
                 }}
                 style={{ flex: 1, padding: "12px 20px", background: "#1e3a8a", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer", boxShadow: "0 4px 10px rgba(30,58,138,0.2)" }}
               >
-                No, Return to Test
+                Return to Test
               </button>
             </div>
           </div>
