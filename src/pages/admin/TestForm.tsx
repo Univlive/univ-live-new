@@ -99,6 +99,7 @@ const testId = params.testId || params.id;
 
   const [durationMinutes, setDurationMinutes] = useState<string>("60");
   const [attemptsAllowed, setAttemptsAllowed] = useState<string>("3");
+  const [accessWindowMinutes, setAccessWindowMinutes] = useState<string>("0");
 
   // IMPORTANT: your new rule is “no test without code/pay”
   // keep this true by default.
@@ -162,6 +163,7 @@ const testId = params.testId || params.id;
 
         setDurationMinutes(String(safeNum(d?.durationMinutes ?? d?.duration, 60)));
         setAttemptsAllowed(String(Math.max(1, safeNum(d?.attemptsAllowed ?? d?.maxAttempts, 3))));
+        setAccessWindowMinutes(String(safeNum(d?.accessWindowMinutes, 0)));
 
         setRequiresUnlock(d?.requiresUnlock !== false); // default true
         setPrice(String(Math.max(0, safeNum(d?.price, 0))));
@@ -267,6 +269,7 @@ const testId = params.testId || params.id;
       description: description.trim() || "",
       durationMinutes: dur,
       attemptsAllowed: attempts,
+      accessWindowMinutes: safeNum(accessWindowMinutes, 0),
 
       // 🔒 new business rule
       requiresUnlock,
@@ -462,6 +465,20 @@ const testId = params.testId || params.id;
                 className="rounded-xl"
                 min={1}
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Access Window (minutes)</Label>
+              <Input
+                type="number"
+                value={accessWindowMinutes}
+                onChange={(e) => setAccessWindowMinutes(e.target.value)}
+                className="rounded-xl"
+                min={0}
+              />
+              <p className="text-xs text-muted-foreground">
+                Time after code generation during which students can unlock. 0 = no limit.
+              </p>
             </div>
 
             <div className="space-y-2">

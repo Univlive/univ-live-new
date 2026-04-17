@@ -45,6 +45,7 @@ export default function AdminTestManager() {
       subject: formData.get("subject"),
       level: formData.get("level"),
       durationMinutes: Number(formData.get("duration")),
+      accessWindowMinutes: Number(formData.get("accessWindowMinutes") || 0),
       authorId: "admin",
       createdAt: serverTimestamp(),
     };
@@ -102,6 +103,10 @@ export default function AdminTestManager() {
                 <div className="space-y-2">
                   <Label>Duration (Mins)</Label>
                   <Input type="number" name="duration" defaultValue={selectedTest?.durationMinutes} required />
+                </div>
+                <div className="space-y-2">
+                  <Label>Access Window (mins, 0 = no limit)</Label>
+                  <Input type="number" name="accessWindowMinutes" defaultValue={selectedTest?.accessWindowMinutes ?? 0} min={0} />
                 </div>
               </div>
               <div className="space-y-2">

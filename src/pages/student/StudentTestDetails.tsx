@@ -41,6 +41,7 @@ type Test = {
   difficulty: "Easy" | "Medium" | "Hard";
   price: number;
   attemptsAllowed: number;
+  accessWindowMinutes: number;
   sections: { id: string; name: string; questionsCount: number }[];
   syllabus: string[];
   markingScheme: { correct: number; incorrect: number; unanswered: number };
@@ -98,6 +99,7 @@ export default function StudentTestDetails() {
   const [loading, setLoading] = useState(true);
   const [test, setTest] = useState<Test | null>(null);
   const [unlocked, setUnlocked] = useState(false);
+  const [unlockWindowExpiresAt, setUnlockWindowExpiresAt] = useState<number | null>(null);
   const [attempts, setAttempts] = useState<AttemptRow[]>([]);
 
   // unlock dialog
@@ -160,6 +162,7 @@ export default function StudentTestDetails() {
 
         const price = Math.max(0, safeNum(data?.price, 0));
         const attemptsAllowed = Math.max(1, safeNum(data?.attemptsAllowed ?? data?.maxAttempts, 3));
+        const accessWindowMinutes = safeNum(data?.accessWindowMinutes, 0);
 
         const markingScheme = data?.markingScheme
           ? {
@@ -186,6 +189,7 @@ export default function StudentTestDetails() {
           difficulty,
           price,
           attemptsAllowed,
+          accessWindowMinutes,
           sections,
           syllabus,
           markingScheme,
@@ -215,10 +219,21 @@ export default function StudentTestDetails() {
 
     const unsub = onSnapshot(
       unlockRef,
-      (snap) => setUnlocked(snap.exists()),
+      (snap) => {
+        setUnlocked(snap.exists());
+        if (snap.exists()) {
+          const d = snap.data() as any;
+          const we = d?.windowExpiresAt;
+          const ms = typeof we?.toMillis === "function" ? we.toMillis() : null;
+          setUnlockWindowExpiresAt(ms);
+        } else {
+          setUnlockWindowExpiresAt(null);
+        }
+      },
       (err) => {
         console.error(err);
         setUnlocked(false);
+        setUnlockWindowExpiresAt(null);
       }
     );
 
@@ -272,8 +287,11 @@ export default function StudentTestDetails() {
 
   const isLocked = useMemo(() => {
     if (!test) return true;
-    return test.price > 0 && !unlocked;
-  }, [test, unlocked]);
+    if (test.price <= 0) return false;
+    if (!unlocked) return true;
+    if (unlockWindowExpiresAt !== null && Date.now() > unlockWindowExpiresAt) return true;
+    return false;
+  }, [test, unlocked, unlockWindowExpiresAt]);
 
   const attemptsUsed = attempts.length;
   const attemptsLeft = test ? Math.max(0, test.attemptsAllowed - attemptsUsed) : 0;
@@ -317,6 +335,16 @@ export default function StudentTestDetails() {
         const already = await tx.get(unlockRef);
         if (already.exists()) return; // don't consume again
 
+        const windowMinutes = safeNum(test?.accessWindowMinutes, 0);
+        let windowExpiresAt = null;
+        if (windowMinutes > 0) {
+          const codeCreatedMs =
+            typeof codeData?.createdAt?.toMillis === "function"
+              ? codeData.createdAt.toMillis()
+              : Date.now();
+          windowExpiresAt = Timestamp.fromMillis(codeCreatedMs + windowMinutes * 60 * 1000);
+        }
+
         tx.set(unlockRef, {
           studentId: firebaseUser.uid,
           educatorId,
@@ -325,6 +353,7 @@ export default function StudentTestDetails() {
           unlockedVia: "accessCode",
           accessCode: codeUpper,
           unlockedAt: serverTimestamp(),
+          windowExpiresAt,
         });
 
         tx.update(codeRef, { usesUsed: increment(1), lastUsedAt: serverTimestamp() });

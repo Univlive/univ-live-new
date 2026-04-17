@@ -589,6 +589,7 @@ export default function TestSeries() {
       subject: String(fd.get("subject") || ""),
       level: String(fd.get("level") || "General"),
       durationMinutes: Number(fd.get("duration") || 0),
+      accessWindowMinutes: Number(fd.get("accessWindowMinutes") || 0),
       attemptsAllowed: 3,
 
       // educator ownership
