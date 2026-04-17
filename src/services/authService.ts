@@ -6,6 +6,7 @@ import {
   signOut,
 } from "firebase/auth";
 import { doc, getDoc, serverTimestamp, setDoc, updateDoc, arrayUnion } from "firebase/firestore";
+import { clearLocalSessionId } from "@/lib/session";
 
 function normSlug(raw: string) {
   return String(raw || "")
@@ -29,6 +30,7 @@ export async function signInEmail(email: string, password: string) {
 }
 
 export async function signOutApp() {
+  clearLocalSessionId();
   await signOut(auth);
 }
 

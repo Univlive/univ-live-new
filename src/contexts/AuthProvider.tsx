@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { User } from "firebase/auth";
-import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
+import { getLocalSessionId, clearLocalSessionId } from "@/lib/session";
+import { toast } from "sonner";
 
 export type UserRole = "ADMIN" | "EDUCATOR" | "STUDENT";
 
@@ -16,6 +18,7 @@ export type AppUserProfile = {
   email?: string;
   photoURL?: string;
   fullName?: string;
+  currentSessionId?: string;
 };
 
 type AuthContextValue = {
@@ -51,6 +54,7 @@ async function loadProfile(uid: string): Promise<AppUserProfile | null> {
     enrolledTenants,
     displayName: typeof data.displayName === "string" ? data.displayName : undefined,
     email: typeof data.email === "string" ? data.email : undefined,
+    currentSessionId: typeof data.currentSessionId === "string" ? data.currentSessionId : undefined,
   };
 
   if (role === "EDUCATOR") {
@@ -73,9 +77,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const refreshProfile = async () => {
-    // Use auth.currentUser directly — the React state (firebaseUser)
-    // may still be null right after signIn if onAuthStateChanged hasn't
-    // triggered a re-render yet.
     const user = firebaseUser || auth.currentUser;
     if (!user) return;
     setFirebaseUser(user);
@@ -85,7 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
+    const unsubAuth = onAuthStateChanged(auth, async (u) => {
       setLoading(true);
       setFirebaseUser(u);
       setProfile(null);
@@ -103,8 +104,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    return () => unsub();
+    return () => unsubAuth();
   }, []);
+
+  // --- Session Enforcement for Students ---
+  useEffect(() => {
+    if (!firebaseUser || !profile || profile.role !== "STUDENT") return;
+
+    const userRef = doc(db, "users", firebaseUser.uid);
+    const unsubSnap = onSnapshot(userRef, (doc) => {
+      if (!doc.exists()) return;
+      const data = doc.data();
+      const firestoreSid = data.currentSessionId;
+      const localSid = getLocalSessionId();
+
+      // If Firestore has a session ID and it doesn't match our local one,
+      // it means the user logged in from another device.
+      if (firestoreSid && localSid && firestoreSid !== localSid) {
+        toast.error("You have been logged out because you logged in from another device.");
+        clearLocalSessionId();
+        signOut(auth);
+      }
+    });
+
+    return () => unsubSnap();
+  }, [firebaseUser, profile]);
 
 
   const value = useMemo<AuthContextValue>(() => {
