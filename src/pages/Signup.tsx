@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { registerStudentForTenant } from "@/lib/studentRegistration";
 import logo from "../assets/univ-logo.png";
+import { generateSessionId, setLocalSessionId, syncSessionWithFirestore } from "@/lib/session";
 
 type RoleUI = "student" | "educator";
 
@@ -104,6 +105,12 @@ export default function Signup() {
               console.warn("API server not detected. Please ensure 'vercel dev' is running.");
             }
           }
+
+          // --- Single Session Logic for Students ---
+          const sid = generateSessionId();
+          setLocalSessionId(sid);
+          await syncSessionWithFirestore(cred.user.uid, sid);
+
           toast.success("Account created!");
           nav("/student");
           return;
@@ -129,6 +136,12 @@ export default function Signup() {
               } catch (apiErr: any) {
                 console.error("[Signup] Sync error (re-join):", apiErr);
               }
+
+              // --- Single Session Logic for Students ---
+              const sid = generateSessionId();
+              setLocalSessionId(sid);
+              await syncSessionWithFirestore(cred2.user.uid, sid);
+
               toast.success("Signed in and enrolled!");
               nav("/student");
               return;

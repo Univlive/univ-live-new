@@ -20,6 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { generateSessionId, setLocalSessionId, syncSessionWithFirestore } from "@/lib/session";
 
 type RoleUI = "student" | "educator";
 
@@ -145,12 +146,15 @@ export default function Login() {
           await registerStudentForTenant(token, tenantSlug);
         } catch (apiErr: any) {
           console.error("[Login] Sync error:", apiErr);
-          // We don't necessarily block login if sync fails, but we inform the user
-          // if it's a critical error. 404 HTML means the API is just not running.
           if (apiErr.message.includes("<!DOCTYPE html>")) {
             console.warn("API server not detected. Please ensure 'vercel dev' is running.");
           }
         }
+
+        // --- Single Session Logic for Students ---
+        const sid = generateSessionId();
+        setLocalSessionId(sid);
+        await syncSessionWithFirestore(cred.user.uid, sid);
 
         toast.success("Welcome back!");
         await refreshProfile();
