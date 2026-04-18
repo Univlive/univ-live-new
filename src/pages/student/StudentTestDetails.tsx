@@ -235,7 +235,9 @@ export default function StudentTestDetails() {
         if (snap.exists()) {
           const d = snap.data() as any;
           const we = d?.windowExpiresAt;
-          const ms = typeof we?.toMillis === "function" ? we.toMillis() : null;
+          const ms = (d?.windowMinutes === 0 || !we)
+            ? null
+            : typeof we?.toMillis === "function" ? we.toMillis() : null;
           setUnlockWindowExpiresAt(ms);
         } else {
           setUnlockWindowExpiresAt(null);
@@ -373,6 +375,7 @@ export default function StudentTestDetails() {
           unlockedVia: "accessCode",
           accessCode: codeUpper,
           unlockedAt: serverTimestamp(),
+          windowMinutes,
           windowExpiresAt,
         });
 

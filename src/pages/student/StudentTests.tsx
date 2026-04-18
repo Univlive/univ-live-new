@@ -117,7 +117,9 @@ export default function StudentTests() {
         const tid = String(data.testSeriesId || data.testId || "");
         if (!tid) return;
         const we = data?.windowExpiresAt;
-        const expMs = typeof we?.toMillis === "function" ? we.toMillis() : null;
+        const expMs = (data?.windowMinutes === 0 || !we)
+          ? null
+          : typeof we?.toMillis === "function" ? we.toMillis() : null;
         const existing = m.get(tid);
         // Keep most permissive: null (no expiry) wins; otherwise take latest expiry
         if (existing === undefined) {
@@ -277,6 +279,7 @@ export default function StudentTests() {
           testSeriesId: testId,
           code: c,
           createdAt: serverTimestamp(),
+          windowMinutes,
           windowExpiresAt,
         });
       });
