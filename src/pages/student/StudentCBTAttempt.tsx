@@ -645,19 +645,22 @@ export default function StudentCBTAttempt() {
     if (!currentQuestion || !attemptId || !isStarted) return;
     
     const answer = selectedAnswer;
+    const hasAnswer = answer !== null && answer !== undefined && String(answer).trim() !== "";
     setResponses((prev) => ({
       ...prev,
       [currentQuestion.id]: { 
         ...prev[currentQuestion.id], 
-        answer, 
-        answered: String(answer).length > 0,
+        answer: hasAnswer ? answer : null,
+        answered: hasAnswer,
+        visited: true,
         markedForReview: false 
       },
     }));
 
     queueAttemptUpdate({
-      [`responses.${currentQuestion.id}.answer`]: answer,
-      [`responses.${currentQuestion.id}.answered`]: String(answer).length > 0,
+      [`responses.${currentQuestion.id}.answer`]: hasAnswer ? answer : null,
+      [`responses.${currentQuestion.id}.answered`]: hasAnswer,
+      [`responses.${currentQuestion.id}.visited`]: true,
       [`responses.${currentQuestion.id}.markedForReview`]: false,
       currentIndex,
     });
@@ -669,19 +672,22 @@ export default function StudentCBTAttempt() {
     if (!currentQuestion || !attemptId || !isStarted) return;
     
     const answer = selectedAnswer;
+    const hasAnswer = answer !== null && answer !== undefined && String(answer).trim() !== "";
     setResponses((prev) => ({
       ...prev,
       [currentQuestion.id]: { 
         ...prev[currentQuestion.id], 
-        answer, 
-        answered: String(answer).length > 0,
+        answer: hasAnswer ? answer : null,
+        answered: hasAnswer,
+        visited: true,
         markedForReview: true 
       },
     }));
 
     queueAttemptUpdate({
-      [`responses.${currentQuestion.id}.answer`]: answer,
-      [`responses.${currentQuestion.id}.answered`]: String(answer).length > 0,
+      [`responses.${currentQuestion.id}.answer`]: hasAnswer ? answer : null,
+      [`responses.${currentQuestion.id}.answered`]: hasAnswer,
+      [`responses.${currentQuestion.id}.visited`]: true,
       [`responses.${currentQuestion.id}.markedForReview`]: true,
       currentIndex,
     });
@@ -1115,7 +1121,7 @@ export default function StudentCBTAttempt() {
 
             {/* ─── TOP HEADER BAR ─── */}
             <div style={{ background: "#1e3a8a", color: "#fff", padding: "0 12px", height: 44, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: 0.5, truncate: true, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: 0.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {testMeta.title}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
