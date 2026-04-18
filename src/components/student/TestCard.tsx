@@ -5,9 +5,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Test } from "@/mock/studentMock";
+import { useTenant } from "@/contexts/TenantProvider";
 
 interface TestCardProps {
   test: Test;
+  attemptsUsed?: number;
   onView: (testId: string) => void;
   onStart: (testId: string) => void;
   onUnlock: (testId: string) => void;
@@ -39,7 +41,9 @@ function formatTimeLeft(ms: number): string {
   return `${s}s left`;
 }
 
-export function TestCard({ test, onView, onStart, onUnlock }: TestCardProps) {
+export function TestCard({ test,  attemptsUsed = 0, onView, onStart, onUnlock }: TestCardProps) {
+    const { tenant } = useTenant();
+
   const parseNum = (value: unknown, fallback: number) => {
     const n = Number(value);
     return Number.isFinite(n) ? n : fallback;
@@ -61,10 +65,13 @@ export function TestCard({ test, onView, onStart, onUnlock }: TestCardProps) {
   // Firestore docs may miss attempts fields on some tests; use safe defaults.
   const attemptsAllowed = Math.max(
     1,
-    parseNum((test as any).attemptsAllowed ?? (test as any).maxAttempts, 3)
+    parseNum(
+      (test as any).attemptsAllowed ?? (test as any).maxAttempts,
+      tenant?.testDefaults?.attemptsAllowed ?? 3
+    )
   );
-  const attemptsUsed = Math.max(0, parseNum((test as any).attemptsUsed, 0));
-  const attemptsRemaining = Math.max(0, attemptsAllowed - attemptsUsed);
+  const attemptsUsedSafe = Math.max(0, parseNum(attemptsUsed, 0));
+  const attemptsRemaining = Math.max(0, attemptsAllowed - attemptsUsedSafe);
 
   return (
     <Card className={cn(

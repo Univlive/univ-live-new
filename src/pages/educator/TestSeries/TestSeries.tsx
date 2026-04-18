@@ -23,6 +23,7 @@ import {
   ChevronDown,
   MoreVertical,
   Move,
+  Award,
 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
@@ -170,6 +171,8 @@ export default function TestSeries() {
   // UI
   const [search, setSearch] = useState("");
   const [importingId, setImportingId] = useState<string | null>(null);
+  const [globalAttemptsAllowed, setGlobalAttemptsAllowed] = useState(3);
+  const [savingGlobalAttempts, setSavingGlobalAttempts] = useState(false);
 
   // Create custom test dialog fields
   const [createOpen, setCreateOpen] = useState(false);
@@ -193,6 +196,14 @@ export default function TestSeries() {
       }
 
       setCurrentUser(user);
+
+      // Load educator preferences
+      const unsubEdu = onSnapshot(doc(db, "educators", user.uid), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          setGlobalAttemptsAllowed(data?.testDefaults?.attemptsAllowed ?? 3);
+        }
+      });
 
       // FOLDERS: educators/{uid}/folders
       const foldersQ = query(collection(db, "educators", user.uid, "folders"));
@@ -436,6 +447,58 @@ export default function TestSeries() {
     handleCreateFolder
   };
 
+  const handleSaveGlobalAttempts = async (val: number) => {
+    if (!currentUser) return;
+    setSavingGlobalAttempts(true);
+    try {
+      // 1. Update educator profile
+      await updateDoc(doc(db, "educators", currentUser.uid), {
+        "testDefaults.attemptsAllowed": val,
+        updatedAt: serverTimestamp(),
+      });
+
+      // 2. Bulk update all existing tests to this value
+      const testsSnap = await getDocs(collection(db, "educators", currentUser.uid, "my_tests"));
+      if (!testsSnap.empty) {
+        const CHUNK_SIZE = 450;
+        const docs = testsSnap.docs;
+        
+        for (let i = 0; i < docs.length; i += CHUNK_SIZE) {
+          const batch = writeBatch(db);
+          const chunk = docs.slice(i, i + CHUNK_SIZE);
+          chunk.forEach((d) => {
+            batch.update(d.ref, { 
+              attemptsAllowed: val, 
+              updatedAt: serverTimestamp() 
+            });
+          });
+          await batch.commit();
+        }
+      }
+
+      toast.success(`Global default attempts set to ${val} for all tests`);
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed to save global setting");
+    } finally {
+      setSavingGlobalAttempts(false);
+    }
+  };
+
+  const handleUpdateTestAttempts = async (testId: string, val: number) => {
+    if (!currentUser) return;
+    try {
+      await updateDoc(doc(db, "educators", currentUser.uid, "my_tests", testId), {
+        attemptsAllowed: val,
+        updatedAt: serverTimestamp(),
+      });
+      toast.success(`Attempts for this test set to ${val}`);
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed to update test attempts");
+    }
+  };
+
   // Import admin test (metadata + questions) into educator library copy
   const handleImport = async (bankTest: any) => {
     if (!currentUser) return;
@@ -455,9 +518,7 @@ export default function TestSeries() {
         instructions: bankTest.instructions ?? "",
 
         // attempts & marking
-        attemptsAllowed: bankTest.attemptsAllowed != null
-          ? Math.max(1, Number(bankTest.attemptsAllowed))
-          : 3,
+        attemptsAllowed: globalAttemptsAllowed,
         markingScheme: bankTest.markingScheme ?? undefined,
 
         // marks config (omit if missing - Firestore rejects undefined)
@@ -521,7 +582,7 @@ export default function TestSeries() {
       subject: String(fd.get("subject") || ""),
       level: String(fd.get("level") || "General"),
       durationMinutes: Number(fd.get("duration") || 0),
-      attemptsAllowed: 3,
+      attemptsAllowed: globalAttemptsAllowed,
 
       // educator ownership
       source: "custom",
@@ -582,7 +643,34 @@ export default function TestSeries() {
           </p>
         </div>
 
-        {/* search and create custom test button */}
+        <div className="flex items-center gap-3 bg-white dark:bg-card border border-border/50 rounded-2xl px-4 py-2 shadow-sm hover:shadow-md transition-all group w-full sm:w-auto">
+          <div className="flex items-center gap-3 flex-1 sm:flex-none">
+            <div className="p-2 rounded-xl bg-primary/10 text-primary group-hover:scale-105 transition-transform shrink-0">
+              <Award className="h-4 w-4" />
+            </div>
+            <div className="flex flex-col min-w-[90px]">
+              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider leading-tight">Default Limit</span>
+              <span className="text-xs font-semibold text-foreground truncate">Global Attempts</span>
+            </div>
+          </div>
+          <div className="h-8 w-px bg-border/60 mx-1 shrink-0" />
+          <Select
+            value={String(globalAttemptsAllowed)}
+            onValueChange={(v) => handleSaveGlobalAttempts(Number(v))}
+            disabled={savingGlobalAttempts}
+          >
+            <SelectTrigger className="h-4 w-[65px] rounded-xl border-none bg-muted/50 hover:bg-muted transition-colors text-xs font-black focus:ring-0 shadow-none shrink-0">
+              {savingGlobalAttempts ? <Loader2 className="h-3 w-3 animate-spin text-primary" /> : <SelectValue />}
+            </SelectTrigger>
+            <SelectContent className="rounded-xl border-none shadow-2xl overflow-hidden p-1">
+              <SelectItem value="1" className="rounded-lg text-xs font-bold py-2">1 Attempt</SelectItem>
+              <SelectItem value="2" className="rounded-lg text-xs font-bold py-2">2 Attempts</SelectItem>
+              <SelectItem value="3" className="rounded-lg text-xs font-bold py-2">3 Attempts</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        
         <div className="flex gap-2">
           <div className="relative w-full sm:w-[320px]">
             <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
@@ -705,20 +793,39 @@ export default function TestSeries() {
                                 <CardContent className="flex-1 flex flex-col gap-4">
                                   <p className="text-sm text-muted-foreground line-clamp-2">{test.description}</p>
 
-                                  <div className="flex items-center gap-4 text-xs text-muted-foreground mt-auto">
-                                    <span className="flex items-center gap-1">
-                                      <BookOpen className="h-3 w-3" /> {test.subject || "—"}
-                                    </span>
-                                    <span className="flex items-center gap-1">
-                                      <Clock className="h-3 w-3" /> {Number(test.durationMinutes || 0)}m
-                                    </span>
-                                    {test.source === "imported" ? (
-                                      <Badge variant="secondary" className="text-[10px] py-0 px-2 h-5">
-                                        Imported
-                                      </Badge>
-                                    ) : (
-                                      <Badge className="text-[10px] py-0 px-2 h-5">Custom</Badge>
-                                    )}
+                                  <div className="flex flex-wrap items-center justify-between gap-y-3 mt-auto">
+                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                                      <span className="flex items-center gap-1 shrink-0">
+                                        <BookOpen className="h-3 w-3" /> {test.subject || "—"}
+                                      </span>
+                                      <span className="flex items-center gap-1 shrink-0">
+                                        <Clock className="h-3 w-3" /> {Number(test.durationMinutes || 0)}m
+                                      </span>
+                                      {test.source === "imported" ? (
+                                        <Badge variant="secondary" className="text-[10px] py-0 px-2 h-5 shrink-0">
+                                          Imported
+                                        </Badge>
+                                      ) : (
+                                        <Badge className="text-[10px] py-0 px-2 h-5 shrink-0">Custom</Badge>
+                                      )}
+                                    </div>
+
+                                    <div className="flex items-center gap-1 bg-muted/30 px-2 py-1 rounded-lg shrink-0">
+                                      <span className="text-[9px] font-bold text-muted-foreground uppercase">Attempts:</span>
+                                      <Select
+                                        value={String(test.attemptsAllowed || 3)}
+                                        onValueChange={(v) => handleUpdateTestAttempts(test.id, Number(v))}
+                                      >
+                                        <SelectTrigger className="h-6 w-[45px] text-[10px] font-bold rounded-md bg-background border-none shadow-none focus:ring-0">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent className="rounded-xl">
+                                          <SelectItem value="1">1</SelectItem>
+                                          <SelectItem value="2">2</SelectItem>
+                                          <SelectItem value="3">3</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
                                   </div>
 
                                   <div className="grid grid-cols-1 gap-2 mt-4 pt-4 border-t">
