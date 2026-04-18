@@ -48,6 +48,54 @@ async function getRequireUser() {
   }
 }
 
+function sanitizeDomain(rawDomain: string): string {
+  return String(rawDomain || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "")
+    .replace(/:\d+$/, "")
+    .replace(/^\.+|\.+$/g, "")
+    .replace(/^www\./, "");
+}
+
+function getAllowedDomainSuffixes(): string[] {
+  const fromCorsSuffixes = String(process.env.CORS_ALLOW_DOMAIN_SUFFIXES || "")
+    .split(",")
+    .map((x) => sanitizeDomain(x))
+    .filter(Boolean);
+
+  const fromAppDomains = String(
+    process.env.VITE_APP_DOMAINS || process.env.VITE_APP_DOMAIN || process.env.VITE_APP_BASE_DOMAIN || ""
+  )
+    .split(",")
+    .map((x) => sanitizeDomain(x))
+    .filter(Boolean);
+
+  const fallback = ["univ.live"];
+
+  const unique: string[] = [];
+  for (const domain of [...fromCorsSuffixes, ...fromAppDomains, ...fallback]) {
+    if (!unique.includes(domain)) unique.push(domain);
+  }
+
+  return unique;
+}
+
+function isOriginAllowedByDomainSuffix(origin: string): boolean {
+  let host = "";
+  try {
+    host = new URL(origin).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+
+  if (!host) return false;
+  if (host === "localhost" || host === "127.0.0.1" || host.endsWith(".localhost")) return true;
+
+  return getAllowedDomainSuffixes().some((domain) => host === domain || host.endsWith(`.${domain}`));
+}
+
 function setCors(req: VercelRequest, res: VercelResponse) {
   try {
     const origin = String(req.headers.origin || "");
@@ -60,11 +108,7 @@ function setCors(req: VercelRequest, res: VercelResponse) {
         .filter(Boolean)
     );
 
-    const isAllowed =
-      allow.has(origin) ||
-      origin.includes("localhost") ||
-      origin.endsWith(".univ.live") ||
-      origin.endsWith("univ.live");
+    const isAllowed = allow.has(origin) || isOriginAllowedByDomainSuffix(origin);
 
     if (isAllowed) {
       res.setHeader("Access-Control-Allow-Origin", origin);

@@ -78,6 +78,27 @@ function safeNumber(v: any, fallback: number) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function parseMcqCorrectIndex(value: any, optionCount: number): number | null {
+  if (value === null || value === undefined) return null;
+
+  const asNumber = Number(value);
+  if (Number.isFinite(asNumber)) {
+    if (asNumber >= 0 && asNumber < optionCount) return Math.trunc(asNumber);
+    if (asNumber >= 1 && asNumber <= optionCount) return Math.trunc(asNumber - 1);
+  }
+
+  const raw = String(value).trim().toUpperCase();
+  if (!raw) return null;
+
+  const letterMatch = raw.match(/^(?:OPTION\s*)?([A-Z])$/);
+  if (letterMatch) {
+    const idx = letterMatch[1].charCodeAt(0) - 65;
+    if (idx >= 0 && idx < optionCount) return idx;
+  }
+
+  return null;
+}
+
 function normalizeAccuracyPercent(val: any, fallback = 0) {
   const n = Number(val);
   if (!Number.isFinite(n)) return fallback;
@@ -127,8 +148,12 @@ function computeFromQuestionsAndResponses(
     if (type === "integer") {
       isCorrect = String(userAnswer).trim() === String(d.correctAnswer ?? "").trim();
     } else {
-      isCorrect = String(userAnswer) === String((d as any).correctOption ?? d.correctOptionIndex ?? 0)
-;
+      const optionCount = Array.isArray(d.options) && d.options.length ? d.options.length : 4;
+      const correctIndex = parseMcqCorrectIndex(
+        (d as any).correctOption ?? d.correctOptionIndex ?? d.correctAnswer,
+        optionCount
+      );
+      isCorrect = String(userAnswer) === String(correctIndex ?? 0);
     }
 
     if (isCorrect) {

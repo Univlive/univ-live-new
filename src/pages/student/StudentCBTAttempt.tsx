@@ -78,6 +78,27 @@ const safeNumber = (v: any, fallback: number) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+const parseMcqCorrectIndex = (value: any, optionCount: number): number | null => {
+  if (value === null || value === undefined) return null;
+
+  const asNumber = Number(value);
+  if (Number.isFinite(asNumber)) {
+    if (asNumber >= 0 && asNumber < optionCount) return Math.trunc(asNumber);
+    if (asNumber >= 1 && asNumber <= optionCount) return Math.trunc(asNumber - 1);
+  }
+
+  const raw = String(value).trim().toUpperCase();
+  if (!raw) return null;
+
+  const letterMatch = raw.match(/^(?:OPTION\s*)?([A-Z])$/);
+  if (letterMatch) {
+    const idx = letterMatch[1].charCodeAt(0) - 65;
+    if (idx >= 0 && idx < optionCount) return idx;
+  }
+
+  return null;
+};
+
 const buildInitResponses = (qs: AttemptQuestion[]) => {
   const init: Record<string, AttemptResponse> = {};
   qs.forEach((q) => (init[q.id] = { answer: null, markedForReview: false, visited: false, answered: false }));
@@ -86,7 +107,11 @@ const buildInitResponses = (qs: AttemptQuestion[]) => {
 
 const mapQuestion = (id: string, data: any): AttemptQuestion => {
   const opts: string[] = Array.isArray(data.options) ? data.options : [];
-  const correctIndex = safeNumber(data.correctOption, 0);
+  const parsedCorrectIndex = parseMcqCorrectIndex(
+    data.correctOption ?? data.correctOptionIndex ?? data.correctAnswer,
+    opts.length || 4
+  );
+  const correctIndex = parsedCorrectIndex ?? 0;
   // Always normalize to +5 marks and -1 negative marks
   const positive = 5;
   const negative = 1;
@@ -206,13 +231,87 @@ export default function StudentCBTAttempt() {
     [attemptRef]
   );
 
-  const answeredCount = useMemo(() => Object.values(responses).filter((r) => !!r?.answer).length, [responses]);
-  const unansweredVisitedCount = useMemo(
-    () => Object.values(responses).filter((r) => r?.visited && !r?.answer).length,
-    [responses]
+  const currentQuestion = questions[currentIndex] || null;
+
+  const effectiveResponses = useMemo(() => {
+    if (!isStarted || !currentQuestion) return responses;
+
+    const current = responses[currentQuestion.id] || {
+      answer: null,
+      markedForReview: false,
+      visited: true,
+      answered: false,
+    };
+
+    const nextAnswered = selectedAnswer !== null && selectedAnswer !== undefined && String(selectedAnswer).trim() !== "";
+
+    // Include current in-progress selection in stats/submission even before explicit save.
+    if (current.answer === selectedAnswer && Boolean(current.answered) === nextAnswered) {
+      return responses;
+    }
+
+    return {
+      ...responses,
+      [currentQuestion.id]: {
+        ...current,
+        answer: selectedAnswer,
+        answered: nextAnswered,
+        visited: true,
+      },
+    };
+  }, [responses, isStarted, currentQuestion, selectedAnswer]);
+
+  const computeResponseCounts = useCallback(
+    (responseMap: Record<string, AttemptResponse>) => {
+      let answeredCount = 0;
+      let notAnsweredCount = 0;
+      let notVisitedCount = 0;
+      let markedForReviewCount = 0;
+      let markedForReviewUnansweredCount = 0;
+      let answeredAndMarkedCount = 0;
+
+      for (const q of questions) {
+        const response = responseMap[q.id];
+        const visited = Boolean(response?.visited);
+        const markedForReview = Boolean(response?.markedForReview);
+        const answered = response?.answer !== null && response?.answer !== undefined && String(response.answer).trim() !== "";
+
+        if (!visited) notVisitedCount += 1;
+        if (answered) answeredCount += 1;
+        if (visited && !answered && !markedForReview) notAnsweredCount += 1;
+
+        if (markedForReview) {
+          markedForReviewCount += 1;
+          if (answered) {
+            answeredAndMarkedCount += 1;
+          } else {
+            markedForReviewUnansweredCount += 1;
+          }
+        }
+      }
+
+      const unansweredCount = Math.max(0, questions.length - answeredCount);
+
+      return {
+        answeredCount,
+        notAnsweredCount,
+        notVisitedCount,
+        markedForReviewCount,
+        markedForReviewUnansweredCount,
+        answeredAndMarkedCount,
+        unansweredCount,
+      };
+    },
+    [questions]
   );
 
-  const currentQuestion = questions[currentIndex] || null;
+  const submissionCounts = useMemo(
+    () => computeResponseCounts(effectiveResponses),
+    [computeResponseCounts, effectiveResponses]
+  );
+
+  const answeredCount = submissionCounts.answeredCount;
+  const unansweredVisitedCount = submissionCounts.notAnsweredCount;
 
   // Load test + questions + existing attempt
   useEffect(() => {
@@ -546,19 +645,22 @@ export default function StudentCBTAttempt() {
     if (!currentQuestion || !attemptId || !isStarted) return;
     
     const answer = selectedAnswer;
+    const hasAnswer = answer !== null && answer !== undefined && String(answer).trim() !== "";
     setResponses((prev) => ({
       ...prev,
       [currentQuestion.id]: { 
         ...prev[currentQuestion.id], 
-        answer, 
-        answered: String(answer).length > 0,
+        answer: hasAnswer ? answer : null,
+        answered: hasAnswer,
+        visited: true,
         markedForReview: false 
       },
     }));
 
     queueAttemptUpdate({
-      [`responses.${currentQuestion.id}.answer`]: answer,
-      [`responses.${currentQuestion.id}.answered`]: String(answer).length > 0,
+      [`responses.${currentQuestion.id}.answer`]: hasAnswer ? answer : null,
+      [`responses.${currentQuestion.id}.answered`]: hasAnswer,
+      [`responses.${currentQuestion.id}.visited`]: true,
       [`responses.${currentQuestion.id}.markedForReview`]: false,
       currentIndex,
     });
@@ -570,19 +672,22 @@ export default function StudentCBTAttempt() {
     if (!currentQuestion || !attemptId || !isStarted) return;
     
     const answer = selectedAnswer;
+    const hasAnswer = answer !== null && answer !== undefined && String(answer).trim() !== "";
     setResponses((prev) => ({
       ...prev,
       [currentQuestion.id]: { 
         ...prev[currentQuestion.id], 
-        answer, 
-        answered: String(answer).length > 0,
+        answer: hasAnswer ? answer : null,
+        answered: hasAnswer,
+        visited: true,
         markedForReview: true 
       },
     }));
 
     queueAttemptUpdate({
-      [`responses.${currentQuestion.id}.answer`]: answer,
-      [`responses.${currentQuestion.id}.answered`]: String(answer).length > 0,
+      [`responses.${currentQuestion.id}.answer`]: hasAnswer ? answer : null,
+      [`responses.${currentQuestion.id}.answered`]: hasAnswer,
+      [`responses.${currentQuestion.id}.visited`]: true,
       [`responses.${currentQuestion.id}.markedForReview`]: true,
       currentIndex,
     });
@@ -631,19 +736,17 @@ export default function StudentCBTAttempt() {
     });
   };
 
-  const computeScore = () => {
+  const computeScore = (responseMap: Record<string, AttemptResponse>) => {
     let score = 0;
     let maxScore = 0;
     let correctCount = 0;
     let incorrectCount = 0;
-    let unansweredCount = 0;
 
     for (const q of questions) {
       maxScore += safeNumber(q.marks.correct, 0);
 
-      const ans = responses[q.id]?.answer;
+      const ans = responseMap[q.id]?.answer;
       if (ans === null || ans === undefined || String(ans).trim() === "") {
-        unansweredCount += 1;
         continue;
       }
 
@@ -669,7 +772,7 @@ export default function StudentCBTAttempt() {
     const attempted = correctCount + incorrectCount;
     const accuracy = attempted > 0 ? correctCount / attempted : 0;
 
-    return { score, maxScore, correctCount, incorrectCount, unansweredCount, accuracy };
+    return { score, maxScore, correctCount, incorrectCount, accuracy };
   };
 
   const flushPendingSaves = async () => {
@@ -687,7 +790,9 @@ export default function StudentCBTAttempt() {
       setSaving(true);
       await flushPendingSaves();
 
-      const { score, maxScore, correctCount, incorrectCount, unansweredCount, accuracy } = computeScore();
+      const submissionResponses = effectiveResponses;
+      const { score, maxScore, correctCount, incorrectCount, accuracy } = computeScore(submissionResponses);
+      const counts = computeResponseCounts(submissionResponses);
       const totalSec = durationSec || testMeta.durationMinutes * 60;
       const startedAtMs = attemptStartedAtMs || Date.now();
       const remaining = computeRemainingSeconds(startedAtMs, totalSec);
@@ -697,11 +802,15 @@ export default function StudentCBTAttempt() {
         status: "submitted",
         submittedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
+        responses: submissionResponses,
         score,
         maxScore,
         correctCount,
         incorrectCount,
-        unansweredCount,
+        unansweredCount: counts.unansweredCount,
+        markedForReviewCount: counts.markedForReviewCount,
+        notVisitedCount: counts.notVisitedCount,
+        notAnsweredCount: counts.notAnsweredCount,
         accuracy,
         timeTakenSec,
       });
@@ -806,10 +915,10 @@ export default function StudentCBTAttempt() {
   const timerKey = isStarted ? `running_${attemptId || "new"}` : `paused_${attemptId || "new"}`;
 
   // Palette legend counts
-  const notVisitedCount = Object.values(responses).filter((r) => !r?.visited).length;
-  const notAnsweredCount = Object.values(responses).filter((r) => r?.visited && !r?.answered && !r?.markedForReview).length;
-  const markedForReviewCount = Object.values(responses).filter((r) => r?.markedForReview && !r?.answered).length;
-  const answeredAndMarkedCount = Object.values(responses).filter((r) => r?.markedForReview && r?.answered).length;
+  const notVisitedCount = submissionCounts.notVisitedCount;
+  const notAnsweredCount = submissionCounts.notAnsweredCount;
+  const markedForReviewCount = submissionCounts.markedForReviewUnansweredCount;
+  const answeredAndMarkedCount = submissionCounts.answeredAndMarkedCount;
 
   const getQuestionBtnStyle = (idx: number): React.CSSProperties => {
     const q = questions[idx];
@@ -1012,7 +1121,7 @@ export default function StudentCBTAttempt() {
 
             {/* ─── TOP HEADER BAR ─── */}
             <div style={{ background: "#1e3a8a", color: "#fff", padding: "0 12px", height: 44, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: 0.5, truncate: true, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: 0.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {testMeta.title}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1331,6 +1440,14 @@ export default function StudentCBTAttempt() {
               <div style={{ padding: 12, borderRadius: 8, background: "#fee2e2", textAlign: "center" }}>
                 <div style={{ fontWeight: 700, fontSize: 22, color: "#dc2626" }}>{unansweredVisitedCount}</div>
                 <div style={{ fontSize: 12, color: "#374151" }}>Not Answered</div>
+              </div>
+              <div style={{ padding: 12, borderRadius: 8, background: "#ede9fe", textAlign: "center" }}>
+                <div style={{ fontWeight: 700, fontSize: 22, color: "#7c3aed" }}>{submissionCounts.markedForReviewCount}</div>
+                <div style={{ fontSize: 12, color: "#374151" }}>Marked for Review</div>
+              </div>
+              <div style={{ padding: 12, borderRadius: 8, background: "#f3f4f6", textAlign: "center" }}>
+                <div style={{ fontWeight: 700, fontSize: 22, color: "#4b5563" }}>{submissionCounts.notVisitedCount}</div>
+                <div style={{ fontSize: 12, color: "#374151" }}>Not Visited</div>
               </div>
             </div>
 
