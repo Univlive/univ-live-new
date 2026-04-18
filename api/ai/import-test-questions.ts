@@ -1,4 +1,5 @@
 import { VercelRequest, VercelResponse } from "@vercel/node";
+import { notifyDiscord } from "../_lib/discordLogger.js";
 
 // ---------------------------------------------------------------------------
 // Vercel Serverless Config – raise body parser limit from default 1 MB to 10 MB
@@ -1148,6 +1149,7 @@ export default async function handler(
     console.error("  Message:", errorDetails);
     console.error("  Stack:", errorStack);
     console.error("  Full error:", error);
+    await notifyDiscord(error, req, "import-test-questions");
     
     try {
       streamError(res, error);

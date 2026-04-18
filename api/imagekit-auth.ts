@@ -1,5 +1,6 @@
 // api/imagekit-auth.ts
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { notifyDiscord } from "./_lib/discordLogger.js";
 
 // Wrap everything in try-catch at module level to prevent unhandled errors
 let ImageKitModule: any = null;
@@ -181,7 +182,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Final safety net - ALWAYS return JSON
     const msg = String(e?.message || String(e) || "Unknown error");
     console.error("[imagekit-auth] 🔴 UNHANDLED ERROR:", msg, e);
-    
+    await notifyDiscord(e, req, "imagekit-auth");
+
     try {
       return res.status(500).json({ error: msg });
     } catch {

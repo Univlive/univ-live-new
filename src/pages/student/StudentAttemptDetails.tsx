@@ -10,6 +10,7 @@ import { HtmlView } from "@/lib/safeHtml";
 
 import { useAuth } from "@/contexts/AuthProvider";
 import { db } from "@/lib/firebase";
+import { logError } from "@/lib/errorLogger";
 import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 
 type AttemptResponse = {
@@ -197,6 +198,7 @@ export default function StudentAttemptDetails() {
         setResponses(a.responses || {});
       } catch (e: any) {
         console.error(e);
+        logError(e, "attempt-details:load");
         if (!mounted) return;
         setError(e?.message || "Failed to load attempt details.");
       } finally {
