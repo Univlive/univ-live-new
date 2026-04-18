@@ -41,8 +41,8 @@ function formatTimeLeft(ms: number): string {
   return `${s}s left`;
 }
 
-export function TestCard({ test,  attemptsUsed = 0, onView, onStart, onUnlock }: TestCardProps) {
-    const { tenant } = useTenant();
+export function TestCard({ test, attemptsUsed = 0, onView, onStart, onUnlock }: TestCardProps) {
+  const { tenant } = useTenant();
 
   const parseNum = (value: unknown, fallback: number) => {
     const n = Number(value);

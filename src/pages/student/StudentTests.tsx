@@ -160,31 +160,11 @@ export default function StudentTests() {
     return () => unsub();
   }, [firebaseUser?.uid, educatorId]);
 
-  // Fetch student attempt counts for this educator
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!firebaseUser?.uid || !educatorId) return;
-
-    const qAttempts = query(
-      collection(db, "attempts"),
-      where("studentId", "==", firebaseUser.uid),
-      where("educatorId", "==", educatorId),
-      where("status", "==", "submitted")
-    );
-
-    const unsub = onSnapshot(qAttempts, (snap) => {
-      const counts: Record<string, number> = {};
-      snap.docs.forEach((d) => {
-        const a = d.data();
-        const tid = String(a.testId || "");
-        if (tid) {
-          counts[tid] = (counts[tid] || 0) + 1;
-        }
-      });
-      setAttemptCounts(counts);
-    });
-
-    return () => unsub();
-  }, [firebaseUser?.uid, educatorId]);
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
 
