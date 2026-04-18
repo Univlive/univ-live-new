@@ -12,6 +12,9 @@ export type TenantProfile = {
   contact?: { phone?: string; email?: string; address?: string };
   socials?: Record<string, string | null>;
   websiteConfig?: any;
+  testDefaults?: {
+    attemptsAllowed?: number;
+  };
 };
 
 type TenantContextValue = {
@@ -111,6 +114,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
           },
           socials: websiteConfig?.socials || data?.socials,
           websiteConfig,
+          testDefaults: data?.testDefaults || {},
         });
       } finally {
         if (alive) setLoading(false);

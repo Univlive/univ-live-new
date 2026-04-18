@@ -33,6 +33,7 @@ export default function StudentTests() {
 
   const [tests, setTests] = useState<any[]>([]);
   const [unlockedIds, setUnlockedIds] = useState<Map<string, number | null>>(new Map());
+  const [attemptCounts, setAttemptCounts] = useState<Record<string, number>>({});
   const [search, setSearch] = useState("");
 
   useEffect(() => {
@@ -128,6 +129,32 @@ export default function StudentTests() {
         }
       });
       setUnlockedIds(m);
+    });
+
+    return () => unsub();
+  }, [firebaseUser?.uid, educatorId]);
+
+  // Fetch student attempt counts for this educator
+  useEffect(() => {
+    if (!firebaseUser?.uid || !educatorId) return;
+
+    const qAttempts = query(
+      collection(db, "attempts"),
+      where("studentId", "==", firebaseUser.uid),
+      where("educatorId", "==", educatorId),
+      where("status", "==", "submitted")
+    );
+
+    const unsub = onSnapshot(qAttempts, (snap) => {
+      const counts: Record<string, number> = {};
+      snap.docs.forEach((d) => {
+        const a = d.data();
+        const tid = String(a.testId || "");
+        if (tid) {
+          counts[tid] = (counts[tid] || 0) + 1;
+        }
+      });
+      setAttemptCounts(counts);
     });
 
     return () => unsub();
@@ -369,6 +396,7 @@ export default function StudentTests() {
                       <TestCard
                         key={t.id}
                         test={{ ...t, isLocked: locked, windowExpiresAt: unlockEntry ?? null }}
+                        attemptsUsed={attemptCounts[t.id] || 0}
                         onView={() => nav(`/student/tests/${t.id}`)}
                         onStart={() => nav(`/student/tests/${t.id}`)}
                         onUnlock={(testId: string) => {

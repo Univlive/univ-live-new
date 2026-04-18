@@ -455,13 +455,16 @@ const testId = params.testId || params.id;
 
             <div className="space-y-2">
               <Label>Attempts Allowed</Label>
-              <Input
-                type="number"
-                value={attemptsAllowed}
-                onChange={(e) => setAttemptsAllowed(e.target.value)}
-                className="rounded-xl"
-                min={1}
-              />
+              <Select value={attemptsAllowed} onValueChange={setAttemptsAllowed}>
+                <SelectTrigger className="rounded-xl">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl">
+                  <SelectItem value="1">1</SelectItem>
+                  <SelectItem value="2">2</SelectItem>
+                  <SelectItem value="3">3</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">
