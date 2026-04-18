@@ -32,7 +32,7 @@ export default function StudentTests() {
   const [billingLoading, setBillingLoading] = useState(true);
 
   const [tests, setTests] = useState<any[]>([]);
-  const [unlockedIds, setUnlockedIds] = useState<Set<string>>(new Set());
+  const [unlockedIds, setUnlockedIds] = useState<Map<string, number | null>>(new Map());
   const [attemptCounts, setAttemptCounts] = useState<Record<string, number>>({});
   const [search, setSearch] = useState("");
 
@@ -111,13 +111,26 @@ export default function StudentTests() {
     );
 
     const unsub = onSnapshot(qUnlock, (snap) => {
-      const s = new Set<string>();
+      const m = new Map<string, number | null>();
       snap.docs.forEach((d) => {
         const data: any = d.data();
         const tid = String(data.testSeriesId || data.testId || "");
-        if (tid) s.add(tid);
+        if (!tid) return;
+        const we = data?.windowExpiresAt;
+        const expMs = (data?.windowMinutes === 0 || !we)
+          ? null
+          : typeof we?.toMillis === "function" ? we.toMillis() : null;
+        const existing = m.get(tid);
+        // Keep most permissive: null (no expiry) wins; otherwise take latest expiry
+        if (existing === undefined) {
+          m.set(tid, expMs);
+        } else if (existing !== null && expMs === null) {
+          m.set(tid, null);
+        } else if (existing !== null && expMs !== null && expMs > existing) {
+          m.set(tid, expMs);
+        }
       });
-      setUnlockedIds(s);
+      setUnlockedIds(m);
     });
 
     return () => unsub();
@@ -148,6 +161,12 @@ export default function StudentTests() {
 
     return () => unsub();
   }, [firebaseUser?.uid, educatorId]);
+
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
 
@@ -243,6 +262,16 @@ export default function StudentTests() {
         const newUsed = used + 1;
         tx.update(codeRef, { usesUsed: newUsed });
 
+        const windowMinutes = Number(data.windowMinutes || 0);
+        let windowExpiresAt = null;
+        if (windowMinutes > 0) {
+          const codeCreatedMs =
+            typeof data.createdAt?.toMillis === "function"
+              ? data.createdAt.toMillis()
+              : Date.now();
+          windowExpiresAt = new Date(codeCreatedMs + windowMinutes * 60 * 1000);
+        }
+
         const unlockRef = doc(collection(db, "testUnlocks"));
         tx.set(unlockRef, {
           studentId: firebaseUser.uid,
@@ -250,6 +279,8 @@ export default function StudentTests() {
           testSeriesId: testId,
           code: c,
           createdAt: serverTimestamp(),
+          windowMinutes,
+          windowExpiresAt,
         });
       });
 
@@ -366,11 +397,14 @@ export default function StudentTests() {
               {isExpanded && (
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 pl-4">
                   {group.tests.map((t) => {
-                    const locked = !(t.isPublic === true || unlockedIds.has(t.id));
+                    const unlockEntry = unlockedIds.get(t.id);
+                    const windowValid = unlockEntry !== undefined &&
+                      (unlockEntry === null || unlockEntry > now);
+                    const locked = !(t.isPublic === true || windowValid);
                     return (
                       <TestCard
                         key={t.id}
-                        test={{ ...t, isLocked: locked }}
+                        test={{ ...t, isLocked: locked, windowExpiresAt: unlockEntry ?? null }}
                         attemptsUsed={attemptCounts[t.id] || 0}
                         onView={() => nav(`/student/tests/${t.id}`)}
                         onStart={() => nav(`/student/tests/${t.id}`)}

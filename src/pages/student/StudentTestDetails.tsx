@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Clock, FileText, Award, ArrowLeft, Play, Lock } from "lucide-react";
+import { Clock, FileText, Award, ArrowLeft, Play, Lock, Timer } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -78,6 +78,16 @@ function accuracyFrom(score: number, maxScore: number) {
   if (!maxScore || maxScore <= 0) return 0;
   return Math.max(0, Math.min(100, Math.round((score / maxScore) * 100)));
 }
+function formatWindowTime(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
 function isExpired(expiresAt: any) {
   if (!expiresAt) return false;
   const ts = expiresAt as Timestamp;
@@ -98,6 +108,8 @@ export default function StudentTestDetails() {
   const [loading, setLoading] = useState(true);
   const [test, setTest] = useState<Test | null>(null);
   const [unlocked, setUnlocked] = useState(false);
+  const [unlockWindowExpiresAt, setUnlockWindowExpiresAt] = useState<number | null>(null);
+  const [windowTimeLeft, setWindowTimeLeft] = useState<number | null>(null);
   const [attempts, setAttempts] = useState<AttemptRow[]>([]);
 
   // unlock dialog
@@ -218,15 +230,37 @@ export default function StudentTestDetails() {
 
     const unsub = onSnapshot(
       unlockRef,
-      (snap) => setUnlocked(snap.exists()),
+      (snap) => {
+        setUnlocked(snap.exists());
+        if (snap.exists()) {
+          const d = snap.data() as any;
+          const we = d?.windowExpiresAt;
+          const ms = (d?.windowMinutes === 0 || !we)
+            ? null
+            : typeof we?.toMillis === "function" ? we.toMillis() : null;
+          setUnlockWindowExpiresAt(ms);
+        } else {
+          setUnlockWindowExpiresAt(null);
+        }
+      },
       (err) => {
         console.error(err);
         setUnlocked(false);
+        setUnlockWindowExpiresAt(null);
       }
     );
 
     return () => unsub();
   }, [canLoad, firebaseUser, educatorId, testId]);
+
+  // 2b) Live countdown for access window
+  useEffect(() => {
+    if (!unlockWindowExpiresAt) { setWindowTimeLeft(null); return; }
+    const tick = () => setWindowTimeLeft(Math.max(0, unlockWindowExpiresAt - Date.now()));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [unlockWindowExpiresAt]);
 
   // 3) Listen attempts for this test
   useEffect(() => {
@@ -275,8 +309,11 @@ export default function StudentTestDetails() {
 
   const isLocked = useMemo(() => {
     if (!test) return true;
-    return test.price > 0 && !unlocked;
-  }, [test, unlocked]);
+    if (test.price <= 0) return false;
+    if (!unlocked) return true;
+    if (unlockWindowExpiresAt !== null && Date.now() > unlockWindowExpiresAt) return true;
+    return false;
+  }, [test, unlocked, unlockWindowExpiresAt]);
 
   const attemptsUsed = attempts.length;
   const attemptsLeft = test ? Math.max(0, test.attemptsAllowed - attemptsUsed) : 0;
@@ -320,6 +357,16 @@ export default function StudentTestDetails() {
         const already = await tx.get(unlockRef);
         if (already.exists()) return; // don't consume again
 
+        const windowMinutes = safeNum(codeData?.windowMinutes, 0);
+        let windowExpiresAt = null;
+        if (windowMinutes > 0) {
+          const codeCreatedMs =
+            typeof codeData?.createdAt?.toMillis === "function"
+              ? codeData.createdAt.toMillis()
+              : Date.now();
+          windowExpiresAt = Timestamp.fromMillis(codeCreatedMs + windowMinutes * 60 * 1000);
+        }
+
         tx.set(unlockRef, {
           studentId: firebaseUser.uid,
           educatorId,
@@ -328,6 +375,8 @@ export default function StudentTestDetails() {
           unlockedVia: "accessCode",
           accessCode: codeUpper,
           unlockedAt: serverTimestamp(),
+          windowMinutes,
+          windowExpiresAt,
         });
 
         tx.update(codeRef, { usesUsed: increment(1), lastUsedAt: serverTimestamp() });
@@ -424,14 +473,25 @@ export default function StudentTestDetails() {
                 Unlock (₹{test.price})
               </Button>
             ) : (
-              <Button
-                className={cn("gradient-bg rounded-xl", attemptsLeft <= 0 && "opacity-60")}
-                onClick={startTest}
-                disabled={attemptsLeft <= 0}
-              >
-                <Play className="h-4 w-4 mr-2" />
-                Start Test
-              </Button>
+              <div className="flex flex-col items-end gap-2">
+                <Button
+                  className={cn("gradient-bg rounded-xl", attemptsLeft <= 0 && "opacity-60")}
+                  onClick={startTest}
+                  disabled={attemptsLeft <= 0}
+                >
+                  <Play className="h-4 w-4 mr-2" />
+                  Start Test
+                </Button>
+                {windowTimeLeft !== null && (
+                  <span className={cn(
+                    "flex items-center gap-1 text-xs font-medium",
+                    windowTimeLeft < 5 * 60 * 1000 ? "text-red-600" : "text-amber-600"
+                  )}>
+                    <Timer className="h-3 w-3" />
+                    Access expires in {windowTimeLeft <= 0 ? "—" : formatWindowTime(windowTimeLeft)}
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </CardContent>
