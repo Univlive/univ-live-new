@@ -160,6 +160,12 @@ export default function StudentTests() {
     return () => unsub();
   }, [firebaseUser?.uid, educatorId]);
 
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
 
   const toggleFolder = (folderId: string) => {
@@ -390,7 +396,7 @@ export default function StudentTests() {
                   {group.tests.map((t) => {
                     const unlockEntry = unlockedIds.get(t.id);
                     const windowValid = unlockEntry !== undefined &&
-                      (unlockEntry === null || unlockEntry > Date.now());
+                      (unlockEntry === null || unlockEntry > now);
                     const locked = !(t.isPublic === true || windowValid);
                     return (
                       <TestCard
