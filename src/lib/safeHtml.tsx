@@ -54,7 +54,14 @@ export function HtmlView({
       .replace(/\\{2,}\(/g, "\\(")
       .replace(/\\{2,}\)/g, "\\)")
       .replace(/\\{2,}\[/g, "\\[")
-      .replace(/\\{2,}\]/g, "\\]");
+      .replace(/\\{2,}\]/g, "\\]")
+      // Collapse over-escaped LaTeX commands that often come from JSON/PDF extraction.
+      .replace(
+        /\\{2,}(?=(?:begin|end|frac|dfrac|tfrac|sqrt|sum|int|prod|lim|log|ln|sin|cos|tan|cot|sec|csc|alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|omega|times|cdot|leq|geq|neq|approx|to|infty|left|right)\b)/g,
+        "\\"
+      )
+      // Normalize escaped braces in LaTeX fragments, e.g. \frac\{1\}\{2\}.
+      .replace(/\\([{}])/g, "$1");
 
     const renderLatex = (expr: string, displayMode: boolean) => {
       try {
