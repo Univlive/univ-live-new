@@ -12,6 +12,8 @@ export type AiImportPreviewItem = {
   marks: number;
   negativeMarks: number;
   include: boolean;
+  /** True when educator modifies the item manually in AI preview. */
+  manualEdited?: boolean;
   rawBlock?: string;
   /** Public URL of a cropped diagram image, if one was detected by Gemini */
   questionImageUrl?: string;
@@ -695,7 +697,7 @@ export function buildImportedQuestionPayload(item: AiImportPreviewItem) {
     item.correctOption < options.length;
 
   const ready =
-    item.status === "ready" &&
+    (item.status === "ready" || item.manualEdited === true) &&
     hasQuestion &&
     hasEnoughOptions &&
     hasValidCorrectOption;

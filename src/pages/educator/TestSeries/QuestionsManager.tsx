@@ -7,7 +7,6 @@ import {
     Trash2,
     Loader2,
     X,
-    Copy,
     CheckCircle2,
     FileUp,
 } from "lucide-react";
@@ -184,48 +183,90 @@ function SortableQuestionListItem({
             ref={setNodeRef}
             style={style}
             onClick={() => onOpenEdit(q)}
-            className={`p-3 rounded-xl border cursor-pointer text-sm hover:bg-accent transition-colors bg-card ${isDragging ? "opacity-70" : ""}`}
+            className={`p-3 rounded-xl border cursor-pointer text-sm hover:bg-gray-300/10 transition-colors bg-card ${isDragging ? "opacity-70" : ""}`}
         >
-            <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex items-start gap-2">
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 rounded-lg text-muted-foreground mt-0.5 cursor-grab active:cursor-grabbing"
-                        onClick={(e) => e.stopPropagation()}
-                        aria-label="Drag to reorder"
-                        {...attributes}
-                        {...listeners}
-                        disabled={dragDisabled}
-                    >
-                        <GripVertical className="h-4 w-4" />
-                    </Button>
+            <div className="flex items-start gap-2">
 
-                    <div className="min-w-0">
-                        <div className="font-medium">
-                            <span className="text-muted-foreground">Q{displayOrder}:</span>
-                            {hasPreviewContent(q.question || "") ? (
-                                <HtmlView
-                                    html={q.question || ""}
-                                    className="mt-0.5 text-sm break-words line-clamp-2 [&_p]:my-0 [&_img]:hidden"
-                                />
-                            ) : (
-                                <p className="text-sm text-muted-foreground">(empty)</p>
-                            )}
+                {/* Drag Handle */}
+                <Button
+                    data-drag-handle
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 rounded-lg text-muted-foreground mt-0.5 cursor-grab active:cursor-grabbing shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label="Drag to reorder"
+                    {...attributes}
+                    {...listeners}
+                    disabled={dragDisabled}
+                >
+                    <GripVertical className="h-4 w-4" />
+                </Button>
+
+                {/* Content */}
+                <div className="w-full min-w-0">
+
+                    {/* Question + Delete */}
+                    <div className="flex items-start gap-2">
+                        <div className="flex-1">
+                            <div className="flex items-center gap-2 min-w-0">
+
+                                {/* Q Number */}
+                                <span className="text-muted-foreground shrink-0">
+                                    Q{displayOrder}:
+                                </span>
+
+                                {/* Question */}
+                                <div className="min-w-0 flex-1 overflow-hidden">
+                                    {hasPreviewContent(q.question || "") ? (
+                                        <HtmlView
+                                            html={q.question || ""}
+                                            className="text-sm line-clamp-1 break-words [&_p]:m-0 [&_img]:hidden"
+                                        />
+                                    ) : (
+                                        <p className="text-sm text-muted-foreground truncate">
+                                            (empty)
+                                        </p>
+                                    )}
+                                </div>
+
+                            </div>
                         </div>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
+
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="rounded-xl text-destructive shrink-0"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onDelete(q.id);
+                            }}
+                            aria-label="Delete question"
+                        >
+                            <Trash2 className="h-4 w-4" />
+                        </Button>
+                    </div>
+
+                    {/* Meta */}
+                    <div className="mt-2 flex flex-wrap justify-between w-full gap-2">
+
+                        <div className="flex gap-1.5 flex-wrap">
                             <Badge variant="secondary" className="text-[10px] rounded-full">
                                 {(q.difficulty || "medium").toUpperCase()}
                             </Badge>
+
                             <Badge variant="outline" className="text-[10px] rounded-full">
                                 +{q.marks ?? "-"} / {formatNegativeMarksDisplay(q.negativeMarks)}
                             </Badge>
-                            {q.source === "ai_import" ? (
+
+                            {q.source === "ai_import" && (
                                 <Badge variant="outline" className="text-[10px] rounded-full">AI</Badge>
-                            ) : q.source === "ai_import_partial" ? (
+                            )}
+
+                            {q.source === "ai_import_partial" && (
                                 <Badge variant="outline" className="text-[10px] rounded-full">AI Draft</Badge>
-                            ) : null}
+                            )}
+
                             {isPublished ? (
                                 <Badge className="text-[10px] rounded-full">Published</Badge>
                             ) : (
@@ -234,42 +275,19 @@ function SortableQuestionListItem({
                                 </Badge>
                             )}
                         </div>
+
+                        <div
+                            className="flex items-center gap-2"
+                            onClick={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
+                        >
+                            <Switch
+                                checked={isPublished}
+                                onCheckedChange={(checked) => onToggleActive(q, checked)}
+                            />
+                        </div>
+
                     </div>
-                </div>
-
-                <div className="flex items-center gap-1">
-                    {/* <Button
-                        variant="ghost"
-                        size="icon"
-                        className="rounded-xl"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onDuplicate(q);
-                        }}
-                    >
-                        <Copy className="h-4 w-4" />
-                    </Button> */}
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="rounded-xl text-destructive"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(q.id);
-                        }}
-                    >
-                        <Trash2 className="h-4 w-4" />
-                    </Button>
-                </div>
-            </div>
-
-            <div className="mt-3 flex items-center justify-between">
-                <div className="text-xs text-muted-foreground">
-                    {/* {q.subject || "-"} {q.topic ? `• ${q.topic}` : ""} */}
-                </div>
-                <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
-                    <span className="text-xs text-muted-foreground">{publishLabel}</span>
-                    <Switch checked={isPublished} onCheckedChange={(checked) => onToggleActive(q, checked)} />
                 </div>
             </div>
         </div>
@@ -856,6 +874,41 @@ const QuestionsManager = ({
         setImportItems((prev) => prev.map((item) => (item.sourceIndex === sourceIndex ? { ...item, include } : item)));
     }
 
+    function updateImportItemContent(
+        sourceIndex: number,
+        patch: Partial<Pick<AiImportPreviewItem, "question" | "options" | "correctOption">>
+    ) {
+        setImportItems((prev) =>
+            prev.map((item) => {
+                if (item.sourceIndex !== sourceIndex) return item;
+
+                const nextQuestion =
+                    typeof patch.question === "string" ? patch.question : item.question;
+                const nextOptions = Array.isArray(patch.options)
+                    ? patch.options.map((value) => String(value ?? ""))
+                    : item.options;
+
+                let nextCorrectOption =
+                    patch.correctOption !== undefined ? patch.correctOption : item.correctOption;
+
+                if (
+                    typeof nextCorrectOption === "number" &&
+                    (nextCorrectOption < 0 || nextCorrectOption >= nextOptions.length)
+                ) {
+                    nextCorrectOption = nextOptions.length ? 0 : null;
+                }
+
+                return {
+                    ...item,
+                    question: nextQuestion,
+                    options: nextOptions,
+                    correctOption: nextCorrectOption,
+                    manualEdited: true,
+                };
+            })
+        );
+    }
+
     function selectAllImportItems() {
         setImportItems((prev) =>
             prev.map((item) => ({
@@ -1182,7 +1235,7 @@ const QuestionsManager = ({
                                                                             <Badge className="rounded-full text-[10px]">Correct</Badge>
                                                                         ) : null}
                                                                     </div>
-                                                        </div>
+                                                                </div>
                                                             ))
                                                         ) : (
                                                             <p className="text-sm text-muted-foreground">Add options to preview formatted answers.</p>
@@ -1331,6 +1384,7 @@ const QuestionsManager = ({
                     }}
                     onCancel={cancelPdfImport}
                     onItemIncludeChange={updateImportItemInclude}
+                    onItemEdit={updateImportItemContent}
                     onSelectAll={selectAllImportItems}
                     onSelectOnlyReady={selectOnlyReadyImportItems}
                     onSelectOnlyPartial={selectOnlyPartialImportItems}
