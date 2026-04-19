@@ -175,7 +175,7 @@ async function buildMcqSchema() {
               items: { type: SchemaType.NUMBER },
               description:
                 "If a diagram/image/figure exists for this question, return bounding box " +
-                "[ymin, xmin, ymax, xmax] scaled 0-1000. Otherwise, empty array.",
+                "[ymin, xmin, ymax, xmax] scaled 0-1000. Use a generous box that includes full outer edges, axes, ticks, labels, legends, and arrowheads with extra margin. Otherwise, empty array.",
             },
           },
           required: [
@@ -227,6 +227,9 @@ function buildSystemInstruction(context: {
     "   - Use \\frac{numerator}{denominator} for fractions whenever mathematically intended.",
     "   - Wrap inline math in $...$ and display/block math in $$...$$.",
     "   - Apply this consistently to equations, inequalities, exponents, roots, ratios/proportions, and unit expressions.",
+    "   - Do NOT omit, simplify, or rewrite any math token: keep all numbers, variables, operators, and symbols exactly as visible.",
+    "   - Preserve equation order and multi-line math layout from the source image.",
+    "   - If math is partially visible, return the visible part faithfully in LaTeX (do not invent missing pieces).",
     "6. Status classification:",
     "   - Mark status='ready' only when question text and all four options are fully visible and fully extracted from this page.",
     "   - If anything is missing/unclear, use status='partial' or 'rejected'.",
@@ -236,7 +239,10 @@ function buildSystemInstruction(context: {
     "   - If not confidently visible, set correctOption=null.",
     "8. Image coordinates:",
     "   - Return questionImageBox only when a clear diagram/graph/geometric figure is required for that question.",
-    "   - Bounding boxes must include a loose outer margin (about 5%-8% padding) so full edges, axes, and labels are never cropped.",
+    "   - Bounding boxes must include a loose outer margin (about 8%-12% padding) so full edges, axes, ticks, labels, legends, and arrowheads are never cropped.",
+    "   - Never return a tight box that touches the visual element boundary.",
+    "   - If uncertain, choose a slightly larger box rather than a tighter box.",
+    "   - Keep coordinates within 0..1000 and maintain ymin < ymax, xmin < xmax.",
     "   - Do NOT return coordinates for logos/backgrounds/text blocks.",
     "   - If no required diagram, return an empty array [].",
     "9. Ordering:",
@@ -596,8 +602,10 @@ async function processWithGemini(
 
     const requestParts: any[] = [
       "Extract all MCQs from this exam page image. " +
+      "Preserve every visible mathematical token in LaTeX without dropping symbols or terms. " +
       "For any question that has an associated diagram, figure, or graph, " +
-      "return its bounding box in questionImageBox with a 5%-10% loose margin around the full visual element (include outer edges, axes, and labels). " +
+      "return its bounding box in questionImageBox with an 8%-12% loose margin around the full visual element (include outer edges, axes, ticks, labels, legends, and arrowheads). " +
+      "Avoid tight crops; if uncertain, expand the box slightly. " +
       "Return the results as structured JSON.",
     ];
 

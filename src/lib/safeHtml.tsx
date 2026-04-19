@@ -57,7 +57,7 @@ export function HtmlView({
       .replace(/\\{2,}\]/g, "\\]")
       // Collapse over-escaped LaTeX commands that often come from JSON/PDF extraction.
       .replace(
-        /\\{2,}(?=(?:begin|end|frac|dfrac|tfrac|sqrt|sum|int|prod|lim|log|ln|sin|cos|tan|cot|sec|csc|alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|omega|times|cdot|leq|geq|neq|approx|to|infty|left|right)\b)/g,
+        /\\{2,}(?=(?:begin|end|frac|dfrac|tfrac|sqrt|sum|int|prod|lim|log|ln|sin|cos|tan|cot|sec|csc|alpha|beta|gamma|delta|epsilon|theta|lambda|mu|nu|pi|rho|sigma|tau|phi|omega|xi|psi|zeta|eta|kappa|upsilon|varsigma|Delta|Omega|times|cdot|div|pm|leq|geq|neq|approx|to|infty|partial|left|right)\b)/g,
         "\\"
       )
       // Normalize escaped braces in LaTeX fragments, e.g. \frac\{1\}\{2\}.
@@ -82,7 +82,7 @@ export function HtmlView({
 
       // Render only explicit LaTeX command fragments and keep surrounding prose untouched.
       const bareCommandPattern =
-        /\\(?:frac|dfrac|tfrac)\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}|\\sqrt\s*(?:\[[^\]]+\])?\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}|\\(?:sum|int|prod|lim|log|ln|sin|cos|tan|cot|sec|csc|alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|omega|times|cdot|leq|geq|neq|approx|to|infty)(?:\s*_[^\s^{}]+|\s*_\{[^}]+\})?(?:\s*\^[^\s_{}]+|\s*\^\{[^}]+\})?/g;
+        /\\(?:frac|dfrac|tfrac)\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}|\\sqrt\s*(?:\[[^\]]+\])?\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}|\\(?:sum|int|prod|lim|log|ln|sin|cos|tan|cot|sec|csc|alpha|beta|gamma|delta|epsilon|theta|lambda|mu|nu|pi|rho|sigma|tau|phi|omega|xi|psi|zeta|eta|kappa|upsilon|varsigma|Delta|Omega|times|cdot|div|pm|leq|geq|neq|approx|to|infty|partial)(?:\s*_[^\s^{}]+|\s*_\{[^}]+\})?(?:\s*\^[^\s_{}]+|\s*\^\{[^}]+\})?/g;
 
       return source.replace(bareCommandPattern, (expr: string) =>
         renderLatex(String(expr || "").trim(), false)

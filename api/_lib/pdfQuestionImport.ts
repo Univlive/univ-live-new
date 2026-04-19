@@ -115,8 +115,11 @@ function normalizeSpecialMathSymbolsToLatex(input: string) {
     (symbol) => SPECIAL_MATH_SYMBOL_TO_LATEX[symbol] || symbol
   );
 
-  // Ensure latex command boundaries remain valid inside plain text.
-  return replaced.replace(/\\([A-Za-z]+)(?=[A-Za-z0-9])/g, "\\$1 ");
+  // Ensure known symbol commands are separated from immediate trailing variables, e.g. "\pir" -> "\pi r".
+  return replaced.replace(
+    /(\\(?:alpha|beta|gamma|delta|epsilon|theta|lambda|mu|nu|pi|rho|sigma|tau|phi|omega|xi|psi|zeta|eta|kappa|upsilon|varsigma|Delta|Omega))(?=[A-Za-z0-9])/g,
+    "$1 "
+  );
 }
 
 function cleanExtractedText(input: string) {
@@ -277,11 +280,13 @@ function stripQuestionNumberPrefix(input: string) {
   if (!value) return value;
 
   const patterns = [
-    /^(?:q(?:uestion)?\s*(?:no\.?\s*)?)\d{1,4}\s*[:.)-]\s*/i,
+    /^(?:q(?:uestion)?\s*(?:no\.?\s*)?)\d{1,4}\s*[.)-]\s*/i,
+    /^(?:q(?:uestion)?\s*(?:no\.?\s*)?)\d{1,4}\s*:\s*(?!\d)/i,
     /^(?:q(?:uestion)?\s*(?:no\.?\s*)?)\d{1,4}\s+/i,
     /^\(\s*\d{1,4}\s*\)\s*/,
     /^\[\s*\d{1,4}\s*\]\s*/,
-    /^\d{1,4}\s*[:.)-]\s*/,
+    /^\d{1,4}\s*[.)-]\s*/,
+    /^\d{1,4}\s*:\s*(?!\d)/,
   ];
 
   for (const pattern of patterns) {
@@ -301,12 +306,32 @@ function normalizeQuestionText(input: string) {
 
   if (!lines.length) return "";
 
-  const optionLinePattern = /^\s*(?:option|choice)?\s*[A-D1-4]\s*[)\].:\-]\s+/i;
+  const optionLinePattern = /^\s*(?:(?:option|choice)\s*)?(?:[A-D]\s*[)\].:\-]|[1-4]\s*[)\].-])\s+/i;
   const answerHintLinePattern = /^\s*(?:ans(?:wer)?|correct(?:\s+answer|\s+option|\s+choice)?|solution)\b/i;
 
-  const cleanedLines = lines.filter(
-    (line) => !optionLinePattern.test(line) && !answerHintLinePattern.test(line)
-  );
+  const looksMathHeavyLine = (line: string) => {
+    const value = String(line || "").trim();
+    if (!value) return false;
+
+    if (/\\(?:frac|dfrac|tfrac|sqrt|sum|int|prod|lim|log|ln|sin|cos|tan|cot|sec|csc|alpha|beta|gamma|delta|epsilon|theta|lambda|mu|nu|pi|rho|sigma|tau|phi|omega|xi|psi|zeta|eta|kappa|upsilon|varsigma|Delta|Omega|pm|times|div|leq|geq|neq|infty|partial)\b/.test(value)) {
+      return true;
+    }
+
+    if (/\$/.test(value)) return true;
+    if (/[\u00B1\u00D7\u00F7\u221A\u2211\u222B\u2260\u2264\u2265\u03C0]/.test(value)) return true;
+    if (/\b\d+\s*:\s*\d+\b/.test(value)) return true;
+    if (/\b[A-Za-z0-9]+\s*[=^]\s*[A-Za-z0-9]+\b/.test(value)) return true;
+    if (/\b[A-Za-z0-9]+\s*[+\-*/]\s*[A-Za-z0-9]+\b/.test(value)) return true;
+
+    return false;
+  };
+
+  const cleanedLines = lines.filter((line) => {
+    if (answerHintLinePattern.test(line)) return false;
+    if (!optionLinePattern.test(line)) return true;
+    // Keep lines that look mathematically meaningful even if they resemble an option label.
+    return looksMathHeavyLine(line);
+  });
 
   return cleanedLines.join("\n").trim();
 }
@@ -359,6 +384,12 @@ function normalizeMathNotationToLatex(input: string) {
       out = out.replace(
         /\\(?:frac|dfrac|tfrac)\s*\{[^{}]+\}\s*\{[^{}]+\}/g,
         (expr: string) => `$${expr}$`
+      );
+
+      // Ensure standalone symbol commands are wrapped in inline math mode.
+      out = out.replace(
+        /\\(?:alpha|beta|gamma|delta|epsilon|theta|lambda|mu|nu|pi|rho|sigma|tau|phi|omega|xi|psi|zeta|eta|kappa|upsilon|varsigma|Delta|Omega|pm|times|div|leq|geq|neq|infty|sum|int|partial)(?:\s*_[^\s^{}]+|\s*_\{[^}]+\})?(?:\s*\^[^\s_{}]+|\s*\^\{[^}]+\})?/g,
+        (expr: string) => `$${expr.trim()}$`
       );
 
       // Wrap simple equation chains in inline math mode.

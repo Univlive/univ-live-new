@@ -76,7 +76,9 @@ function extractQuestionNumber(text: string): number | null {
   const value = String(text || "");
   if (!value.trim()) return null;
 
-  const prefixed = value.match(/(?:^|\n|\s)(?:q(?:uestion)?\s*)?(\d{1,4})\s*[:.)\]-]/i);
+  const prefixed = value.match(
+    /(?:^|\n|\s)(?:q(?:uestion)?\s*)?(\d{1,4})(?:\s*[.)\]-]|\s*:\s*(?!\d))/i
+  );
   if (prefixed?.[1]) return Number(prefixed[1]);
 
   const bracketed = value.match(/(?:^|\n|\s)[\[(](\d{1,4})[\])]/);
@@ -115,7 +117,7 @@ function extractAnswerKeyPairs(text: string): Array<{ questionNumber: number; co
   return pairs;
 }
 
-function reconcileTrailingAnswerKey(items: Omit<AiImportPreviewItem, "include">[]) {
+function reconcileTrailingAnswerKey(items: Omit<AiImportPreviewItem, "include">[]): Omit<AiImportPreviewItem, "include">[] {
   const answerMap = new Map<number, number>();
 
   for (const item of items) {
@@ -149,10 +151,12 @@ function reconcileTrailingAnswerKey(items: Omit<AiImportPreviewItem, "include">[
     const hasQuestion = Boolean(String(item.question || "").trim());
     const hasEnoughOptions = item.options.length >= 2;
 
+    const reconciledStatus: AiImportStatus = hasQuestion && hasEnoughOptions ? "ready" : "partial";
+
     return {
       ...item,
       correctOption: mappedOption,
-      status: hasQuestion && hasEnoughOptions ? "ready" : "partial",
+      status: reconciledStatus,
       reasons: nextReasons,
     };
   });
