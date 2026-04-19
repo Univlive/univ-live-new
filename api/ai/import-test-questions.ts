@@ -83,7 +83,7 @@ const ALLOWED_MIME_TYPES = new Set([
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
 /** Padding percentage applied to each side of a bounding box crop */
-const BBOX_PAD_PERCENT = 0.05;
+const BBOX_PAD_PERCENT = 0.1;
 
 let sharpLoader: Promise<any> | null = null;
 
@@ -222,11 +222,11 @@ function buildSystemInstruction(context: {
     "4. For each valid item, extract options in this exact structure:",
     "   options: { \"a\": \"...\", \"b\": \"...\", \"c\": \"...\", \"d\": \"...\" }",
     "   - Option values must be answer text only (remove labels like A), B., Option C).",
-    "5. Mathematics/science notation must preserve the same visible format as the image.",
-    "   - Keep equations exactly as seen (symbols, operators, spacing, and structure).",
-    "   - Do NOT rewrite notation style (for example, do not convert 1/2 to \\frac{1}{2}, and do not convert \\frac{1}{2} to 1/2).",
-    "   - Preserve ratios and proportions exactly (e.g., 2:3, a:b, x:y).",
-    "   - Preserve fraction forms exactly as printed (stacked fraction, slash fraction, or mixed number).",
+    "5. Mathematics and equations must be represented in standard LaTeX.",
+    "   - Preserve the exact mathematical structure from the image.",
+    "   - Use \\frac{numerator}{denominator} for stacked fractions.",
+    "   - Wrap inline math in $...$ and display/block math in $$...$$.",
+    "   - Keep ratios/proportions and equation relationships faithful to the source image while expressing them in LaTeX.",
     "6. Status classification:",
     "   - Mark status='ready' only when question text and all four options are fully visible and fully extracted from this page.",
     "   - If anything is missing/unclear, use status='partial' or 'rejected'.",
@@ -236,6 +236,7 @@ function buildSystemInstruction(context: {
     "   - If not confidently visible, set correctOption=null.",
     "8. Image coordinates:",
     "   - Return questionImageBox only when a clear diagram/graph/geometric figure is required for that question.",
+    "   - Bounding boxes must include a loose outer margin (about 5%-10% padding) so full edges, axes, and labels are never cropped.",
     "   - Do NOT return coordinates for logos/backgrounds/text blocks.",
     "   - If no required diagram, return an empty array [].",
     "9. Ordering:",
@@ -596,7 +597,7 @@ async function processWithGemini(
     const requestParts: any[] = [
       "Extract all MCQs from this exam page image. " +
       "For any question that has an associated diagram, figure, or graph, " +
-      "return its bounding box in questionImageBox. " +
+      "return its bounding box in questionImageBox with a 5%-10% loose margin around the full visual element (include outer edges, axes, and labels). " +
       "Return the results as structured JSON.",
     ];
 
