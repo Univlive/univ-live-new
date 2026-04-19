@@ -46,8 +46,81 @@ function decodeHexString(input: string) {
   return chars.join("");
 }
 
+const SPECIAL_MATH_SYMBOL_TO_LATEX: Record<string, string> = {
+  // Common private-use glyphs from Symbol-like encodings found in PDFs.
+  "\uF061": "\\alpha",
+  "\uF062": "\\beta",
+  "\uF063": "\\chi",
+  "\uF064": "\\delta",
+  "\uF065": "\\epsilon",
+  "\uF066": "\\phi",
+  "\uF067": "\\gamma",
+  "\uF068": "\\eta",
+  "\uF069": "\\iota",
+  "\uF06B": "\\kappa",
+  "\uF06C": "\\lambda",
+  "\uF06D": "\\mu",
+  "\uF06E": "\\nu",
+  "\uF070": "\\pi",
+  "\uF071": "\\theta",
+  "\uF072": "\\rho",
+  "\uF073": "\\sigma",
+  "\uF074": "\\tau",
+  "\uF075": "\\upsilon",
+  "\uF076": "\\varsigma",
+  "\uF077": "\\omega",
+  "\uF078": "\\xi",
+  "\uF079": "\\psi",
+  "\uF07A": "\\zeta",
+  "\uF0B1": "\\pm",
+  "\uF0B9": "\\neq",
+  "\uF0A5": "\\infty",
+
+  // Unicode Greek/math symbols.
+  "\u03B1": "\\alpha",
+  "\u03B2": "\\beta",
+  "\u03B3": "\\gamma",
+  "\u03B4": "\\delta",
+  "\u03B5": "\\epsilon",
+  "\u03B8": "\\theta",
+  "\u03BB": "\\lambda",
+  "\u03BC": "\\mu",
+  "\u03C0": "\\pi",
+  "\u03C1": "\\rho",
+  "\u03C3": "\\sigma",
+  "\u03C4": "\\tau",
+  "\u03C6": "\\phi",
+  "\u03A9": "\\Omega",
+  "\u03C9": "\\omega",
+  "\u00D7": "\\times",
+  "\u00F7": "\\div",
+  "\u2264": "\\leq",
+  "\u2265": "\\geq",
+  "\u2260": "\\neq",
+  "\u00B1": "\\pm",
+  "\u221E": "\\infty",
+  "\u2211": "\\sum",
+  "\u222B": "\\int",
+  "\u2202": "\\partial",
+  "\u2206": "\\Delta",
+  "\u2212": "-",
+};
+
+function normalizeSpecialMathSymbolsToLatex(input: string) {
+  const value = String(input || "");
+  if (!value) return "";
+
+  const replaced = value.replace(
+    /[\u03B1\u03B2\u03B3\u03B4\u03B5\u03B8\u03BB\u03BC\u03C0\u03C1\u03C3\u03C4\u03C6\u03A9\u03C9\u00D7\u00F7\u2264\u2265\u2260\u00B1\u221E\u2211\u222B\u2202\u2206\u2212\uF000-\uF0FF]/g,
+    (symbol) => SPECIAL_MATH_SYMBOL_TO_LATEX[symbol] || symbol
+  );
+
+  // Ensure latex command boundaries remain valid inside plain text.
+  return replaced.replace(/\\([A-Za-z]+)(?=[A-Za-z0-9])/g, "\\$1 ");
+}
+
 function cleanExtractedText(input: string) {
-  return input
+  return normalizeSpecialMathSymbolsToLatex(input)
     .replace(/\u0000/g, " ")
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ")
     .replace(/[ \t]+/g, " ")
@@ -239,7 +312,7 @@ function normalizeQuestionText(input: string) {
 }
 
 function normalizeMathNotationToLatex(input: string) {
-  const value = String(input || "");
+  const value = normalizeSpecialMathSymbolsToLatex(String(input || ""));
   if (!value.trim()) return "";
 
   // Convert legacy LaTeX delimiters to dollar delimiters for consistency.
@@ -438,6 +511,9 @@ export function normalizeImportedItem(item: any, fallbackIndex: number): Importe
     reasons: Array.from(new Set(reasons)),
     marks: 5,
     negativeMarks: -1,
-    rawBlock: typeof item?.rawBlock === "string" ? item.rawBlock : "",
+    rawBlock:
+      typeof item?.rawBlock === "string"
+        ? normalizeSpecialMathSymbolsToLatex(item.rawBlock)
+        : "",
   };
 }

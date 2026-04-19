@@ -236,7 +236,7 @@ function buildSystemInstruction(context: {
     "   - If not confidently visible, set correctOption=null.",
     "8. Image coordinates:",
     "   - Return questionImageBox only when a clear diagram/graph/geometric figure is required for that question.",
-    "   - Bounding boxes must include a loose outer margin (about 5%-10% padding) so full edges, axes, and labels are never cropped.",
+    "   - Bounding boxes must include a loose outer margin (about 5%-8% padding) so full edges, axes, and labels are never cropped.",
     "   - Do NOT return coordinates for logos/backgrounds/text blocks.",
     "   - If no required diagram, return an empty array [].",
     "9. Ordering:",
@@ -789,8 +789,47 @@ function isLikelyNecessaryDiagramBox(
   return true;
 }
 
+const SYMBOLS_FOR_VERIFICATION: Record<string, string> = {
+  "\uF070": " pi ",
+  "\uF071": " theta ",
+  "\uF061": " alpha ",
+  "\uF062": " beta ",
+  "\uF067": " gamma ",
+  "\uF064": " delta ",
+  "\uF06C": " lambda ",
+  "\uF06D": " mu ",
+  "\uF073": " sigma ",
+  "\uF077": " omega ",
+  "\uF0B1": " plusminus ",
+  "\uF0B9": " notequal ",
+  "\uF0A5": " infinity ",
+  "\u03C0": " pi ",
+  "\u03B1": " alpha ",
+  "\u03B2": " beta ",
+  "\u03B3": " gamma ",
+  "\u03B4": " delta ",
+  "\u03B8": " theta ",
+  "\u03BB": " lambda ",
+  "\u03BC": " mu ",
+  "\u03C3": " sigma ",
+  "\u03C9": " omega ",
+  "\u221E": " infinity ",
+  "\u2260": " notequal ",
+  "\u2264": " lessequal ",
+  "\u2265": " greaterequal ",
+  "\u00D7": " times ",
+  "\u00F7": " divide ",
+};
+
+function normalizeSymbolsForPageVerification(input: string) {
+  return String(input || "").replace(
+    /[\u03B1\u03B2\u03B3\u03B4\u03B8\u03BB\u03BC\u03C0\u03C3\u03C9\u221E\u2260\u2264\u2265\u00D7\u00F7\uF000-\uF0FF]/g,
+    (symbol) => SYMBOLS_FOR_VERIFICATION[symbol] || symbol
+  );
+}
+
 function normalizeForPageVerification(input: string) {
-  return String(input || "")
+  return normalizeSymbolsForPageVerification(String(input || ""))
     .replace(/<[^>]*>/g, " ")
     .replace(/\\\((.*?)\\\)/g, " $1 ")
     .replace(/\\\[(.*?)\\\]/g, " $1 ")
