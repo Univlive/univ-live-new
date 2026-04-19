@@ -37,6 +37,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
+import ReactCrop, {
+    type Crop,
+    type PercentCrop,
+    type PixelCrop,
+} from "react-image-crop";
+import "react-image-crop/dist/ReactCrop.css";
 
 import AiQuestionImportOverlay from "@/components/educator/AiQuestionImportOverlay";
 import ImageTextarea from "@/components/educator/ImageTextarea";
@@ -51,6 +57,7 @@ import {
 } from "@/lib/aiQuestionImport";
 import { aiFeatureFlags, getAiFeatureDisabledMessage } from "@/lib/aiFeatureFlags";
 import { HtmlView } from "@/lib/safeHtml";
+import { uploadToImageKit } from "@/lib/imagekitUpload";
 
 // Firebase
 import {
@@ -106,6 +113,81 @@ type TestQuestion = {
     updatedAt?: any;
 };
 
+type EditorDraftSnapshot = {
+    question: string;
+    options: string[];
+    correct: number;
+    difficulty: Difficulty;
+    subject: string;
+    topic: string;
+    marks: string;
+    negativeMarks: string;
+    active: boolean;
+};
+
+type PendingEditorAction =
+    | { type: "close-manager" }
+    | { type: "close-editor" }
+    | { type: "open-new" }
+    | { type: "open-edit"; question: TestQuestion };
+
+type PreviewCropTarget =
+    | { kind: "question"; imageIndex: number }
+    | { kind: "option"; optionIndex: number; imageIndex: number };
+
+function normalizeOptionsForSnapshot(options: string[] = []) {
+    const normalized = options.slice(0, 6).map((value) => String(value ?? ""));
+    while (normalized.length < 4) normalized.push("");
+    return normalized;
+}
+
+function buildSnapshotFromQuestion(question?: TestQuestion): EditorDraftSnapshot {
+    if (!question) {
+        return {
+            question: "",
+            options: ["", "", "", ""],
+            correct: 0,
+            difficulty: "medium",
+            subject: "",
+            topic: "",
+            marks: "",
+            negativeMarks: "",
+            active: true,
+        };
+    }
+
+    const options = normalizeOptionsForSnapshot(question.options || []);
+    const parsedCorrect = Number.isFinite(question.correctOption) ? question.correctOption : 0;
+
+    return {
+        question: question.question || "",
+        options,
+        correct: Math.min(Math.max(0, parsedCorrect), options.length - 1),
+        difficulty: question.difficulty || "medium",
+        subject: question.subject || "",
+        topic: question.topic || "",
+        marks: question.marks != null ? String(question.marks) : "",
+        negativeMarks: question.negativeMarks != null ? String(question.negativeMarks) : "",
+        active: isQuestionPublished(question.isActive),
+    };
+}
+
+function areSnapshotsEqual(a: EditorDraftSnapshot, b: EditorDraftSnapshot) {
+    if (a.question !== b.question) return false;
+    if (a.correct !== b.correct) return false;
+    if (a.difficulty !== b.difficulty) return false;
+    if (a.subject !== b.subject) return false;
+    if (a.topic !== b.topic) return false;
+    if (a.marks !== b.marks) return false;
+    if (a.negativeMarks !== b.negativeMarks) return false;
+    if (a.active !== b.active) return false;
+    if (a.options.length !== b.options.length) return false;
+    for (let i = 0; i < a.options.length; i += 1) {
+        if (a.options[i] !== b.options[i]) return false;
+    }
+    return true;
+}
+
 function stripHtml(input: string) {
     if (!input) return "";
     return input.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
@@ -137,6 +219,13 @@ function hasPreviewContent(raw: string) {
     const imageRegex = new RegExp(IMG_TAG_REGEX.source, "gi");
     if (imageRegex.test(raw)) return true;
     return raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().length > 0;
+}
+
+function combinePreviewContent(text: string, imageUrls: string[]) {
+    if (imageUrls.length === 0) return text;
+    const tags = imageUrls.map((url) => `<img src="${url}" alt="" />`).join("\n");
+    if (!text) return tags;
+    return text.endsWith("\n") ? `${text}${tags}` : `${text}\n${tags}`;
 }
 
 function isQuestionPublished(isActive?: boolean) {
@@ -327,6 +416,22 @@ const QuestionsManager = ({
     const [formMarks, setFormMarks] = useState("");
     const [formNegMarks, setFormNegMarks] = useState("");
     const [formActive, setFormActive] = useState(true);
+    const [editorSnapshot, setEditorSnapshot] = useState<EditorDraftSnapshot | null>(null);
+    const [unsavedConfirmOpen, setUnsavedConfirmOpen] = useState(false);
+    const [pendingEditorAction, setPendingEditorAction] = useState<PendingEditorAction | null>(null);
+    const [previewCropOpen, setPreviewCropOpen] = useState(false);
+    const [previewCropTargetUrl, setPreviewCropTargetUrl] = useState<string | null>(null);
+    const [previewCropTarget, setPreviewCropTarget] = useState<PreviewCropTarget | null>(null);
+    const [previewCropSelection, setPreviewCropSelection] = useState<Crop>({
+        unit: "%",
+        x: 10,
+        y: 10,
+        width: 80,
+        height: 80,
+    });
+    const [previewCropPixels, setPreviewCropPixels] = useState<PixelCrop | null>(null);
+    const [previewCropping, setPreviewCropping] = useState(false);
+    const previewCropImageRef = useRef<HTMLImageElement | null>(null);
 
     const [saving, setSaving] = useState(false);
 
@@ -436,6 +541,28 @@ const QuestionsManager = ({
                 .filter(({ option }) => hasPreviewContent(option || "")),
         [formOptions]
     );
+
+    const questionPreviewParts = useMemo(() => splitPreviewContent(formQuestion || ""), [formQuestion]);
+
+    const currentEditorSnapshot = useMemo<EditorDraftSnapshot>(
+        () => ({
+            question: formQuestion,
+            options: normalizeOptionsForSnapshot(formOptions),
+            correct: Number(formCorrect) || 0,
+            difficulty: formDifficulty || "medium",
+            subject: formSubject || "",
+            topic: formTopic || "",
+            marks: formMarks,
+            negativeMarks: formNegMarks,
+            active: !!formActive,
+        }),
+        [formQuestion, formOptions, formCorrect, formDifficulty, formSubject, formTopic, formMarks, formNegMarks, formActive]
+    );
+
+    const hasUnsavedQuestionChanges = useMemo(() => {
+        if (!editorOpen || !editorSnapshot) return false;
+        return !areSnapshotsEqual(editorSnapshot, currentEditorSnapshot);
+    }, [editorOpen, editorSnapshot, currentEditorSnapshot]);
 
     const dndEnabled = searchQ.trim().length === 0;
 
@@ -585,6 +712,7 @@ const QuestionsManager = ({
         setFormMarks("");
         setFormNegMarks("");
         setFormActive(true);
+        setEditorSnapshot(null);
     }
 
     function addOptionField() {
@@ -604,16 +732,16 @@ const QuestionsManager = ({
         });
     }
 
-    function openNew() {
+    function openNewDirect() {
         resetEditor();
+        setEditorSnapshot(buildSnapshotFromQuestion());
         setEditorOpen(true);
     }
 
-    function openEdit(q: TestQuestion) {
+    function openEditDirect(q: TestQuestion) {
         setEditingId(q.id);
         setFormQuestion(q.question || "");
-        const existingOptions = (q.options || []).slice(0, 6).map((opt) => opt || "");
-        while (existingOptions.length < 4) existingOptions.push("");
+        const existingOptions = normalizeOptionsForSnapshot(q.options || []);
         setFormOptions(existingOptions);
         const parsedCorrect = Number.isFinite(q.correctOption) ? q.correctOption : 0;
         setFormCorrect(Math.min(Math.max(0, parsedCorrect), existingOptions.length - 1));
@@ -623,11 +751,176 @@ const QuestionsManager = ({
         setFormMarks(q.marks != null ? String(q.marks) : "");
         setFormNegMarks(q.negativeMarks != null ? String(q.negativeMarks) : "");
         setFormActive(isQuestionPublished(q.isActive));
+        setEditorSnapshot(buildSnapshotFromQuestion(q));
         setEditorOpen(true);
     }
 
-    async function saveQuestion() {
-        if (saving) return;
+    function runEditorAction(action: PendingEditorAction) {
+        if (action.type === "close-manager") {
+            onClose();
+            return;
+        }
+        if (action.type === "close-editor") {
+            setEditorOpen(false);
+            resetEditor();
+            return;
+        }
+        if (action.type === "open-new") {
+            openNewDirect();
+            return;
+        }
+        if (action.type === "open-edit") {
+            openEditDirect(action.question);
+        }
+    }
+
+    function requestEditorAction(action: PendingEditorAction) {
+        if (editorOpen && hasUnsavedQuestionChanges) {
+            setPendingEditorAction(action);
+            setUnsavedConfirmOpen(true);
+            return;
+        }
+        runEditorAction(action);
+    }
+
+    function openNew() {
+        requestEditorAction({ type: "open-new" });
+    }
+
+    function openEdit(q: TestQuestion) {
+        requestEditorAction({ type: "open-edit", question: q });
+    }
+
+    function requestCloseEditor() {
+        requestEditorAction({ type: "close-editor" });
+    }
+
+    function requestCloseManager() {
+        requestEditorAction({ type: "close-manager" });
+    }
+
+    function openPreviewCrop(target: PreviewCropTarget, imageUrl: string) {
+        setPreviewCropTarget(target);
+        setPreviewCropTargetUrl(imageUrl);
+        setPreviewCropSelection({ unit: "%", x: 10, y: 10, width: 80, height: 80 });
+        setPreviewCropPixels(null);
+        setPreviewCropOpen(true);
+    }
+
+    function closePreviewCrop() {
+        setPreviewCropOpen(false);
+        setPreviewCropTarget(null);
+        setPreviewCropTargetUrl(null);
+        setPreviewCropPixels(null);
+    }
+
+    function handleQuestionPreviewImageClick(event: React.MouseEvent<HTMLDivElement>) {
+        const target = event.target as HTMLElement;
+        if (!target || target.tagName !== "IMG") return;
+        const src = (target as HTMLImageElement).getAttribute("src") || "";
+        if (!src) return;
+
+        const imageIndex = questionPreviewParts.imageUrls.indexOf(src);
+        if (imageIndex < 0) return;
+
+        openPreviewCrop({ kind: "question", imageIndex }, src);
+    }
+
+    function handleOptionPreviewImageClick(optionIndex: number, optionRaw: string, event: React.MouseEvent<HTMLDivElement>) {
+        const target = event.target as HTMLElement;
+        if (!target || target.tagName !== "IMG") return;
+        const src = (target as HTMLImageElement).getAttribute("src") || "";
+        if (!src) return;
+
+        const optionParts = splitPreviewContent(optionRaw || "");
+        const imageIndex = optionParts.imageUrls.indexOf(src);
+        if (imageIndex < 0) return;
+
+        openPreviewCrop({ kind: "option", optionIndex, imageIndex }, src);
+    }
+
+    async function createPreviewCroppedBlob(image: HTMLImageElement, pixelCrop: PixelCrop): Promise<Blob> {
+        const scaleX = image.naturalWidth / image.width;
+        const scaleY = image.naturalHeight / image.height;
+
+        const outWidth = Math.max(1, Math.floor(pixelCrop.width * scaleX));
+        const outHeight = Math.max(1, Math.floor(pixelCrop.height * scaleY));
+
+        const canvas = document.createElement("canvas");
+        canvas.width = outWidth;
+        canvas.height = outHeight;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("Could not create crop canvas");
+
+        ctx.drawImage(
+            image,
+            pixelCrop.x * scaleX,
+            pixelCrop.y * scaleY,
+            pixelCrop.width * scaleX,
+            pixelCrop.height * scaleY,
+            0,
+            0,
+            outWidth,
+            outHeight
+        );
+
+        const blob = await new Promise<Blob | null>((resolve) => {
+            canvas.toBlob((output) => resolve(output), "image/png", 1);
+        });
+
+        if (!blob) throw new Error("Failed to generate cropped image");
+        return blob;
+    }
+
+    async function applyPreviewCrop() {
+        if (!previewCropTarget || !previewCropTargetUrl || !previewCropPixels || !previewCropImageRef.current) {
+            toast.error("Select a crop area first");
+            return;
+        }
+
+        setPreviewCropping(true);
+        try {
+            const croppedBlob = await createPreviewCroppedBlob(previewCropImageRef.current, previewCropPixels);
+            const folder = previewCropTarget.kind === "question" ? "/test-questions" : "/test-options";
+            const fileName = `preview-crop-${Date.now()}.png`;
+            const { url } = await uploadToImageKit(croppedBlob, fileName, folder, "website");
+
+            if (previewCropTarget.kind === "question") {
+                const current = splitPreviewContent(formQuestion || "");
+                if (previewCropTarget.imageIndex < 0 || previewCropTarget.imageIndex >= current.imageUrls.length) {
+                    closePreviewCrop();
+                    return;
+                }
+                const nextUrls = [...current.imageUrls];
+                nextUrls[previewCropTarget.imageIndex] = url;
+                setFormQuestion(combinePreviewContent(current.text, nextUrls));
+            } else {
+                const optionValue = formOptions[previewCropTarget.optionIndex] || "";
+                const current = splitPreviewContent(optionValue);
+                if (previewCropTarget.imageIndex < 0 || previewCropTarget.imageIndex >= current.imageUrls.length) {
+                    closePreviewCrop();
+                    return;
+                }
+                const nextUrls = [...current.imageUrls];
+                nextUrls[previewCropTarget.imageIndex] = url;
+                const nextValue = combinePreviewContent(current.text, nextUrls);
+                setFormOptions((prev) => prev.map((opt, i) => (i === previewCropTarget.optionIndex ? nextValue : opt)));
+            }
+
+            toast.success("Image cropped");
+            closePreviewCrop();
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : "Image crop failed";
+            console.error("[QuestionsManager preview crop error]", msg);
+            toast.error(msg);
+        } finally {
+            setPreviewCropping(false);
+        }
+    }
+
+    async function saveQuestion(): Promise<boolean> {
+        if (saving) return false;
 
         const trimmedQuestion = formQuestion.trim();
         const normalizedOptions = formOptions.slice(0, 6).map((value) => value ?? "");
@@ -635,15 +928,15 @@ const QuestionsManager = ({
 
         if (!trimmedQuestion) {
             toast.error("Question is required");
-            return;
+            return false;
         }
         if (nonEmptyOptions.length < 2) {
             toast.error("At least two options are required");
-            return;
+            return false;
         }
         if (!normalizedOptions[formCorrect] || normalizedOptions[formCorrect].trim() === "") {
             toast.error("Correct option cannot be empty");
-            return;
+            return false;
         }
 
         const payload: any = {
@@ -680,12 +973,40 @@ const QuestionsManager = ({
             await syncTestQuestionCount();
             setEditorOpen(false);
             resetEditor();
+            return true;
         } catch (e) {
             console.error(e);
             toast.error("Save failed");
+            return false;
         } finally {
             setSaving(false);
         }
+    }
+
+    async function handleSaveAndContinue() {
+        if (!pendingEditorAction) {
+            setUnsavedConfirmOpen(false);
+            return;
+        }
+
+        const actionToRun = pendingEditorAction;
+        const saved = await saveQuestion();
+        if (!saved) return;
+
+        setUnsavedConfirmOpen(false);
+        setPendingEditorAction(null);
+        runEditorAction(actionToRun);
+    }
+
+    function handleExitWithoutSaving() {
+        if (!pendingEditorAction) {
+            setUnsavedConfirmOpen(false);
+            return;
+        }
+        const actionToRun = pendingEditorAction;
+        setUnsavedConfirmOpen(false);
+        setPendingEditorAction(null);
+        runEditorAction(actionToRun);
     }
 
     async function deleteQuestion(id: string) {
@@ -1040,11 +1361,11 @@ const QuestionsManager = ({
                         </p>
                     </div>
                     {isPageMode ? (
-                        <Button variant="outline" onClick={onClose} className="rounded-xl">
+                        <Button variant="outline" onClick={requestCloseManager} className="rounded-xl">
                             <ArrowLeft className="h-4 w-4 mr-2" /> Back
                         </Button>
                     ) : (
-                        <Button variant="ghost" size="icon" onClick={onClose} className="rounded-xl">
+                        <Button variant="ghost" size="icon" onClick={requestCloseManager} className="rounded-xl">
                             <X className="h-5 w-5" />
                         </Button>
                     )}
@@ -1072,10 +1393,7 @@ const QuestionsManager = ({
                                             <Button
                                                 variant="outline"
                                                 className="rounded-xl"
-                                                onClick={() => {
-                                                    setEditorOpen(false);
-                                                    resetEditor();
-                                                }}
+                                                onClick={requestCloseEditor}
                                             >
                                                 Cancel
                                             </Button>
@@ -1217,20 +1535,20 @@ const QuestionsManager = ({
                                             <p className="text-xs font-medium text-muted-foreground mb-2">Question Preview</p>
                                             {hasPreviewContent(formQuestion) ? (
                                                 <div className="space-y-3">
-                                                    <div className="rounded-lg border border-border/60 bg-background p-3">
-                                                        <HtmlView html={formQuestion} className="text-sm break-words" />
+                                                    <div className="rounded-lg border border-border/60 bg-background p-3" onClick={handleQuestionPreviewImageClick}>
+                                                        <HtmlView html={formQuestion} className="text-sm break-words [&_img]:cursor-pointer" />
                                                     </div>
 
                                                     <div className="space-y-2">
                                                         <p className="text-xs font-medium text-muted-foreground">Options Preview</p>
                                                         {previewOptions.length ? (
                                                             previewOptions.map(({ index, option }) => (
-                                                                <div key={index} className="rounded-lg border border-border/60 bg-background p-3">
+                                                                <div key={index} className="rounded-lg border border-border/60 bg-background p-3" onClick={(event) => handleOptionPreviewImageClick(index, option, event)}>
                                                                     <div className="flex items-start gap-2">
                                                                         <span className="text-xs font-semibold text-muted-foreground mt-1">
                                                                             {String.fromCharCode(65 + index)}.
                                                                         </span>
-                                                                        <HtmlView html={option} className="text-sm break-words flex-1" />
+                                                                        <HtmlView html={option} className="text-sm break-words flex-1 [&_img]:cursor-pointer" />
                                                                         {formCorrect === index ? (
                                                                             <Badge className="rounded-full text-[10px]">Correct</Badge>
                                                                         ) : null}
@@ -1391,6 +1709,95 @@ const QuestionsManager = ({
                     onSelectOnlyRejected={selectOnlyRejectedImportItems}
                     onSaveSelected={saveImportedQuestions}
                 />
+
+                <Dialog
+                    open={previewCropOpen}
+                    onOpenChange={(open) => {
+                        if (!open && !previewCropping) closePreviewCrop();
+                    }}
+                >
+                    <DialogContent className="sm:max-w-3xl rounded-2xl">
+                        <DialogHeader>
+                            <DialogTitle>Crop Preview Image</DialogTitle>
+                            <DialogDescription>
+                                Click on an image in preview and crop the exact region to keep.
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="rounded-xl border bg-black/70 p-2 max-h-[68vh] overflow-auto">
+                            {previewCropTargetUrl ? (
+                                <ReactCrop
+                                    crop={previewCropSelection}
+                                    onChange={(_px: PixelCrop, percentCrop: PercentCrop) =>
+                                        setPreviewCropSelection(percentCrop)
+                                    }
+                                    onComplete={(pixelCrop) => setPreviewCropPixels(pixelCrop)}
+                                    keepSelection
+                                    minWidth={20}
+                                    minHeight={20}
+                                >
+                                    <img
+                                        ref={previewCropImageRef}
+                                        src={previewCropTargetUrl}
+                                        alt="Preview crop"
+                                        crossOrigin="anonymous"
+                                        className="max-h-[60vh] w-auto mx-auto"
+                                    />
+                                </ReactCrop>
+                            ) : (
+                                <div className="h-[260px] flex items-center justify-center text-sm text-muted-foreground">
+                                    No image selected
+                                </div>
+                            )}
+                        </div>
+
+                        <DialogFooter>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={closePreviewCrop}
+                                disabled={previewCropping}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="button"
+                                onClick={applyPreviewCrop}
+                                disabled={previewCropping || !previewCropPixels || previewCropPixels.width < 2 || previewCropPixels.height < 2}
+                            >
+                                {previewCropping ? <Loader2 className="h-4 w-4 animate-spin" /> : "Apply Crop"}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                <Dialog
+                    open={unsavedConfirmOpen}
+                    onOpenChange={(open) => {
+                        if (!open) {
+                            setUnsavedConfirmOpen(false);
+                            setPendingEditorAction(null);
+                        }
+                    }}
+                >
+                    <DialogContent className="rounded-2xl">
+                        <DialogHeader>
+                            <DialogTitle>Save Question Changes?</DialogTitle>
+                            <DialogDescription>
+                                You made changes in this question. Do you want to save and update before exiting?
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <DialogFooter>
+                            <Button variant="outline" onClick={handleExitWithoutSaving}>
+                                No, Exit
+                            </Button>
+                            <Button onClick={handleSaveAndContinue} disabled={saving}>
+                                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Yes, Save Changes"}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
 
                 <Dialog
                     open={confirmPdfOpen}

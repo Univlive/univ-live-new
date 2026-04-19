@@ -46,8 +46,84 @@ function decodeHexString(input: string) {
   return chars.join("");
 }
 
+const SPECIAL_MATH_SYMBOL_TO_LATEX: Record<string, string> = {
+  // Common private-use glyphs from Symbol-like encodings found in PDFs.
+  "\uF061": "\\alpha",
+  "\uF062": "\\beta",
+  "\uF063": "\\chi",
+  "\uF064": "\\delta",
+  "\uF065": "\\epsilon",
+  "\uF066": "\\phi",
+  "\uF067": "\\gamma",
+  "\uF068": "\\eta",
+  "\uF069": "\\iota",
+  "\uF06B": "\\kappa",
+  "\uF06C": "\\lambda",
+  "\uF06D": "\\mu",
+  "\uF06E": "\\nu",
+  "\uF070": "\\pi",
+  "\uF071": "\\theta",
+  "\uF072": "\\rho",
+  "\uF073": "\\sigma",
+  "\uF074": "\\tau",
+  "\uF075": "\\upsilon",
+  "\uF076": "\\varsigma",
+  "\uF077": "\\omega",
+  "\uF078": "\\xi",
+  "\uF079": "\\psi",
+  "\uF07A": "\\zeta",
+  "\uF0B1": "\\pm",
+  "\uF0B9": "\\neq",
+  "\uF0A5": "\\infty",
+
+  // Unicode Greek/math symbols.
+  "\u03B1": "\\alpha",
+  "\u03B2": "\\beta",
+  "\u03B3": "\\gamma",
+  "\u03B4": "\\delta",
+  "\u03B5": "\\epsilon",
+  "\u03B8": "\\theta",
+  "\u03BB": "\\lambda",
+  "\u03BC": "\\mu",
+  "\u03C0": "\\pi",
+  "\u03C1": "\\rho",
+  "\u03C3": "\\sigma",
+  "\u03C4": "\\tau",
+  "\u03C6": "\\phi",
+  "\u03A9": "\\Omega",
+  "\u03C9": "\\omega",
+  "\u00D7": "\\times",
+  "\u00F7": "\\div",
+  "\u2264": "\\leq",
+  "\u2265": "\\geq",
+  "\u2260": "\\neq",
+  "\u00B1": "\\pm",
+  "\u221E": "\\infty",
+  "\u2211": "\\sum",
+  "\u222B": "\\int",
+  "\u2202": "\\partial",
+  "\u2206": "\\Delta",
+  "\u2212": "-",
+};
+
+function normalizeSpecialMathSymbolsToLatex(input: string) {
+  const value = String(input || "");
+  if (!value) return "";
+
+  const replaced = value.replace(
+    /[\u03B1\u03B2\u03B3\u03B4\u03B5\u03B8\u03BB\u03BC\u03C0\u03C1\u03C3\u03C4\u03C6\u03A9\u03C9\u00D7\u00F7\u2264\u2265\u2260\u00B1\u221E\u2211\u222B\u2202\u2206\u2212\uF000-\uF0FF]/g,
+    (symbol) => SPECIAL_MATH_SYMBOL_TO_LATEX[symbol] || symbol
+  );
+
+  // Ensure known symbol commands are separated from immediate trailing variables, e.g. "\pir" -> "\pi r".
+  return replaced.replace(
+    /(\\(?:alpha|beta|gamma|delta|epsilon|theta|lambda|mu|nu|pi|rho|sigma|tau|phi|omega|xi|psi|zeta|eta|kappa|upsilon|varsigma|Delta|Omega))(?=[A-Za-z0-9])/g,
+    "$1 "
+  );
+}
+
 function cleanExtractedText(input: string) {
-  return input
+  return normalizeSpecialMathSymbolsToLatex(input)
     .replace(/\u0000/g, " ")
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ")
     .replace(/[ \t]+/g, " ")
@@ -204,11 +280,13 @@ function stripQuestionNumberPrefix(input: string) {
   if (!value) return value;
 
   const patterns = [
-    /^(?:q(?:uestion)?\s*(?:no\.?\s*)?)\d{1,4}\s*[:.)-]\s*/i,
+    /^(?:q(?:uestion)?\s*(?:no\.?\s*)?)\d{1,4}\s*[.)-]\s*/i,
+    /^(?:q(?:uestion)?\s*(?:no\.?\s*)?)\d{1,4}\s*:\s*(?!\d)/i,
     /^(?:q(?:uestion)?\s*(?:no\.?\s*)?)\d{1,4}\s+/i,
     /^\(\s*\d{1,4}\s*\)\s*/,
     /^\[\s*\d{1,4}\s*\]\s*/,
-    /^\d{1,4}\s*[:.)-]\s*/,
+    /^\d{1,4}\s*[.)-]\s*/,
+    /^\d{1,4}\s*:\s*(?!\d)/,
   ];
 
   for (const pattern of patterns) {
@@ -228,14 +306,109 @@ function normalizeQuestionText(input: string) {
 
   if (!lines.length) return "";
 
-  const optionLinePattern = /^\s*(?:option|choice)?\s*[A-D1-4]\s*[)\].:\-]\s+/i;
+  const optionLinePattern = /^\s*(?:(?:option|choice)\s*)?(?:[A-D]\s*[)\].:\-]|[1-4]\s*[)\].-])\s+/i;
   const answerHintLinePattern = /^\s*(?:ans(?:wer)?|correct(?:\s+answer|\s+option|\s+choice)?|solution)\b/i;
 
-  const cleanedLines = lines.filter(
-    (line) => !optionLinePattern.test(line) && !answerHintLinePattern.test(line)
-  );
+  const looksMathHeavyLine = (line: string) => {
+    const value = String(line || "").trim();
+    if (!value) return false;
+
+    if (/\\(?:frac|dfrac|tfrac|sqrt|sum|int|prod|lim|log|ln|sin|cos|tan|cot|sec|csc|alpha|beta|gamma|delta|epsilon|theta|lambda|mu|nu|pi|rho|sigma|tau|phi|omega|xi|psi|zeta|eta|kappa|upsilon|varsigma|Delta|Omega|pm|times|div|leq|geq|neq|infty|partial)\b/.test(value)) {
+      return true;
+    }
+
+    if (/\$/.test(value)) return true;
+    if (/[\u00B1\u00D7\u00F7\u221A\u2211\u222B\u2260\u2264\u2265\u03C0]/.test(value)) return true;
+    if (/\b\d+\s*:\s*\d+\b/.test(value)) return true;
+    if (/\b[A-Za-z0-9]+\s*[=^]\s*[A-Za-z0-9]+\b/.test(value)) return true;
+    if (/\b[A-Za-z0-9]+\s*[+\-*/]\s*[A-Za-z0-9]+\b/.test(value)) return true;
+
+    return false;
+  };
+
+  const cleanedLines = lines.filter((line) => {
+    if (answerHintLinePattern.test(line)) return false;
+    if (!optionLinePattern.test(line)) return true;
+    // Keep lines that look mathematically meaningful even if they resemble an option label.
+    return looksMathHeavyLine(line);
+  });
 
   return cleanedLines.join("\n").trim();
+}
+
+function normalizeMathNotationToLatex(input: string) {
+  const value = normalizeSpecialMathSymbolsToLatex(String(input || ""));
+  if (!value.trim()) return "";
+
+  // Convert legacy LaTeX delimiters to dollar delimiters for consistency.
+  const normalizedDelimiters = value
+    .replace(/\\\(([^]+?)\\\)/g, (_, expr: string) => `$${String(expr || "").trim()}$`)
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_, expr: string) => `$$${String(expr || "").trim()}$$`);
+
+  const fractionMap: Record<string, string> = {
+    "½": "\\frac{1}{2}",
+    "⅓": "\\frac{1}{3}",
+    "⅔": "\\frac{2}{3}",
+    "¼": "\\frac{1}{4}",
+    "¾": "\\frac{3}{4}",
+    "⅕": "\\frac{1}{5}",
+    "⅖": "\\frac{2}{5}",
+    "⅗": "\\frac{3}{5}",
+    "⅘": "\\frac{4}{5}",
+    "⅙": "\\frac{1}{6}",
+    "⅚": "\\frac{5}{6}",
+    "⅛": "\\frac{1}{8}",
+    "⅜": "\\frac{3}{8}",
+    "⅝": "\\frac{5}{8}",
+    "⅞": "\\frac{7}{8}",
+  };
+
+  const parts = normalizedDelimiters.split(/(\${1,2}[\s\S]*?\${1,2})/g);
+
+  const processed = parts
+    .map((part) => {
+      if (!part) return part;
+      if (/^\${1,2}[\s\S]*\${1,2}$/.test(part)) return part;
+
+      let out = part;
+
+      out = out.replace(/[½⅓⅔¼¾⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞]/g, (ch) => fractionMap[ch] || ch);
+
+      // Convert simple slash fractions to LaTeX fractions.
+      out = out.replace(
+        /(^|[^\\\w])([A-Za-z0-9]+)\s*\/\s*([A-Za-z0-9]+)(?=$|[^\w])/g,
+        (_match: string, prefix: string, num: string, den: string) => `${prefix}\\frac{${num}}{${den}}`
+      );
+
+      // Ensure LaTeX fractions are wrapped in inline math mode.
+      out = out.replace(
+        /\\(?:frac|dfrac|tfrac)\s*\{[^{}]+\}\s*\{[^{}]+\}/g,
+        (expr: string) => `$${expr}$`
+      );
+
+      // Ensure standalone symbol commands are wrapped in inline math mode.
+      out = out.replace(
+        /\\(?:alpha|beta|gamma|delta|epsilon|theta|lambda|mu|nu|pi|rho|sigma|tau|phi|omega|xi|psi|zeta|eta|kappa|upsilon|varsigma|Delta|Omega|pm|times|div|leq|geq|neq|infty|sum|int|partial)(?:\s*_[^\s^{}]+|\s*_\{[^}]+\})?(?:\s*\^[^\s_{}]+|\s*\^\{[^}]+\})?/g,
+        (expr: string) => `$${expr.trim()}$`
+      );
+
+      // Wrap simple equation chains in inline math mode.
+      out = out.replace(
+        /\b(?:[A-Za-z]|\d+)(?:\s*[=+\-*/^]\s*(?:[A-Za-z]|\d+)){1,}\b/g,
+        (expr: string) => `$${expr.trim()}$`
+      );
+
+      // Wrap simple ratio/proportion patterns in inline math mode.
+      out = out.replace(
+        /\b([A-Za-z0-9]+\s*:\s*[A-Za-z0-9]+)\b/g,
+        (_match: string, expr: string) => `$${expr.replace(/\s+/g, "")}$`
+      );
+
+      return out;
+    })
+    .join("");
+
+  return processed;
 }
 
 function looksLikeInstructionOrMetaText(question: string) {
@@ -305,19 +478,19 @@ function normalizeCorrectOptionValue(rawCorrectOption: any, optionCount: number)
 }
 
 export function normalizeImportedItem(item: any, fallbackIndex: number): ImportedQuestionItem {
-  const rawQuestion = String(item?.question || "");
+  const rawQuestion = normalizeMathNotationToLatex(String(item?.question || ""));
   const question = normalizeQuestionText(stripQuestionNumberPrefix(rawQuestion));
   const options = (() => {
     if (Array.isArray(item?.options)) {
       return item.options
-        .map((option: any) => String(option || "").trim())
+        .map((option: any) => normalizeMathNotationToLatex(String(option || "").trim()))
         .filter(Boolean)
         .slice(0, 4);
     }
 
     if (item?.options && typeof item.options === "object") {
       return ["a", "b", "c", "d"]
-        .map((key) => String(item.options?.[key] || "").trim())
+        .map((key) => normalizeMathNotationToLatex(String(item.options?.[key] || "").trim()))
         .filter(Boolean)
         .slice(0, 4);
     }
@@ -369,6 +542,9 @@ export function normalizeImportedItem(item: any, fallbackIndex: number): Importe
     reasons: Array.from(new Set(reasons)),
     marks: 5,
     negativeMarks: -1,
-    rawBlock: typeof item?.rawBlock === "string" ? item.rawBlock : "",
+    rawBlock:
+      typeof item?.rawBlock === "string"
+        ? normalizeSpecialMathSymbolsToLatex(item.rawBlock)
+        : "",
   };
 }

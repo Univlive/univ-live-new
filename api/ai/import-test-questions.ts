@@ -83,7 +83,22 @@ const ALLOWED_MIME_TYPES = new Set([
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
 /** Padding percentage applied to each side of a bounding box crop */
-const BBOX_PAD_PERCENT = 0.05;
+const BBOX_PAD_PERCENT = 0.1;
+
+/** Extra top padding kept intentionally low to avoid pulling question text into diagram crop */
+const BBOX_TOP_PAD_PERCENT = 0.04;
+
+/** Extra bottom padding can be a bit higher for axis labels/legends below plots */
+const BBOX_BOTTOM_PAD_PERCENT = 0.1;
+
+/** Minimum pixel padding for tiny boxes */
+const MIN_PAD_PX = 6;
+
+/** Edge-text trimming thresholds for top/bottom cleanup inside cropped diagram */
+const EDGE_TEXT_SCAN_RATIO = 0.3;
+const EDGE_TEXT_SCAN_MAX_PX = 180;
+const EDGE_TEXT_MAX_TRIM_RATIO = 0.2;
+const EDGE_TEXT_GAP_ROWS = 4;
 
 let sharpLoader: Promise<any> | null = null;
 
@@ -175,7 +190,7 @@ async function buildMcqSchema() {
               items: { type: SchemaType.NUMBER },
               description:
                 "If a diagram/image/figure exists for this question, return bounding box " +
-                "[ymin, xmin, ymax, xmax] scaled 0-1000. Otherwise, empty array.",
+                "[ymin, xmin, ymax, xmax] scaled 0-1000. Use a generous box that includes full outer edges, axes, ticks, labels, legends, and arrowheads with extra margin. Otherwise, empty array.",
             },
           },
           required: [
@@ -222,10 +237,14 @@ function buildSystemInstruction(context: {
     "4. For each valid item, extract options in this exact structure:",
     "   options: { \"a\": \"...\", \"b\": \"...\", \"c\": \"...\", \"d\": \"...\" }",
     "   - Option values must be answer text only (remove labels like A), B., Option C).",
-    "5. Mathematics and science notation must use raw LaTeX when identifiable.",
-    "   - Inline math must be wrapped as \\( ... \\).",
-    "   - Block equations must be wrapped as $$ ... $$.",
-    "   - Prefer LaTeX forms for fractions/symbols (e.g., \\(\\frac{1}{2}\\) instead of 1/2).",
+    "5. All mathematical expressions in question and options must be represented in standard LaTeX.",
+    "   - Preserve the exact mathematical structure from the image.",
+    "   - Use \\frac{numerator}{denominator} for fractions whenever mathematically intended.",
+    "   - Wrap inline math in $...$ and display/block math in $$...$$.",
+    "   - Apply this consistently to equations, inequalities, exponents, roots, ratios/proportions, and unit expressions.",
+    "   - Do NOT omit, simplify, or rewrite any math token: keep all numbers, variables, operators, and symbols exactly as visible.",
+    "   - Preserve equation order and multi-line math layout from the source image.",
+    "   - If math is partially visible, return the visible part faithfully in LaTeX (do not invent missing pieces).",
     "6. Status classification:",
     "   - Mark status='ready' only when question text and all four options are fully visible and fully extracted from this page.",
     "   - If anything is missing/unclear, use status='partial' or 'rejected'.",
@@ -235,7 +254,12 @@ function buildSystemInstruction(context: {
     "   - If not confidently visible, set correctOption=null.",
     "8. Image coordinates:",
     "   - Return questionImageBox only when a clear diagram/graph/geometric figure is required for that question.",
+    "   - Bounding boxes must include a loose outer margin (about 2%-6% padding) so full edges, axes, ticks, labels, legends, and arrowheads are never cropped.",
+    "   - Never return a tight box that touches the visual element boundary.",
+    "   - If uncertain, choose a slightly larger box rather than a tighter box.",
+    "   - Keep coordinates within 0..1000 and maintain ymin < ymax, xmin < xmax.",
     "   - Do NOT return coordinates for logos/backgrounds/text blocks.",
+    "   - Diagram should not contain any of the question text, lables or text with diagram are accepted",
     "   - If no required diagram, return an empty array [].",
     "9. Ordering:",
     "   - Number sourceIndex sequentially from 1 in exact top-to-bottom order on this page.",
@@ -594,8 +618,10 @@ async function processWithGemini(
 
     const requestParts: any[] = [
       "Extract all MCQs from this exam page image. " +
+      "Preserve every visible mathematical token in LaTeX without dropping symbols or terms. " +
       "For any question that has an associated diagram, figure, or graph, " +
-      "return its bounding box in questionImageBox. " +
+      "return its bounding box in questionImageBox with an 8%-12% loose margin around the full visual element (include outer edges, axes, ticks, labels, legends, and arrowheads). " +
+      "Avoid tight crops; if uncertain, expand the box slightly. " +
       "Return the results as structured JSON.",
     ];
 
@@ -673,33 +699,126 @@ async function extractAndCropImage(
 
     const [ymin, xmin, ymax, xmax] = geminiBox;
 
-    // Map from Gemini's 1000×1000 grid to actual pixel coordinates
-    // Apply padding to avoid clipping edges of diagrams
-    const padX = (xmax - xmin) * BBOX_PAD_PERCENT;
-    const padY = (ymax - ymin) * BBOX_PAD_PERCENT;
+    // Map from Gemini's 1000×1000 grid to actual pixel coordinates.
+    // Keep top expansion tighter than bottom to reduce question-text bleed.
+    const boxWidth = Math.max(1, xmax - xmin);
+    const boxHeight = Math.max(1, ymax - ymin);
 
-    const left = Math.max(0, Math.round(((xmin - padX) / 1000) * imgWidth));
-    const top = Math.max(0, Math.round(((ymin - padY) / 1000) * imgHeight));
+    const padX = Math.max(boxWidth * BBOX_PAD_PERCENT, (MIN_PAD_PX / imgWidth) * 1000);
+    const padTop = Math.max(boxHeight * BBOX_TOP_PAD_PERCENT, (MIN_PAD_PX / imgHeight) * 1000);
+    const padBottom = Math.max(boxHeight * BBOX_BOTTOM_PAD_PERCENT, (MIN_PAD_PX / imgHeight) * 1000);
+
+    const left = Math.max(0, Math.floor(((xmin - padX) / 1000) * imgWidth));
+    const top = Math.max(0, Math.floor(((ymin - padTop) / 1000) * imgHeight));
     const right = Math.min(
       imgWidth,
-      Math.round(((xmax + padX) / 1000) * imgWidth)
+      Math.ceil(((xmax + padX) / 1000) * imgWidth)
     );
     const bottom = Math.min(
       imgHeight,
-      Math.round(((ymax + padY) / 1000) * imgHeight)
+      Math.ceil(((ymax + padBottom) / 1000) * imgHeight)
     );
 
     const cropWidth = Math.max(1, right - left);
     const cropHeight = Math.max(1, bottom - top);
 
-    return await sharp(originalImageBuffer)
+    const initialCrop = await sharp(originalImageBuffer)
       .extract({ left, top, width: cropWidth, height: cropHeight })
+      .png()
+      .toBuffer();
+
+    // Optional refinement: trim top/bottom text-like bands when a separator gap exists.
+    const trim = await detectEdgeTextBands(sharp, initialCrop);
+    if (trim.top <= 0 && trim.bottom <= 0) {
+      return initialCrop;
+    }
+
+    const initialMeta = await sharp(initialCrop).metadata();
+    const initialWidth = initialMeta.width ?? cropWidth;
+    const initialHeight = initialMeta.height ?? cropHeight;
+    const refinedHeight = initialHeight - trim.top - trim.bottom;
+
+    if (refinedHeight < 60 || refinedHeight < Math.floor(initialHeight * 0.55)) {
+      return initialCrop;
+    }
+
+    return await sharp(initialCrop)
+      .extract({ left: 0, top: trim.top, width: initialWidth, height: refinedHeight })
       .png()
       .toBuffer();
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : "Unknown error";
     console.error(`[extractAndCropImage] Error cropping image:`, errorMsg);
     throw new Error(`Failed to crop diagram from PDF: ${errorMsg}`);
+  }
+}
+
+async function detectEdgeTextBands(
+  sharp: any,
+  croppedBuffer: Buffer
+): Promise<{ top: number; bottom: number }> {
+  try {
+    const raw = await sharp(croppedBuffer)
+      .greyscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const width = raw.info?.width ?? 0;
+    const height = raw.info?.height ?? 0;
+    if (width < 24 || height < 24) return { top: 0, bottom: 0 };
+
+    const data = raw.data;
+    const rowInk = new Array<number>(height).fill(0);
+
+    for (let y = 0; y < height; y += 1) {
+      let dark = 0;
+      const rowOffset = y * width;
+      for (let x = 0; x < width; x += 1) {
+        const v = data[rowOffset + x];
+        if (v < 200) dark += 1;
+      }
+      rowInk[y] = dark / width;
+    }
+
+    const scanRows = Math.min(Math.floor(height * EDGE_TEXT_SCAN_RATIO), EDGE_TEXT_SCAN_MAX_PX);
+    const maxTrim = Math.floor(height * EDGE_TEXT_MAX_TRIM_RATIO);
+    const hasInk = (ratio: number) => ratio > 0.02;
+    const isGap = (ratio: number) => ratio < 0.004;
+
+    let topTrim = 0;
+    let seenTopInk = false;
+    let topGapRun = 0;
+    for (let y = 0; y < scanRows; y += 1) {
+      const ratio = rowInk[y];
+      if (hasInk(ratio)) seenTopInk = true;
+      if (seenTopInk && isGap(ratio)) topGapRun += 1;
+      else if (seenTopInk) topGapRun = 0;
+
+      if (seenTopInk && topGapRun >= EDGE_TEXT_GAP_ROWS) {
+        topTrim = Math.min(y - EDGE_TEXT_GAP_ROWS + 1, maxTrim);
+        break;
+      }
+    }
+
+    let bottomTrim = 0;
+    let seenBottomInk = false;
+    let bottomGapRun = 0;
+    for (let i = 0; i < scanRows; i += 1) {
+      const y = height - 1 - i;
+      const ratio = rowInk[y];
+      if (hasInk(ratio)) seenBottomInk = true;
+      if (seenBottomInk && isGap(ratio)) bottomGapRun += 1;
+      else if (seenBottomInk) bottomGapRun = 0;
+
+      if (seenBottomInk && bottomGapRun >= EDGE_TEXT_GAP_ROWS) {
+        bottomTrim = Math.min(i - EDGE_TEXT_GAP_ROWS + 1, maxTrim);
+        break;
+      }
+    }
+
+    return { top: Math.max(0, topTrim), bottom: Math.max(0, bottomTrim) };
+  } catch {
+    return { top: 0, bottom: 0 };
   }
 }
 
@@ -787,8 +906,47 @@ function isLikelyNecessaryDiagramBox(
   return true;
 }
 
+const SYMBOLS_FOR_VERIFICATION: Record<string, string> = {
+  "\uF070": " pi ",
+  "\uF071": " theta ",
+  "\uF061": " alpha ",
+  "\uF062": " beta ",
+  "\uF067": " gamma ",
+  "\uF064": " delta ",
+  "\uF06C": " lambda ",
+  "\uF06D": " mu ",
+  "\uF073": " sigma ",
+  "\uF077": " omega ",
+  "\uF0B1": " plusminus ",
+  "\uF0B9": " notequal ",
+  "\uF0A5": " infinity ",
+  "\u03C0": " pi ",
+  "\u03B1": " alpha ",
+  "\u03B2": " beta ",
+  "\u03B3": " gamma ",
+  "\u03B4": " delta ",
+  "\u03B8": " theta ",
+  "\u03BB": " lambda ",
+  "\u03BC": " mu ",
+  "\u03C3": " sigma ",
+  "\u03C9": " omega ",
+  "\u221E": " infinity ",
+  "\u2260": " notequal ",
+  "\u2264": " lessequal ",
+  "\u2265": " greaterequal ",
+  "\u00D7": " times ",
+  "\u00F7": " divide ",
+};
+
+function normalizeSymbolsForPageVerification(input: string) {
+  return String(input || "").replace(
+    /[\u03B1\u03B2\u03B3\u03B4\u03B8\u03BB\u03BC\u03C0\u03C3\u03C9\u221E\u2260\u2264\u2265\u00D7\u00F7\uF000-\uF0FF]/g,
+    (symbol) => SYMBOLS_FOR_VERIFICATION[symbol] || symbol
+  );
+}
+
 function normalizeForPageVerification(input: string) {
-  return String(input || "")
+  return normalizeSymbolsForPageVerification(String(input || ""))
     .replace(/<[^>]*>/g, " ")
     .replace(/\\\((.*?)\\\)/g, " $1 ")
     .replace(/\\\[(.*?)\\\]/g, " $1 ")
