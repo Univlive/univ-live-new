@@ -16,6 +16,7 @@ import {
   Loader2,
   Download,
   Upload,
+  X,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -845,6 +846,173 @@ export default function Questions() {
 
   const testSelectValue = selectedTestId || "";
 
+  const renderInlineEditor = () => (
+    <div className="space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+      <div className="flex items-center justify-between">
+        <h3 className="font-bold text-lg">{editingId ? "Edit Question" : "New Question"}</h3>
+        <Button variant="ghost" size="icon" onClick={() => { setEditorOpen(false); resetEditor(); }}>
+          <X className="h-5 w-5" />
+        </Button>
+      </div>
+      
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
+        <div className="xl:col-span-3 space-y-6">
+          <div className="space-y-2">
+            <Label className="text-sm font-semibold">Question Content</Label>
+            <ImageTextarea
+              value={formQuestion}
+              onChange={setFormQuestion}
+              folder="/admin-test-questions"
+              placeholder="Write your question with text, HTML/expressions, and images..."
+              minHeight="170px"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {formOptions.map((opt, idx) => (
+              <div key={idx} className="space-y-2">
+                <Label className="text-sm font-semibold">{`Option ${String.fromCharCode(65 + idx)}`}</Label>
+                <ImageTextarea
+                  value={opt}
+                  onChange={(v) => {
+                    setFormOptions((prev) => prev.map((x, i) => (i === idx ? v : x)));
+                  }}
+                  folder="/admin-test-options"
+                  placeholder={`Enter option ${idx + 1} with text/image/html`}
+                  minHeight="95px"
+                />
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-sm font-semibold">Explanation (optional)</Label>
+            <ImageTextarea
+              value={formExplanation}
+              onChange={setFormExplanation}
+              folder="/admin-test-explanations"
+              placeholder="Explain the answer with text, images, or formatted content"
+              minHeight="125px"
+            />
+          </div>
+        </div>
+
+        <div className="xl:col-span-2 space-y-5">
+          <div className="grid grid-cols-1 gap-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Correct Option</Label>
+              <Select value={String(formCorrect)} onValueChange={(v) => setFormCorrect(Number(v))}>
+                <SelectTrigger className="rounded-xl h-11">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[0, 1, 2, 3].map((i) => (
+                    <SelectItem key={i} value={String(i)}>
+                      Option {String.fromCharCode(65 + i)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Difficulty</Label>
+              <Select value={formDifficulty} onValueChange={(v: any) => setFormDifficulty(v)}>
+                <SelectTrigger className="rounded-xl h-11">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DIFFICULTY_OPTIONS.map((d) => (
+                    <SelectItem key={d} value={d}>
+                      {d.charAt(0).toUpperCase() + d.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center justify-between p-4 rounded-xl bg-muted/40 border border-border">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold">Published</p>
+                <p className="text-xs text-muted-foreground">Draft is hidden from active use</p>
+              </div>
+              <Switch checked={formActive} onCheckedChange={setFormActive} />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Subject</Label>
+              <Input
+                value={formSubject}
+                onChange={(e) => setFormSubject(e.target.value)}
+                placeholder={selectedTest?.subject || "e.g. Physics"}
+                className="rounded-xl h-11"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Topic</Label>
+              <Input
+                value={formTopic}
+                onChange={(e) => setFormTopic(e.target.value)}
+                placeholder="e.g. Kinematics"
+                className="rounded-xl h-11"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Marks</Label>
+                <Input
+                  value={formMarks}
+                  onChange={(e) => setFormMarks(e.target.value)}
+                  placeholder={selectedTest?.positiveMarks != null ? String(selectedTest.positiveMarks) : "5"}
+                  className="rounded-xl h-11"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Neg. Marks</Label>
+                <Input
+                  value={formNegMarks}
+                  onChange={(e) => setFormNegMarks(e.target.value)}
+                  placeholder={selectedTest?.negativeMarks != null ? String(selectedTest.negativeMarks) : "1"}
+                  className="rounded-xl h-11"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-end gap-3 pt-4 border-t">
+        <Button
+          variant="outline"
+          className="rounded-xl px-6"
+          onClick={() => {
+            setEditorOpen(false);
+            resetEditor();
+          }}
+          disabled={saving}
+        >
+          Cancel
+        </Button>
+        <Button 
+          className="rounded-xl gradient-bg text-white px-8 min-w-[140px]" 
+          onClick={saveQuestion} 
+          disabled={saving}
+        >
+          {saving ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              Saving...
+            </>
+          ) : (
+            <>{editingId ? "Update Question" : "Save Question"}</>
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -1189,6 +1357,9 @@ export default function Questions() {
           <TabsTrigger value="questions" className="rounded-lg">
             Question Bank
           </TabsTrigger>
+          <TabsTrigger value="analytics" className="rounded-lg">
+            Analytics
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="questions" className="pt-4">
@@ -1224,10 +1395,20 @@ export default function Questions() {
             </Card>
           ) : (
             <div className="space-y-3">
+              {editorOpen && !editingId && (
+                <Card className="border-primary/40 shadow-md ring-1 ring-primary/20">
+                  <CardContent className="p-6">
+                    {renderInlineEditor()}
+                  </CardContent>
+                </Card>
+              )}
+
               {filtered.map((q, idx) => {
                 const isHtml = q.contentFormat === "html" || q.source === "question_bank" || /<\w+[\s\S]*>/i.test(q.question || "");
                 const correctText = q.options?.[q.correctOption] || "";
                 const correctTextPlain = stripHtml(correctText);
+                const isEditing = editingId === q.id && editorOpen;
+
                 return (
                   <motion.div
                     key={q.id}
@@ -1235,129 +1416,136 @@ export default function Questions() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: Math.min(0.2, idx * 0.02) }}
                   >
-                    <Card className="border-border/50 hover:shadow-sm transition-shadow">
+                    <Card className={cn(
+                      "border-border/50 hover:shadow-sm transition-all duration-300",
+                      isEditing && "border-primary/40 shadow-md ring-1 ring-primary/20"
+                    )}>
                       <CardContent className="p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2 mb-2">
-                              <Badge variant="secondary" className={cn("rounded-full", difficultyBadge(q.difficulty))}>
-                                {q.difficulty}
-                              </Badge>
-                              {q.subject ? (
-                                <Badge variant="secondary" className="rounded-full">
-                                  {q.subject}
+                        {isEditing ? (
+                          renderInlineEditor()
+                        ) : (
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2 mb-2">
+                                <Badge variant="secondary" className={cn("rounded-full", difficultyBadge(q.difficulty))}>
+                                  {q.difficulty}
                                 </Badge>
-                              ) : null}
-                              {q.topic ? (
-                                <Badge variant="secondary" className="rounded-full">
-                                  {q.topic}
-                                </Badge>
-                              ) : null}
+                                {q.subject ? (
+                                  <Badge variant="secondary" className="rounded-full">
+                                    {q.subject}
+                                  </Badge>
+                                ) : null}
+                                {q.topic ? (
+                                  <Badge variant="secondary" className="rounded-full">
+                                    {q.topic}
+                                  </Badge>
+                                ) : null}
 
-                              {q.isActive !== false ? (
-                                <Badge variant="secondary" className="rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                                  <CheckCircle2 className="h-3 w-3 mr-1" />
-                                  published
-                                </Badge>
-                              ) : (
-                                <Badge variant="secondary" className="rounded-full bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-300">
-                                  <XCircle className="h-3 w-3 mr-1" />
-                                  draft
-                                </Badge>
-                              )}
-                            </div>
-
-                            {isHtml ? (
-                              <div
-                                className="prose prose-sm dark:prose-invert max-w-none leading-snug line-clamp-3"
-                                dangerouslySetInnerHTML={{ __html: q.question }}
-                              />
-                            ) : (
-                              <p className="font-medium text-foreground leading-snug line-clamp-3">
-                                {q.question}
-                              </p>
-                            )}
-
-                            {q.options?.length ? (
-                              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                {q.options.slice(0, 4).map((opt, i) => (
-                                  <div
-                                    key={i}
-                                    className={cn(
-                                      "text-sm p-2 rounded-xl border",
-                                      i === q.correctOption
-                                        ? "border-primary/40 bg-primary/5"
-                                        : "border-border bg-muted/20"
-                                    )}
-                                  >
-                                    <span className="text-xs text-muted-foreground mr-2">
-                                      {String.fromCharCode(65 + i)}.
-                                    </span>
-                                    {isHtml ? (
-                                      <span
-                                        className={cn(i === q.correctOption && "font-medium")}
-                                        dangerouslySetInnerHTML={{ __html: opt }}
-                                      />
-                                    ) : (
-                                      <span className={cn(i === q.correctOption && "font-medium")}>
-                                        {opt}
-                                      </span>
-                                    )}
-                                  </div>
-                                ))}
+                                {q.isActive !== false ? (
+                                  <Badge variant="secondary" className="rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                                    <CheckCircle2 className="h-3 w-3 mr-1" />
+                                    published
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="secondary" className="rounded-full bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-300">
+                                    <XCircle className="h-3 w-3 mr-1" />
+                                    draft
+                                  </Badge>
+                                )}
                               </div>
-                            ) : null}
 
-                            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                              <span>Correct: <span className="font-medium text-foreground">{correctTextPlain || "—"}</span></span>
-                              <span>Marks: <span className="font-medium text-foreground">{q.marks ?? selectedTest?.positiveMarks ?? "—"}</span></span>
-                              <span>Neg: <span className="font-medium text-foreground">{q.negativeMarks ?? selectedTest?.negativeMarks ?? "—"}</span></span>
-                              <span>Used: <span className="font-medium text-foreground">{q.usageCount ?? 0}</span></span>
-                              <span>Updated: <span className="font-medium text-foreground">{fmtDate(q.updatedAtTs || q.createdAtTs || null)}</span></span>
+                              {isHtml ? (
+                                <div
+                                  className="prose prose-sm dark:prose-invert max-w-none leading-snug line-clamp-3"
+                                  dangerouslySetInnerHTML={{ __html: q.question }}
+                                />
+                              ) : (
+                                <p className="font-medium text-foreground leading-snug line-clamp-3">
+                                  {q.question}
+                                </p>
+                              )}
+
+                              {q.options?.length ? (
+                                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {q.options.slice(0, 4).map((opt, i) => (
+                                    <div
+                                      key={i}
+                                      className={cn(
+                                        "text-sm p-2 rounded-xl border",
+                                        i === q.correctOption
+                                          ? "border-primary/40 bg-primary/5"
+                                          : "border-border bg-muted/20"
+                                      )}
+                                    >
+                                      <span className="text-xs text-muted-foreground mr-2">
+                                        {String.fromCharCode(65 + i)}.
+                                      </span>
+                                      {isHtml ? (
+                                        <span
+                                          className={cn(i === q.correctOption && "font-medium")}
+                                          dangerouslySetInnerHTML={{ __html: opt }}
+                                        />
+                                      ) : (
+                                        <span className={cn(i === q.correctOption && "font-medium")}>
+                                          {opt}
+                                        </span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
+
+                              <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                                <span>Correct: <span className="font-medium text-foreground">{correctTextPlain || "—"}</span></span>
+                                <span>Marks: <span className="font-medium text-foreground">{q.marks ?? selectedTest?.positiveMarks ?? "—"}</span></span>
+                                <span>Neg: <span className="font-medium text-foreground">{q.negativeMarks ?? selectedTest?.negativeMarks ?? "—"}</span></span>
+                                <span>Used: <span className="font-medium text-foreground">{q.usageCount ?? 0}</span></span>
+                                <span>Updated: <span className="font-medium text-foreground">{fmtDate(q.updatedAtTs || q.createdAtTs || null)}</span></span>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-col items-end gap-2">
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  checked={q.isActive !== false}
+                                  onCheckedChange={(checked) => toggleActive(q, checked)}
+                                />
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="rounded-xl"
+                                  onClick={() => openEdit(q)}
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="rounded-xl"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(q.question);
+                                    toast({ title: "Copied", description: "Question text copied." });
+                                  }}
+                                >
+                                  <Copy className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="rounded-xl text-destructive"
+                                  onClick={() => deleteQuestion(q)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
                             </div>
                           </div>
+                        )}
 
-                          <div className="flex flex-col items-end gap-2">
-                            <div className="flex items-center gap-2">
-                              <Switch
-                                checked={q.isActive !== false}
-                                onCheckedChange={(checked) => toggleActive(q, checked)}
-                              />
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="rounded-xl"
-                                onClick={() => openEdit(q)}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="rounded-xl"
-                                onClick={() => {
-                                  navigator.clipboard.writeText(q.question);
-                                  toast({ title: "Copied", description: "Question text copied." });
-                                }}
-                              >
-                                <Copy className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="rounded-xl text-destructive"
-                                onClick={() => deleteQuestion(q)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-
-                        {q.explanation ? (
+                        {!isEditing && q.explanation ? (
                           <div className="mt-4 p-3 rounded-xl bg-muted/30 border border-border">
                             <p className="text-xs text-muted-foreground mb-1">Explanation</p>
                             <p className="text-sm text-foreground whitespace-pre-wrap">{q.explanation}</p>
@@ -1436,178 +1624,6 @@ export default function Questions() {
           </div>
         </TabsContent>
       </Tabs>
-
-      {editorOpen ? (
-        <Card className="border-border/60 shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base md:text-lg">{editingId ? "Edit Question" : "New Question"}</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Rich editor supports text, HTML expressions, and drag/paste image uploads.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <div className="grid grid-cols-1 xl:grid-cols-5 gap-5">
-              <div className="xl:col-span-3 space-y-5">
-                <div className="space-y-2">
-                  <Label>Question Content</Label>
-                  <ImageTextarea
-                    value={formQuestion}
-                    onChange={setFormQuestion}
-                    folder="/admin-test-questions"
-                    placeholder="Write your question with text, HTML/expressions, and images..."
-                    minHeight="170px"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {formOptions.map((opt, idx) => (
-                    <div key={idx} className="space-y-2">
-                      <Label>{`Option ${String.fromCharCode(65 + idx)}`}</Label>
-                      <ImageTextarea
-                        value={opt}
-                        onChange={(v) => {
-                          setFormOptions((prev) => prev.map((x, i) => (i === idx ? v : x)));
-                        }}
-                        folder="/admin-test-options"
-                        placeholder={`Enter option ${idx + 1} with text/image/html`}
-                        minHeight="95px"
-                      />
-                    </div>
-                  ))}
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Explanation (optional)</Label>
-                  <ImageTextarea
-                    value={formExplanation}
-                    onChange={setFormExplanation}
-                    folder="/admin-test-explanations"
-                    placeholder="Explain the answer with text, images, or formatted content"
-                    minHeight="125px"
-                  />
-                </div>
-              </div>
-
-              <div className="xl:col-span-2 space-y-4">
-                <div className="grid grid-cols-1 gap-3">
-                  <div>
-                    <Label>Correct Option</Label>
-                    <Select value={String(formCorrect)} onValueChange={(v) => setFormCorrect(Number(v))}>
-                      <SelectTrigger className="rounded-xl mt-1.5">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {[0, 1, 2, 3].map((i) => (
-                          <SelectItem key={i} value={String(i)}>
-                            {String.fromCharCode(65 + i)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label>Difficulty</Label>
-                    <Select value={formDifficulty} onValueChange={(v: any) => setFormDifficulty(v)}>
-                      <SelectTrigger className="rounded-xl mt-1.5">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {DIFFICULTY_OPTIONS.map((d) => (
-                          <SelectItem key={d} value={d}>
-                            {d.charAt(0).toUpperCase() + d.slice(1)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40 border border-border">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">Published</p>
-                      <p className="text-xs text-muted-foreground">Draft is hidden from active use</p>
-                    </div>
-                    <Switch checked={formActive} onCheckedChange={setFormActive} />
-                  </div>
-
-                  <div>
-                    <Label>Subject</Label>
-                    <Input
-                      value={formSubject}
-                      onChange={(e) => setFormSubject(e.target.value)}
-                      placeholder={selectedTest?.subject || "e.g. Physics"}
-                      className="rounded-xl mt-1.5"
-                    />
-                  </div>
-
-                  <div>
-                    <Label>Topic</Label>
-                    <Input
-                      value={formTopic}
-                      onChange={(e) => setFormTopic(e.target.value)}
-                      placeholder="e.g. Kinematics"
-                      className="rounded-xl mt-1.5"
-                    />
-                  </div>
-
-                  <div>
-                    <Label>Marks (optional)</Label>
-                    <Input
-                      value={formMarks}
-                      onChange={(e) => setFormMarks(e.target.value)}
-                      placeholder={selectedTest?.positiveMarks != null ? String(selectedTest.positiveMarks) : "e.g. 5"}
-                      className="rounded-xl mt-1.5"
-                    />
-                  </div>
-
-                  <div>
-                    <Label>Negative Marks (optional)</Label>
-                    <Input
-                      value={formNegMarks}
-                      onChange={(e) => setFormNegMarks(e.target.value)}
-                      placeholder={selectedTest?.negativeMarks != null ? String(selectedTest.negativeMarks) : "e.g. 1"}
-                      className="rounded-xl mt-1.5"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-border bg-muted/20 p-3">
-              <p className="text-xs font-medium text-muted-foreground mb-2">Question Preview</p>
-              {formQuestion.trim() ? (
-                <div className="prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: formQuestion }} />
-              ) : (
-                <p className="text-sm text-muted-foreground">Start typing to preview formatted content.</p>
-              )}
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <Button
-                variant="outline"
-                className="rounded-xl"
-                onClick={() => {
-                  setEditorOpen(false);
-                  resetEditor();
-                }}
-                disabled={saving}
-              >
-                Cancel
-              </Button>
-              <Button className="rounded-xl gradient-bg text-white" onClick={saveQuestion} disabled={saving}>
-                {saving ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Saving...
-                  </>
-                ) : (
-                  <>{editingId ? "Update Question" : "Save Question"}</>
-                )}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
     </div>
   );
 }
