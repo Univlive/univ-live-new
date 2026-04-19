@@ -413,7 +413,9 @@ export default function ImageTextarea({
               <img
                 src={url}
                 alt={`Preview ${i + 1}`}
-                className="h-[72px] w-[72px] object-cover transition-transform group-hover:scale-105"
+                className="h-[72px] w-[72px] object-cover transition-transform group-hover:scale-105 cursor-pointer"
+                onClick={() => openCropDialog(i, url)}
+                title="Click to crop"
                 onError={(e) => {
                   const el = e.target as HTMLImageElement;
                   el.style.display = "none";
