@@ -238,6 +238,75 @@ function normalizeQuestionText(input: string) {
   return cleanedLines.join("\n").trim();
 }
 
+function normalizeMathNotationToLatex(input: string) {
+  const value = String(input || "");
+  if (!value.trim()) return "";
+
+  // Convert legacy LaTeX delimiters to dollar delimiters for consistency.
+  const normalizedDelimiters = value
+    .replace(/\\\(([^]+?)\\\)/g, (_, expr: string) => `$${String(expr || "").trim()}$`)
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_, expr: string) => `$$${String(expr || "").trim()}$$`);
+
+  const fractionMap: Record<string, string> = {
+    "½": "\\frac{1}{2}",
+    "⅓": "\\frac{1}{3}",
+    "⅔": "\\frac{2}{3}",
+    "¼": "\\frac{1}{4}",
+    "¾": "\\frac{3}{4}",
+    "⅕": "\\frac{1}{5}",
+    "⅖": "\\frac{2}{5}",
+    "⅗": "\\frac{3}{5}",
+    "⅘": "\\frac{4}{5}",
+    "⅙": "\\frac{1}{6}",
+    "⅚": "\\frac{5}{6}",
+    "⅛": "\\frac{1}{8}",
+    "⅜": "\\frac{3}{8}",
+    "⅝": "\\frac{5}{8}",
+    "⅞": "\\frac{7}{8}",
+  };
+
+  const parts = normalizedDelimiters.split(/(\${1,2}[\s\S]*?\${1,2})/g);
+
+  const processed = parts
+    .map((part) => {
+      if (!part) return part;
+      if (/^\${1,2}[\s\S]*\${1,2}$/.test(part)) return part;
+
+      let out = part;
+
+      out = out.replace(/[½⅓⅔¼¾⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞]/g, (ch) => fractionMap[ch] || ch);
+
+      // Convert simple slash fractions to LaTeX fractions.
+      out = out.replace(
+        /(^|[^\\\w])([A-Za-z0-9]+)\s*\/\s*([A-Za-z0-9]+)(?=$|[^\w])/g,
+        (_match: string, prefix: string, num: string, den: string) => `${prefix}\\frac{${num}}{${den}}`
+      );
+
+      // Ensure LaTeX fractions are wrapped in inline math mode.
+      out = out.replace(
+        /\\(?:frac|dfrac|tfrac)\s*\{[^{}]+\}\s*\{[^{}]+\}/g,
+        (expr: string) => `$${expr}$`
+      );
+
+      // Wrap simple equation chains in inline math mode.
+      out = out.replace(
+        /\b(?:[A-Za-z]|\d+)(?:\s*[=+\-*/^]\s*(?:[A-Za-z]|\d+)){1,}\b/g,
+        (expr: string) => `$${expr.trim()}$`
+      );
+
+      // Wrap simple ratio/proportion patterns in inline math mode.
+      out = out.replace(
+        /\b([A-Za-z0-9]+\s*:\s*[A-Za-z0-9]+)\b/g,
+        (_match: string, expr: string) => `$${expr.replace(/\s+/g, "")}$`
+      );
+
+      return out;
+    })
+    .join("");
+
+  return processed;
+}
+
 function looksLikeInstructionOrMetaText(question: string) {
   const q = question.trim().toLowerCase();
   if (!q) return true;
@@ -305,19 +374,19 @@ function normalizeCorrectOptionValue(rawCorrectOption: any, optionCount: number)
 }
 
 export function normalizeImportedItem(item: any, fallbackIndex: number): ImportedQuestionItem {
-  const rawQuestion = String(item?.question || "");
+  const rawQuestion = normalizeMathNotationToLatex(String(item?.question || ""));
   const question = normalizeQuestionText(stripQuestionNumberPrefix(rawQuestion));
   const options = (() => {
     if (Array.isArray(item?.options)) {
       return item.options
-        .map((option: any) => String(option || "").trim())
+        .map((option: any) => normalizeMathNotationToLatex(String(option || "").trim()))
         .filter(Boolean)
         .slice(0, 4);
     }
 
     if (item?.options && typeof item.options === "object") {
       return ["a", "b", "c", "d"]
-        .map((key) => String(item.options?.[key] || "").trim())
+        .map((key) => normalizeMathNotationToLatex(String(item.options?.[key] || "").trim()))
         .filter(Boolean)
         .slice(0, 4);
     }
