@@ -11,10 +11,19 @@
 // presented only as visual thumbnails below the textarea. This
 // prevents accidental corruption of HTML markup.
 
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Crop as CropIcon,
   Image as ImageIcon,
   Loader2,
   X,
@@ -23,6 +32,12 @@ import {
 import { toast } from "sonner";
 import { uploadToImageKit } from "@/lib/imagekitUpload";
 import { cn } from "@/lib/utils";
+import ReactCrop, {
+  type Crop,
+  type PercentCrop,
+  type PixelCrop,
+} from "react-image-crop";
+import "react-image-crop/dist/ReactCrop.css";
 
 interface ImageTextareaProps {
   value: string;
@@ -52,8 +67,7 @@ function splitContent(raw: string): { text: string; imageUrls: string[] } {
   // Strip all <img …> tags and collapse resulting blank lines
   const text = raw
     .replace(new RegExp(IMG_TAG_REGEX.source, "gi"), "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .replace(/\n{3,}/g, "\n\n");
 
   return { text, imageUrls };
 }
@@ -62,8 +76,8 @@ function splitContent(raw: string): { text: string; imageUrls: string[] } {
 function combineContent(text: string, imageUrls: string[]): string {
   if (imageUrls.length === 0) return text;
   const tags = imageUrls.map((url) => `<img src="${url}" alt="" />`).join("\n");
-  const trimmed = text.trimEnd();
-  return trimmed ? `${trimmed}\n${tags}` : tags;
+  if (!text) return tags;
+  return text.endsWith("\n") ? `${text}${tags}` : `${text}\n${tags}`;
 }
 
 // ─── Component ─────────────────────────────────────────────────────────
@@ -80,10 +94,41 @@ export default function ImageTextarea({
 }: ImageTextareaProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [cropDialogOpen, setCropDialogOpen] = useState(false);
+  const [cropTargetUrl, setCropTargetUrl] = useState<string | null>(null);
+  const [cropTargetIndex, setCropTargetIndex] = useState<number | null>(null);
+  const [cropSelection, setCropSelection] = useState<Crop>({
+    unit: "%",
+    x: 10,
+    y: 10,
+    width: 80,
+    height: 80,
+  });
+  const [cropPixels, setCropPixels] = useState<PixelCrop | null>(null);
+  const [cropping, setCropping] = useState(false);
   const dragCounter = useRef(0);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const cropImageRef = useRef<HTMLImageElement | null>(null);
 
   // Derive text (shown in textarea) and imageUrls (shown as previews)
   const { text, imageUrls } = useMemo(() => splitContent(value), [value]);
+
+  const resizeTextarea = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+
+    el.style.height = "auto";
+    const minPx = Number.parseFloat(minHeight);
+    if (Number.isFinite(minPx)) {
+      el.style.height = `${Math.max(el.scrollHeight, minPx)}px`;
+    } else {
+      el.style.height = `${el.scrollHeight}px`;
+    }
+  }, [minHeight]);
+
+  useEffect(() => {
+    resizeTextarea();
+  }, [text, resizeTextarea]);
 
   // ─── When the user edits the textarea, keep existing images ────────
   const handleTextChange = useCallback(
@@ -138,6 +183,100 @@ export default function ImageTextarea({
     },
     [value, onChange]
   );
+
+  const replaceImageAtIndex = useCallback(
+    (index: number, nextUrl: string) => {
+      const latest = splitContent(value);
+      if (index < 0 || index >= latest.imageUrls.length) return;
+      const next = [...latest.imageUrls];
+      next[index] = nextUrl;
+      onChange(combineContent(latest.text, next));
+    },
+    [value, onChange]
+  );
+
+  const openCropDialog = useCallback((index: number, url: string) => {
+    setCropTargetIndex(index);
+    setCropTargetUrl(url);
+    setCropSelection({ unit: "%", x: 10, y: 10, width: 80, height: 80 });
+    setCropPixels(null);
+    setCropDialogOpen(true);
+  }, []);
+
+  const closeCropDialog = useCallback(() => {
+    setCropDialogOpen(false);
+    setCropTargetIndex(null);
+    setCropTargetUrl(null);
+    setCropPixels(null);
+  }, []);
+
+  const createCroppedBlob = useCallback(
+    async (image: HTMLImageElement, pixelCrop: PixelCrop): Promise<Blob> => {
+      const scaleX = image.naturalWidth / image.width;
+      const scaleY = image.naturalHeight / image.height;
+
+      const outWidth = Math.max(1, Math.floor(pixelCrop.width * scaleX));
+      const outHeight = Math.max(1, Math.floor(pixelCrop.height * scaleY));
+
+      const canvas = document.createElement("canvas");
+      canvas.width = outWidth;
+      canvas.height = outHeight;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Could not create crop canvas");
+
+      ctx.drawImage(
+        image,
+        pixelCrop.x * scaleX,
+        pixelCrop.y * scaleY,
+        pixelCrop.width * scaleX,
+        pixelCrop.height * scaleY,
+        0,
+        0,
+        outWidth,
+        outHeight
+      );
+
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob((output) => resolve(output), "image/png", 1);
+      });
+
+      if (!blob) throw new Error("Failed to generate cropped image");
+      return blob;
+    },
+    []
+  );
+
+  const applyCrop = useCallback(async () => {
+    if (cropTargetIndex == null || !cropTargetUrl || !cropPixels || !cropImageRef.current) {
+      toast.error("Select an area to crop");
+      return;
+    }
+
+    setCropping(true);
+    try {
+      const croppedBlob = await createCroppedBlob(cropImageRef.current, cropPixels);
+      const fileName = `cropped-${Date.now()}.png`;
+      const { url } = await uploadToImageKit(croppedBlob, fileName, folder, "website");
+      replaceImageAtIndex(cropTargetIndex, url);
+      toast.success("Image cropped");
+      closeCropDialog();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Image crop failed";
+      console.error("[ImageTextarea crop error]", msg);
+      toast.error(msg);
+    } finally {
+      setCropping(false);
+    }
+  }, [
+    closeCropDialog,
+    createCroppedBlob,
+    cropPixels,
+    cropTargetIndex,
+    cropTargetUrl,
+    folder,
+    replaceImageAtIndex,
+  ]);
 
   // ─── Drag-and-drop handlers ───────────────────────────────────────
   const handleDragEnter = useCallback((e: React.DragEvent) => {
@@ -208,7 +347,7 @@ export default function ImageTextarea({
     input.click();
   }, [uploadAndAppend]);
 
-  const busy = uploading || disabled;
+  const busy = uploading || cropping || disabled;
 
   return (
     <div className="space-y-2">
@@ -246,11 +385,12 @@ export default function ImageTextarea({
 
         {/* The textarea shows ONLY the text portion — no HTML img tags */}
         <Textarea
+          ref={textareaRef}
           value={text}
           onChange={(e) => handleTextChange(e.target.value)}
           onPaste={handlePaste}
           className={cn("rounded-xl", className)}
-          style={{ minHeight }}
+          style={{ minHeight, overflowY: "hidden" }}
           placeholder={
             placeholder ||
             "Type your text here. You can drag & drop or paste images too."
@@ -273,12 +413,28 @@ export default function ImageTextarea({
               <img
                 src={url}
                 alt={`Preview ${i + 1}`}
-                className="h-[72px] w-[72px] object-cover transition-transform group-hover:scale-105"
+                className="h-[72px] w-[72px] object-cover transition-transform group-hover:scale-105 cursor-pointer"
+                onClick={() => openCropDialog(i, url)}
+                title="Click to crop"
                 onError={(e) => {
                   const el = e.target as HTMLImageElement;
                   el.style.display = "none";
                 }}
               />
+              <button
+                type="button"
+                onClick={() => openCropDialog(i, url)}
+                className={cn(
+                  "absolute -top-0.5 -left-0.5 h-5 w-5 rounded-full",
+                  "bg-background/95 text-foreground border border-border",
+                  "opacity-0 group-hover:opacity-100 transition-opacity shadow-md",
+                  "hover:bg-muted focus:opacity-100 focus:outline-none"
+                )}
+                title="Crop image"
+              >
+                <CropIcon className="h-3 w-3" />
+              </button>
+
               <button
                 type="button"
                 onClick={() => removeImage(url)}
@@ -320,6 +476,67 @@ export default function ImageTextarea({
           </span>
         </div>
       )}
+
+      <Dialog
+        open={cropDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && !cropping) closeCropDialog();
+        }}
+      >
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Crop Image</DialogTitle>
+            <DialogDescription>
+              Select the exact region to keep for this question block image.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-xl border bg-black/70 p-2 max-h-[68vh] overflow-auto">
+            {cropTargetUrl ? (
+              <ReactCrop
+                crop={cropSelection}
+                onChange={(_px: PixelCrop, percentCrop: PercentCrop) =>
+                  setCropSelection(percentCrop)
+                }
+                onComplete={(pixelCrop) => setCropPixels(pixelCrop)}
+                keepSelection
+                minWidth={20}
+                minHeight={20}
+              >
+                <img
+                  ref={cropImageRef}
+                  src={cropTargetUrl}
+                  alt="Crop preview"
+                  crossOrigin="anonymous"
+                  className="max-h-[60vh] w-auto mx-auto"
+                />
+              </ReactCrop>
+            ) : (
+              <div className="h-[260px] flex items-center justify-center text-sm text-muted-foreground">
+                No image selected
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={closeCropDialog}
+              disabled={cropping}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={applyCrop}
+              disabled={cropping || !cropPixels || cropPixels.width < 2 || cropPixels.height < 2}
+            >
+              {cropping ? <Loader2 className="h-4 w-4 animate-spin" /> : "Apply Crop"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

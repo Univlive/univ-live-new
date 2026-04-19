@@ -91,15 +91,15 @@ export default function EducatorLayout() {
       { icon: Users, label: "Learners", href: "/educator/learners" },
       { icon: FileText, label: "Test Series", href: "/educator/test-series" },
       { icon: Key, label: "Access Codes", href: "/educator/access-codes" },
-      {
-        icon: MessageSquare,
-        label: "Messages",
-        href: "/educator/messages",
-        badge: unreadMessages > 0 ? unreadMessages : undefined,
-      },
       { icon: Globe, label: "Edit Theme/Website", href: "/educator/website-settings" },
       { icon: CreditCard, label: "Billing & Plan", href: "/educator/billing" },
       { icon: Settings, label: "Settings", href: "/educator/settings" },
+      {
+        icon: MessageSquare,
+        label: "Help",
+        href: "/educator/messages",
+        badge: unreadMessages > 0 ? unreadMessages : undefined,
+      },
     ],
     [unreadMessages]
   );
@@ -139,7 +139,7 @@ export default function EducatorLayout() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="h-screen bg-background flex overflow-hidden">
       <AnimatePresence>
         {sidebarOpen && (
           <motion.div
@@ -154,7 +154,7 @@ export default function EducatorLayout() {
 
       <aside
         className={cn(
-          "fixed left-0 top-0 z-50 h-full w-64 bg-card border-r border-border transition-transform duration-300 lg:translate-x-0 lg:static",
+          "fixed left-0 top-0 z-50 h-screen w-64 bg-card border-r border-border transition-transform duration-300 lg:translate-x-0 lg:static lg:top-0",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
@@ -200,7 +200,7 @@ export default function EducatorLayout() {
             })}
           </nav>
 
-          <div className="p-4 border-t border-border">
+          <div className="p-4 border-t border-border mt-auto">
             <Button variant="ghost" className="w-full justify-start text-muted-foreground hover:text-destructive" onClick={handleLogout}>
               <LogOut className="h-5 w-5 mr-3" />
               Logout

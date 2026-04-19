@@ -5,7 +5,7 @@ import { VercelRequest, VercelResponse } from "@vercel/node";
 // so that large Base64-encoded page images are accepted without a 413 error.
 // ---------------------------------------------------------------------------
 export const config = {
-  maxDuration: 60, // Allow up to 60s for Gemini vision processing
+  maxDuration: 120, // Allow longer processing for dense pages with many questions
   api: {
     bodyParser: {
       sizeLimit: "10mb",
@@ -35,6 +35,8 @@ type ImportRequest = {
   imageBase64: string;
   /** Original MIME type of the image (default: image/png) */
   imageMimeType?: string;
+  /** Optional text extracted from the same PDF page for anti-hallucination checks */
+  pageText?: string;
   fileName?: string;
   /** Which page of the PDF this image represents (1-indexed) */
   pageNumber?: number;
@@ -81,7 +83,22 @@ const ALLOWED_MIME_TYPES = new Set([
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
 /** Padding percentage applied to each side of a bounding box crop */
-const BBOX_PAD_PERCENT = 0.05;
+const BBOX_PAD_PERCENT = 0.1;
+
+/** Extra top padding kept intentionally low to avoid pulling question text into diagram crop */
+const BBOX_TOP_PAD_PERCENT = 0.04;
+
+/** Extra bottom padding can be a bit higher for axis labels/legends below plots */
+const BBOX_BOTTOM_PAD_PERCENT = 0.1;
+
+/** Minimum pixel padding for tiny boxes */
+const MIN_PAD_PX = 6;
+
+/** Edge-text trimming thresholds for top/bottom cleanup inside cropped diagram */
+const EDGE_TEXT_SCAN_RATIO = 0.3;
+const EDGE_TEXT_SCAN_MAX_PX = 180;
+const EDGE_TEXT_MAX_TRIM_RATIO = 0.2;
+const EDGE_TEXT_GAP_ROWS = 4;
 
 let sharpLoader: Promise<any> | null = null;
 
@@ -173,7 +190,7 @@ async function buildMcqSchema() {
               items: { type: SchemaType.NUMBER },
               description:
                 "If a diagram/image/figure exists for this question, return bounding box " +
-                "[ymin, xmin, ymax, xmax] scaled 0-1000. Otherwise, empty array.",
+                "[ymin, xmin, ymax, xmax] scaled 0-1000. Use a generous box that includes full outer edges, axes, ticks, labels, legends, and arrowheads with extra margin. Otherwise, empty array.",
             },
           },
           required: [
@@ -199,42 +216,67 @@ async function buildMcqSchema() {
 function buildSystemInstruction(context: {
   testTitle?: string;
   subject?: string;
+  hasReferenceText?: boolean;
 }): string {
-  return [
-    "You are an expert MCQ extraction engine for educational test papers.",
-    "You will receive an image of a single page from a PDF exam paper.",
+  const lines = [
+    "You are an optical character recognition and data extraction engine.",
+    "Your sole purpose is to extract questions and multiple-choice options from one exam page image with strict fidelity.",
     "",
-    "Your task:",
-    "1. Identify every single-correct Multiple Choice Question (MCQ) visible on the page.",
-    "2. For each question, extract: the full question text (preserving math notation where possible),",
-    "   options as a JSON object exactly in this format:",
+    "CRITICAL RULES:",
+    "1. Zero hallucination: extract text exactly as visible.",
+    "   - Do NOT add missing words.",
+    "   - Do NOT generate your own filler text.",
+    "   - Do NOT guess missing options.",
+    "   - Do NOT answer the question.",
+    "   - If a question is cut off, extract only the visible portion.",
+    "2. Extract only actual MCQ question blocks.",
+    "   - Do NOT treat instructions, headings, section labels, directions, page footers/headers, or normal passage text as a question.",
+    "   - If a block is not a standalone MCQ, set status='rejected' and include reason(s).",
+    "3. Question text must contain only the question statement.",
+    "   - Do NOT append non-question notes, unrelated passage lines, answer keys, or commentary into question text.",
+    "4. For each valid item, extract options in this exact structure:",
     "   options: { \"a\": \"...\", \"b\": \"...\", \"c\": \"...\", \"d\": \"...\" }",
-    "   and the correct option index (0-based: A=0, B=1, C=2, D=3).",
-    "   IMPORTANT: option values must contain only answer text, not labels like 'A)', 'B.', or 'Option C'.",
-    "3. If a question contains an associated diagram, figure, graph, chart, or embedded image,",
-    "   return a bounding box in `questionImageBox` as [ymin, xmin, ymax, xmax] using Gemini's",
-    "   standard 1000×1000 coordinate grid (0 = top-left, 1000 = bottom-right).",
-    "   The bounding box MUST tightly enclose the diagram/figure itself.",
-    "   If no diagram exists for a question, return an empty array [].",
-    "4. Use answer hints visible on the page (like 'Ans: B', 'Correct option: 2', answer keys)",
-    "   to set correctOption. Map letter answers to 0-based indices: A=0, B=1, C=2, D=3.",
-    "5. If you cannot confidently determine the correct answer, set status to 'partial'",
-    "   and correctOption to null.",
-    "6. If a block is not a valid MCQ (e.g. instructions, headers, page numbers),",
-    "   set status to 'rejected'.",
-    "7. Do NOT invent or hallucinate any content. Only extract what is visually present.",
-    "8. CRITICAL: Number each question sequentially starting from sourceIndex 1,",
-    "   following the EXACT top-to-bottom visual order as they appear on the page.",
-    "   If the page shows Q5, Q6, Q7, use sourceIndex 1, 2, 3 respectively (not 5, 6, 7).",
-    "   The items array MUST be ordered the same way — first item = first question on page.",
-    "9. Keep rawBlock as a concise plain-text excerpt of the ORIGINAL question text",
-    "   INCLUDING its original question number prefix (e.g. '12. What is...' or 'Q5) The ratio...').",
-    "   Max ~100 chars.",
-    "10. Preserve mathematical expressions as closely as possible (use Unicode symbols",
-    "    or LaTeX-like notation if clear from the page).",
+    "   - Option values must be answer text only (remove labels like A), B., Option C).",
+    "5. All mathematical expressions in question and options must be represented in standard LaTeX.",
+    "   - Preserve the exact mathematical structure from the image.",
+    "   - Use \\frac{numerator}{denominator} for fractions whenever mathematically intended.",
+    "   - Wrap inline math in $...$ and display/block math in $$...$$.",
+    "   - Apply this consistently to equations, inequalities, exponents, roots, ratios/proportions, and unit expressions.",
+    "   - Do NOT omit, simplify, or rewrite any math token: keep all numbers, variables, operators, and symbols exactly as visible.",
+    "   - Preserve equation order and multi-line math layout from the source image.",
+    "   - If math is partially visible, return the visible part faithfully in LaTeX (do not invent missing pieces).",
+    "6. Status classification:",
+    "   - Mark status='ready' only when question text and all four options are fully visible and fully extracted from this page.",
+    "   - If anything is missing/unclear, use status='partial' or 'rejected'.",
+    "7. Correct option:",
+    "   - Use visible answer hints only (Ans/B/Correct Option, etc.) to set correctOption.",
+    "   - Use 0-based index mapping A=0, B=1, C=2, D=3.",
+    "   - If not confidently visible, set correctOption=null.",
+    "8. Image coordinates:",
+    "   - Return questionImageBox only when a clear diagram/graph/geometric figure is required for that question.",
+    "   - Bounding boxes must include a loose outer margin (about 2%-6% padding) so full edges, axes, ticks, labels, legends, and arrowheads are never cropped.",
+    "   - Never return a tight box that touches the visual element boundary.",
+    "   - If uncertain, choose a slightly larger box rather than a tighter box.",
+    "   - Keep coordinates within 0..1000 and maintain ymin < ymax, xmin < xmax.",
+    "   - Do NOT return coordinates for logos/backgrounds/text blocks.",
+    "   - Diagram should not contain any of the question text, lables or text with diagram are accepted",
+    "   - If no required diagram, return an empty array [].",
+    "9. Ordering:",
+    "   - Number sourceIndex sequentially from 1 in exact top-to-bottom order on this page.",
+    "   - Scan the ENTIRE page top-to-bottom and do not stop early after first few questions.",
+    "   - If many questions exist on the page, you must still include all of them in items.",
+    "10. rawBlock:",
+    "   - Keep a concise excerpt of original question text including visible question number prefix.",
+    "   - Max ~100 chars.",
+    context.hasReferenceText ? "11. Grounding:" : null,
+    context.hasReferenceText
+      ? "   - Reference text from the same page is provided. Keep only questions supported by BOTH image and reference text."
+      : null,
     "",
     `Context — Test: "${context.testTitle || "Unknown"}", Subject: "${context.subject || "Unknown"}"`,
-  ].join("\n");
+  ];
+
+  return lines.filter(Boolean).join("\n");
 }
 
 function normalizeJsonCandidate(input: string) {
@@ -531,7 +573,7 @@ function getRequiredClosers(json: string): string | null {
 async function processWithGemini(
   imageBuffer: Buffer,
   mimeType: string,
-  context: { testTitle?: string; subject?: string }
+  context: { testTitle?: string; subject?: string; pageText?: string }
 ): Promise<GeminiResponse> {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -550,7 +592,7 @@ async function processWithGemini(
     const mcqSchema = await buildMcqSchema();
 
     const generationConfig: GenerationConfig = {
-      temperature: 0.1,
+      temperature: 0,
       maxOutputTokens: 16384,
       responseMimeType: "application/json",
       responseSchema: mcqSchema as any, // SDK typing requires cast
@@ -559,7 +601,11 @@ async function processWithGemini(
     const model = genAI.getGenerativeModel({
       model: modelName,
       generationConfig,
-      systemInstruction: buildSystemInstruction(context),
+      systemInstruction: buildSystemInstruction({
+        testTitle: context.testTitle,
+        subject: context.subject,
+        hasReferenceText: Boolean(context.pageText && context.pageText.trim().length > 0),
+      }),
     });
 
     // Build the multimodal content parts
@@ -570,13 +616,25 @@ async function processWithGemini(
       },
     };
 
-    const result = await model.generateContent([
+    const requestParts: any[] = [
       "Extract all MCQs from this exam page image. " +
+      "Preserve every visible mathematical token in LaTeX without dropping symbols or terms. " +
       "For any question that has an associated diagram, figure, or graph, " +
-      "return its bounding box in questionImageBox. " +
+      "return its bounding box in questionImageBox with an 8%-12% loose margin around the full visual element (include outer edges, axes, ticks, labels, legends, and arrowheads). " +
+      "Avoid tight crops; if uncertain, expand the box slightly. " +
       "Return the results as structured JSON.",
-      imagePart,
-    ]);
+    ];
+
+    if (context.pageText && context.pageText.trim()) {
+      requestParts.push(
+        "Reference text extracted from the same page (use only for grounding; do not invent beyond it):\n" +
+          context.pageText.slice(0, 12000)
+      );
+    }
+
+    requestParts.push(imagePart);
+
+    const result = await model.generateContent(requestParts);
 
     const text = result.response.text();
     if (!text) {
@@ -641,33 +699,126 @@ async function extractAndCropImage(
 
     const [ymin, xmin, ymax, xmax] = geminiBox;
 
-    // Map from Gemini's 1000×1000 grid to actual pixel coordinates
-    // Apply padding to avoid clipping edges of diagrams
-    const padX = (xmax - xmin) * BBOX_PAD_PERCENT;
-    const padY = (ymax - ymin) * BBOX_PAD_PERCENT;
+    // Map from Gemini's 1000×1000 grid to actual pixel coordinates.
+    // Keep top expansion tighter than bottom to reduce question-text bleed.
+    const boxWidth = Math.max(1, xmax - xmin);
+    const boxHeight = Math.max(1, ymax - ymin);
 
-    const left = Math.max(0, Math.round(((xmin - padX) / 1000) * imgWidth));
-    const top = Math.max(0, Math.round(((ymin - padY) / 1000) * imgHeight));
+    const padX = Math.max(boxWidth * BBOX_PAD_PERCENT, (MIN_PAD_PX / imgWidth) * 1000);
+    const padTop = Math.max(boxHeight * BBOX_TOP_PAD_PERCENT, (MIN_PAD_PX / imgHeight) * 1000);
+    const padBottom = Math.max(boxHeight * BBOX_BOTTOM_PAD_PERCENT, (MIN_PAD_PX / imgHeight) * 1000);
+
+    const left = Math.max(0, Math.floor(((xmin - padX) / 1000) * imgWidth));
+    const top = Math.max(0, Math.floor(((ymin - padTop) / 1000) * imgHeight));
     const right = Math.min(
       imgWidth,
-      Math.round(((xmax + padX) / 1000) * imgWidth)
+      Math.ceil(((xmax + padX) / 1000) * imgWidth)
     );
     const bottom = Math.min(
       imgHeight,
-      Math.round(((ymax + padY) / 1000) * imgHeight)
+      Math.ceil(((ymax + padBottom) / 1000) * imgHeight)
     );
 
     const cropWidth = Math.max(1, right - left);
     const cropHeight = Math.max(1, bottom - top);
 
-    return await sharp(originalImageBuffer)
+    const initialCrop = await sharp(originalImageBuffer)
       .extract({ left, top, width: cropWidth, height: cropHeight })
+      .png()
+      .toBuffer();
+
+    // Optional refinement: trim top/bottom text-like bands when a separator gap exists.
+    const trim = await detectEdgeTextBands(sharp, initialCrop);
+    if (trim.top <= 0 && trim.bottom <= 0) {
+      return initialCrop;
+    }
+
+    const initialMeta = await sharp(initialCrop).metadata();
+    const initialWidth = initialMeta.width ?? cropWidth;
+    const initialHeight = initialMeta.height ?? cropHeight;
+    const refinedHeight = initialHeight - trim.top - trim.bottom;
+
+    if (refinedHeight < 60 || refinedHeight < Math.floor(initialHeight * 0.55)) {
+      return initialCrop;
+    }
+
+    return await sharp(initialCrop)
+      .extract({ left: 0, top: trim.top, width: initialWidth, height: refinedHeight })
       .png()
       .toBuffer();
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : "Unknown error";
     console.error(`[extractAndCropImage] Error cropping image:`, errorMsg);
     throw new Error(`Failed to crop diagram from PDF: ${errorMsg}`);
+  }
+}
+
+async function detectEdgeTextBands(
+  sharp: any,
+  croppedBuffer: Buffer
+): Promise<{ top: number; bottom: number }> {
+  try {
+    const raw = await sharp(croppedBuffer)
+      .greyscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const width = raw.info?.width ?? 0;
+    const height = raw.info?.height ?? 0;
+    if (width < 24 || height < 24) return { top: 0, bottom: 0 };
+
+    const data = raw.data;
+    const rowInk = new Array<number>(height).fill(0);
+
+    for (let y = 0; y < height; y += 1) {
+      let dark = 0;
+      const rowOffset = y * width;
+      for (let x = 0; x < width; x += 1) {
+        const v = data[rowOffset + x];
+        if (v < 200) dark += 1;
+      }
+      rowInk[y] = dark / width;
+    }
+
+    const scanRows = Math.min(Math.floor(height * EDGE_TEXT_SCAN_RATIO), EDGE_TEXT_SCAN_MAX_PX);
+    const maxTrim = Math.floor(height * EDGE_TEXT_MAX_TRIM_RATIO);
+    const hasInk = (ratio: number) => ratio > 0.02;
+    const isGap = (ratio: number) => ratio < 0.004;
+
+    let topTrim = 0;
+    let seenTopInk = false;
+    let topGapRun = 0;
+    for (let y = 0; y < scanRows; y += 1) {
+      const ratio = rowInk[y];
+      if (hasInk(ratio)) seenTopInk = true;
+      if (seenTopInk && isGap(ratio)) topGapRun += 1;
+      else if (seenTopInk) topGapRun = 0;
+
+      if (seenTopInk && topGapRun >= EDGE_TEXT_GAP_ROWS) {
+        topTrim = Math.min(y - EDGE_TEXT_GAP_ROWS + 1, maxTrim);
+        break;
+      }
+    }
+
+    let bottomTrim = 0;
+    let seenBottomInk = false;
+    let bottomGapRun = 0;
+    for (let i = 0; i < scanRows; i += 1) {
+      const y = height - 1 - i;
+      const ratio = rowInk[y];
+      if (hasInk(ratio)) seenBottomInk = true;
+      if (seenBottomInk && isGap(ratio)) bottomGapRun += 1;
+      else if (seenBottomInk) bottomGapRun = 0;
+
+      if (seenBottomInk && bottomGapRun >= EDGE_TEXT_GAP_ROWS) {
+        bottomTrim = Math.min(i - EDGE_TEXT_GAP_ROWS + 1, maxTrim);
+        break;
+      }
+    }
+
+    return { top: Math.max(0, topTrim), bottom: Math.max(0, bottomTrim) };
+  } catch {
+    return { top: 0, bottom: 0 };
   }
 }
 
@@ -734,6 +885,126 @@ function isValidBoundingBox(box: unknown): box is [number, number, number, numbe
   return ymax > ymin && xmax > xmin;
 }
 
+function isLikelyNecessaryDiagramBox(
+  box: [number, number, number, number],
+  normalized: ImportedQuestionItem
+) {
+  if (normalized.status === "rejected") return false;
+
+  const [ymin, xmin, ymax, xmax] = box;
+  const width = xmax - xmin;
+  const height = ymax - ymin;
+  const areaRatio = (width * height) / 1_000_000;
+
+  // Tiny boxes are usually icons/noise; huge boxes are often text regions.
+  if (areaRatio < 0.004) return false;
+  if (areaRatio > 0.45) return false;
+
+  // Near full-page width/height generally indicates non-diagram capture.
+  if (width > 980 || height > 980) return false;
+
+  return true;
+}
+
+const SYMBOLS_FOR_VERIFICATION: Record<string, string> = {
+  "\uF070": " pi ",
+  "\uF071": " theta ",
+  "\uF061": " alpha ",
+  "\uF062": " beta ",
+  "\uF067": " gamma ",
+  "\uF064": " delta ",
+  "\uF06C": " lambda ",
+  "\uF06D": " mu ",
+  "\uF073": " sigma ",
+  "\uF077": " omega ",
+  "\uF0B1": " plusminus ",
+  "\uF0B9": " notequal ",
+  "\uF0A5": " infinity ",
+  "\u03C0": " pi ",
+  "\u03B1": " alpha ",
+  "\u03B2": " beta ",
+  "\u03B3": " gamma ",
+  "\u03B4": " delta ",
+  "\u03B8": " theta ",
+  "\u03BB": " lambda ",
+  "\u03BC": " mu ",
+  "\u03C3": " sigma ",
+  "\u03C9": " omega ",
+  "\u221E": " infinity ",
+  "\u2260": " notequal ",
+  "\u2264": " lessequal ",
+  "\u2265": " greaterequal ",
+  "\u00D7": " times ",
+  "\u00F7": " divide ",
+};
+
+function normalizeSymbolsForPageVerification(input: string) {
+  return String(input || "").replace(
+    /[\u03B1\u03B2\u03B3\u03B4\u03B8\u03BB\u03BC\u03C0\u03C3\u03C9\u221E\u2260\u2264\u2265\u00D7\u00F7\uF000-\uF0FF]/g,
+    (symbol) => SYMBOLS_FOR_VERIFICATION[symbol] || symbol
+  );
+}
+
+function normalizeForPageVerification(input: string) {
+  return normalizeSymbolsForPageVerification(String(input || ""))
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\\\((.*?)\\\)/g, " $1 ")
+    .replace(/\\\[(.*?)\\\]/g, " $1 ")
+    .replace(/\$\$([\s\S]*?)\$\$/g, " $1 ")
+    .replace(/\$([^\n$]+?)\$/g, " $1 ")
+    .replace(/\\[a-zA-Z]+/g, " ")
+    .replace(/[^a-zA-Z0-9]+/g, " ")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenizeForPageVerification(input: string) {
+  return normalizeForPageVerification(input)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
+}
+
+function hasSufficientPageTextEvidence(item: ImportedQuestionItem, pageTextRaw: string) {
+  const pageText = normalizeForPageVerification(pageTextRaw);
+  if (!pageText || pageText.length < 80) return true;
+
+  const pageTokens = new Set(tokenizeForPageVerification(pageText));
+  if (pageTokens.size < 12) return true;
+
+  const candidateTokens = Array.from(
+    new Set(tokenizeForPageVerification(`${item.question} ${(item.options || []).join(" ")}`))
+  );
+
+  if (candidateTokens.length < 5) return true;
+
+  let matched = 0;
+  for (const token of candidateTokens) {
+    if (pageTokens.has(token)) matched += 1;
+  }
+
+  const ratio = matched / candidateTokens.length;
+  const minRatio =
+    candidateTokens.length >= 16 ? 0.55 : candidateTokens.length >= 10 ? 0.5 : 0.4;
+
+  if (ratio < minRatio) return false;
+
+  const rawBlock = normalizeForPageVerification(item.rawBlock || "");
+  if (rawBlock.length >= 20) {
+    const rawTokens = tokenizeForPageVerification(rawBlock);
+    if (rawTokens.length >= 4) {
+      let rawMatched = 0;
+      for (const token of rawTokens) {
+        if (pageTokens.has(token)) rawMatched += 1;
+      }
+      if (rawMatched / rawTokens.length < 0.5) return false;
+    }
+  }
+
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Retry logic for transient API failures
 // ---------------------------------------------------------------------------
@@ -779,7 +1050,7 @@ function delayMs(ms: number): Promise<void> {
 async function processWithGeminiRetry(
   imageBuffer: Buffer,
   mimeType: string,
-  context: { testTitle?: string; subject?: string }
+  context: { testTitle?: string; subject?: string; pageText?: string }
 ): Promise<GeminiResponse> {
   const MAX_RETRIES = 3;
   let attempt = 0;
@@ -841,6 +1112,7 @@ export default async function handler(
     const {
       imageBase64,
       imageMimeType,
+      pageText,
       fileName,
       pageNumber,
       testTitle,
@@ -889,35 +1161,10 @@ export default async function handler(
       geminiResult = await processWithGeminiRetry(imageBuffer, mimeType, {
         testTitle,
         subject,
+        pageText,
       });
     } catch (modelErr) {
-      const msg = (modelErr instanceof Error ? modelErr.message : String(modelErr)).toLowerCase();
-      const isMalformedJson =
-        msg.includes("invalid json") ||
-        msg.includes("unterminated string") ||
-        msg.includes("double-quoted property name") ||
-        msg.includes("could not be repaired");
-
-      if (!isMalformedJson) {
-        throw modelErr;
-      }
-
-      sendStreamEvent(res, {
-        type: "complete",
-        data: {
-          summary: { total: 0, ready: 0, partial: 0, rejected: 0 },
-          items: [],
-          meta: {
-            fileName,
-            pageNumber,
-            diagnostics: [
-              "AI returned malformed JSON for this page. Skipped this page and continued.",
-            ],
-          },
-        },
-      });
-      endStreaming(res);
-      return;
+      throw modelErr;
     }
 
     const rawItems = Array.isArray(geminiResult?.items)
@@ -951,13 +1198,26 @@ export default async function handler(
       questionImageUrl?: string;
     })[] = await Promise.all(
       rawItems.map(async (item, idx) => {
-        const normalized = normalizeImportedItem(item, idx + 1);
+        let normalized = normalizeImportedItem(item, idx + 1);
+
+        if (!hasSufficientPageTextEvidence(normalized, String(pageText || ""))) {
+          normalized = {
+            ...normalized,
+            status: "rejected",
+            reasons: Array.from(
+              new Set([
+                ...(normalized.reasons || []),
+                "Question not verified against PDF page text (removed to prevent hallucination).",
+              ])
+            ),
+          };
+        }
 
         // Check for a valid bounding box
         const box = item.questionImageBox;
         let questionImageUrl: string | undefined;
 
-        if (isValidBoundingBox(box)) {
+        if (isValidBoundingBox(box) && isLikelyNecessaryDiagramBox(box, normalized)) {
           try {
             const cropped = await extractAndCropImage(imageBuffer, box);
 
@@ -989,17 +1249,18 @@ export default async function handler(
       message: "Finalizing results...",
     });
 
-    // ---- Step 3: De-duplicate ----
+    // ---- Step 3: Conservative de-duplicate ----
+    // Keep repeated question text if sourceIndex differs (some papers intentionally repeat stems).
     const unique = processedItems.filter((item, index, arr) => {
       if (item.status === "rejected") return true;
-      const signature = `${item.question.toLowerCase()}__${item.options
+      const signature = `${item.sourceIndex}__${item.question.toLowerCase()}__${item.options
         .join("||")
         .toLowerCase()}`;
       return (
         arr.findIndex(
           (entry) =>
             entry.status !== "rejected" &&
-            `${entry.question.toLowerCase()}__${entry.options
+            `${entry.sourceIndex}__${entry.question.toLowerCase()}__${entry.options
               .join("||")
               .toLowerCase()}` === signature
         ) === index

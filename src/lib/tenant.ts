@@ -14,11 +14,28 @@ function sanitizeDomain(rawDomain: string): string {
 }
 
 export function getConfiguredAppDomain(): string {
-  const fromEnv =
-    (import.meta.env.VITE_APP_DOMAIN as string | undefined) ||
-    (import.meta.env.VITE_APP_BASE_DOMAIN as string | undefined) ||
-    "univ.live";
-  return sanitizeDomain(fromEnv);
+  return getConfiguredAppDomains()[0];
+}
+
+function getConfiguredAppDomains(): string[] {
+  const fromList = String(import.meta.env.VITE_APP_DOMAINS || "")
+    .split(",")
+    .map((x) => sanitizeDomain(x))
+    .filter(Boolean);
+
+  const legacy = [
+    import.meta.env.VITE_APP_DOMAIN as string | undefined,
+    import.meta.env.VITE_APP_BASE_DOMAIN as string | undefined,
+    "univ.live",
+  ]
+    .map((x) => sanitizeDomain(String(x || "")))
+    .filter(Boolean);
+
+  const unique: string[] = [];
+  for (const domain of [...fromList, ...legacy]) {
+    if (!unique.includes(domain)) unique.push(domain);
+  }
+  return unique;
 }
 
 function normalizeSlug(value: string | null | undefined): string | null {
@@ -38,6 +55,12 @@ function getTenantFromQuery(): string | null {
 
 function isPreviewHost(hostname: string): boolean {
   return hostname.endsWith(".vercel.app");
+}
+
+function shouldAllowQueryFallbackOnAnyHost(): boolean {
+  return String(import.meta.env.VITE_ALLOW_QUERY_TENANT_FALLBACK || "")
+    .trim()
+    .toLowerCase() === "true";
 }
 
 function isLocalHost(hostname: string): boolean {
@@ -74,12 +97,25 @@ export function persistLocalTenant(slug: string | null) {
   }
 }
 
+function findMatchingConfiguredDomain(hostname: string): string | null {
+  const domains = getConfiguredAppDomains();
+  let bestMatch: string | null = null;
+
+  for (const domain of domains) {
+    if (hostname === domain || hostname.endsWith(`.${domain}`)) {
+      if (!bestMatch || domain.length > bestMatch.length) {
+        bestMatch = domain;
+      }
+    }
+  }
+
+  return bestMatch;
+}
+
 export function getTenantSlugFromHostname(hostnameArg?: string): string | null {
   const hostname =
     (hostnameArg || (typeof window !== "undefined" ? window.location.hostname : "")).toLowerCase();
   const tenantFromQuery = getTenantFromQuery();
-
-  const appDomain = getConfiguredAppDomain();
 
   // LOCAL DEV SUPPORT
   if (hostname === "localhost" || hostname === "127.0.0.1") {
@@ -96,6 +132,17 @@ export function getTenantSlugFromHostname(hostnameArg?: string): string | null {
   }
   if (hostname.endsWith(".lvh.me")) {
     return hostname.replace(".lvh.me", "");
+  }
+
+  const appDomain = findMatchingConfiguredDomain(hostname);
+
+  if (!appDomain) {
+    // Preview deployments (or explicitly enabled fallback) can use ?tenant=slug.
+    if ((isPreviewHost(hostname) || shouldAllowQueryFallbackOnAnyHost()) && tenantFromQuery) {
+      persistLocalTenant(tenantFromQuery);
+      return tenantFromQuery;
+    }
+    return null;
   }
 
   const parts = hostname.split(".");
@@ -147,6 +194,11 @@ export function buildTenantUrl(tenantSlug: string, path = "/"): string {
       const url = new URL(normalizedPath, `${protocol}//${host}`);
       url.searchParams.set("tenant", normalizedSlug);
       return url.toString();
+    }
+
+    const activeDomain = findMatchingConfiguredDomain(hostname);
+    if (activeDomain) {
+      return `${protocol}//${normalizedSlug}.${activeDomain}${normalizedPath}`;
     }
   }
 

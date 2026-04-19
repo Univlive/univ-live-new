@@ -63,6 +63,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/hooks/use-toast";
+import ImageTextarea from "@/components/educator/ImageTextarea";
 
 type Difficulty = "easy" | "medium" | "hard";
 
@@ -635,7 +636,7 @@ export default function Questions() {
         isActive: !!formActive,
         usageCount: 0,
         source: "manual",
-        contentFormat: "text",
+        contentFormat: "html",
         updatedAt: serverTimestamp(),
       };
 
@@ -780,7 +781,7 @@ export default function Questions() {
           isActive: item?.isActive !== false,
           usageCount: 0,
           source: "manual",
-          contentFormat: "text",
+          contentFormat: "html",
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
@@ -1107,7 +1108,7 @@ export default function Questions() {
 
             <div className="w-full md:w-[320px] space-y-2">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>Active questions</span>
+                <span>Published questions</span>
                 <span className="font-medium">{activeCount}/{total} ({activePct}%)</span>
               </div>
               <Progress value={activePct} />
@@ -1162,8 +1163,8 @@ export default function Questions() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="inactive">Inactive</SelectItem>
+                <SelectItem value="active">Published</SelectItem>
+                <SelectItem value="inactive">Draft</SelectItem>
               </SelectContent>
             </Select>
 
@@ -1256,12 +1257,12 @@ export default function Questions() {
                               {q.isActive !== false ? (
                                 <Badge variant="secondary" className="rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
                                   <CheckCircle2 className="h-3 w-3 mr-1" />
-                                  active
+                                  published
                                 </Badge>
                               ) : (
                                 <Badge variant="secondary" className="rounded-full bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-300">
                                   <XCircle className="h-3 w-3 mr-1" />
-                                  inactive
+                                  draft
                                 </Badge>
                               )}
                             </div>
@@ -1386,17 +1387,17 @@ export default function Questions() {
                   <span className="font-semibold">{total}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Active</span>
+                  <span className="text-muted-foreground">Published</span>
                   <span className="font-semibold">{activeCount}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Inactive</span>
+                  <span className="text-muted-foreground">Draft</span>
                   <span className="font-semibold">{Math.max(0, total - activeCount)}</span>
                 </div>
 
                 <div className="pt-2">
                   <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
-                    <span>Active ratio</span>
+                    <span>Published ratio</span>
                     <span className="font-medium">{activePct}%</span>
                   </div>
                   <Progress value={activePct} />
@@ -1436,149 +1437,161 @@ export default function Questions() {
         </TabsContent>
       </Tabs>
 
-      {/* Editor Dialog */}
-      <Dialog
-        open={editorOpen}
-        onOpenChange={(open) => {
-          setEditorOpen(open);
-          if (!open) resetEditor();
-        }}
-      >
-        <DialogContent className="rounded-2xl max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{editingId ? "Edit Question" : "Add Question"}</DialogTitle>
-            <DialogDescription>
-              Saved to Firestore:{" "}
-              <span className="font-mono">
-                test_series/{selectedTestId || "{testId}"}/questions
-              </span>
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div>
-              <Label>Question</Label>
-              <Textarea
-                value={formQuestion}
-                onChange={(e) => setFormQuestion(e.target.value)}
-                placeholder="Type the question..."
-                className="rounded-xl min-h-[100px] mt-1.5"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {formOptions.map((opt, idx) => (
-                <div key={idx}>
-                  <Label>{`Option ${String.fromCharCode(65 + idx)}`}</Label>
-                  <Input
-                    value={opt}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setFormOptions((prev) => prev.map((x, i) => (i === idx ? v : x)));
-                    }}
-                    placeholder={`Option ${idx + 1}`}
-                    className="rounded-xl mt-1.5"
+      {editorOpen ? (
+        <Card className="border-border/60 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base md:text-lg">{editingId ? "Edit Question" : "New Question"}</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Rich editor supports text, HTML expressions, and drag/paste image uploads.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid grid-cols-1 xl:grid-cols-5 gap-5">
+              <div className="xl:col-span-3 space-y-5">
+                <div className="space-y-2">
+                  <Label>Question Content</Label>
+                  <ImageTextarea
+                    value={formQuestion}
+                    onChange={setFormQuestion}
+                    folder="/admin-test-questions"
+                    placeholder="Write your question with text, HTML/expressions, and images..."
+                    minHeight="170px"
                   />
                 </div>
-              ))}
-            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <Label>Correct Option</Label>
-                <Select value={String(formCorrect)} onValueChange={(v) => setFormCorrect(Number(v))}>
-                  <SelectTrigger className="rounded-xl mt-1.5">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[0, 1, 2, 3].map((i) => (
-                      <SelectItem key={i} value={String(i)}>
-                        {String.fromCharCode(65 + i)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label>Difficulty</Label>
-                <Select value={formDifficulty} onValueChange={(v: any) => setFormDifficulty(v)}>
-                  <SelectTrigger className="rounded-xl mt-1.5">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {DIFFICULTY_OPTIONS.map((d) => (
-                      <SelectItem key={d} value={d}>
-                        {d.charAt(0).toUpperCase() + d.slice(1)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40 border border-border mt-6 sm:mt-0">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">Active</p>
-                  <p className="text-xs text-muted-foreground">Visible for use</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {formOptions.map((opt, idx) => (
+                    <div key={idx} className="space-y-2">
+                      <Label>{`Option ${String.fromCharCode(65 + idx)}`}</Label>
+                      <ImageTextarea
+                        value={opt}
+                        onChange={(v) => {
+                          setFormOptions((prev) => prev.map((x, i) => (i === idx ? v : x)));
+                        }}
+                        folder="/admin-test-options"
+                        placeholder={`Enter option ${idx + 1} with text/image/html`}
+                        minHeight="95px"
+                      />
+                    </div>
+                  ))}
                 </div>
-                <Switch checked={formActive} onCheckedChange={setFormActive} />
+
+                <div className="space-y-2">
+                  <Label>Explanation (optional)</Label>
+                  <ImageTextarea
+                    value={formExplanation}
+                    onChange={setFormExplanation}
+                    folder="/admin-test-explanations"
+                    placeholder="Explain the answer with text, images, or formatted content"
+                    minHeight="125px"
+                  />
+                </div>
+              </div>
+
+              <div className="xl:col-span-2 space-y-4">
+                <div className="grid grid-cols-1 gap-3">
+                  <div>
+                    <Label>Correct Option</Label>
+                    <Select value={String(formCorrect)} onValueChange={(v) => setFormCorrect(Number(v))}>
+                      <SelectTrigger className="rounded-xl mt-1.5">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[0, 1, 2, 3].map((i) => (
+                          <SelectItem key={i} value={String(i)}>
+                            {String.fromCharCode(65 + i)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label>Difficulty</Label>
+                    <Select value={formDifficulty} onValueChange={(v: any) => setFormDifficulty(v)}>
+                      <SelectTrigger className="rounded-xl mt-1.5">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DIFFICULTY_OPTIONS.map((d) => (
+                          <SelectItem key={d} value={d}>
+                            {d.charAt(0).toUpperCase() + d.slice(1)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40 border border-border">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">Published</p>
+                      <p className="text-xs text-muted-foreground">Draft is hidden from active use</p>
+                    </div>
+                    <Switch checked={formActive} onCheckedChange={setFormActive} />
+                  </div>
+
+                  <div>
+                    <Label>Subject</Label>
+                    <Input
+                      value={formSubject}
+                      onChange={(e) => setFormSubject(e.target.value)}
+                      placeholder={selectedTest?.subject || "e.g. Physics"}
+                      className="rounded-xl mt-1.5"
+                    />
+                  </div>
+
+                  <div>
+                    <Label>Topic</Label>
+                    <Input
+                      value={formTopic}
+                      onChange={(e) => setFormTopic(e.target.value)}
+                      placeholder="e.g. Kinematics"
+                      className="rounded-xl mt-1.5"
+                    />
+                  </div>
+
+                  <div>
+                    <Label>Marks (optional)</Label>
+                    <Input
+                      value={formMarks}
+                      onChange={(e) => setFormMarks(e.target.value)}
+                      placeholder={selectedTest?.positiveMarks != null ? String(selectedTest.positiveMarks) : "e.g. 5"}
+                      className="rounded-xl mt-1.5"
+                    />
+                  </div>
+
+                  <div>
+                    <Label>Negative Marks (optional)</Label>
+                    <Input
+                      value={formNegMarks}
+                      onChange={(e) => setFormNegMarks(e.target.value)}
+                      placeholder={selectedTest?.negativeMarks != null ? String(selectedTest.negativeMarks) : "e.g. 1"}
+                      className="rounded-xl mt-1.5"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <Label>Subject</Label>
-                <Input
-                  value={formSubject}
-                  onChange={(e) => setFormSubject(e.target.value)}
-                  placeholder={selectedTest?.subject || "e.g. Physics"}
-                  className="rounded-xl mt-1.5"
-                />
-              </div>
-              <div>
-                <Label>Topic</Label>
-                <Input
-                  value={formTopic}
-                  onChange={(e) => setFormTopic(e.target.value)}
-                  placeholder="e.g. Kinematics"
-                  className="rounded-xl mt-1.5"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <Label>Marks (optional)</Label>
-                <Input
-                  value={formMarks}
-                  onChange={(e) => setFormMarks(e.target.value)}
-                  placeholder={selectedTest?.positiveMarks != null ? String(selectedTest.positiveMarks) : "e.g. 5"}
-                  className="rounded-xl mt-1.5"
-                />
-              </div>
-              <div>
-                <Label>Negative Marks (optional)</Label>
-                <Input
-                  value={formNegMarks}
-                  onChange={(e) => setFormNegMarks(e.target.value)}
-                  placeholder={selectedTest?.negativeMarks != null ? String(selectedTest.negativeMarks) : "e.g. 1"}
-                  className="rounded-xl mt-1.5"
-                />
-              </div>
-            </div>
-
-            <div>
-              <Label>Explanation (optional)</Label>
-              <Textarea
-                value={formExplanation}
-                onChange={(e) => setFormExplanation(e.target.value)}
-                placeholder="Explain the correct answer..."
-                className="rounded-xl min-h-[80px] mt-1.5"
-              />
+            <div className="rounded-xl border border-border bg-muted/20 p-3">
+              <p className="text-xs font-medium text-muted-foreground mb-2">Question Preview</p>
+              {formQuestion.trim() ? (
+                <div className="prose prose-sm dark:prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: formQuestion }} />
+              ) : (
+                <p className="text-sm text-muted-foreground">Start typing to preview formatted content.</p>
+              )}
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-2">
-              <Button variant="outline" className="rounded-xl" onClick={() => setEditorOpen(false)} disabled={saving}>
+              <Button
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => {
+                  setEditorOpen(false);
+                  resetEditor();
+                }}
+                disabled={saving}
+              >
                 Cancel
               </Button>
               <Button className="rounded-xl gradient-bg text-white" onClick={saveQuestion} disabled={saving}>
@@ -1592,9 +1605,9 @@ export default function Questions() {
                 )}
               </Button>
             </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }

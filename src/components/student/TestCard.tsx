@@ -1,4 +1,5 @@
-import { Clock, FileText, Lock, Unlock, Play, Eye } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Clock, FileText, Lock, Unlock, Play, Eye, Timer } from "lucide-react";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,17 @@ const subjectColors: Record<string, string> = {
   "Biology": "bg-pastel-cream",
 };
 
+function formatTimeLeft(ms: number): string {
+  if (ms <= 0) return "Expired";
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m left`;
+  if (m > 0) return `${m}m ${s}s left`;
+  return `${s}s left`;
+}
+
 function safeNum(v: any, fallback: number) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -36,6 +48,19 @@ function safeNum(v: any, fallback: number) {
 
 export function TestCard({ test, attemptsUsed = 0, onView, onStart, onUnlock }: TestCardProps) {
   const { tenant } = useTenant();
+
+  const windowExpiresAt = (test as any).windowExpiresAt as number | null | undefined;
+  const [timeLeft, setTimeLeft] = useState<number | null>(
+    windowExpiresAt ? Math.max(0, windowExpiresAt - Date.now()) : null
+  );
+
+  useEffect(() => {
+    if (!windowExpiresAt) return;
+    const tick = () => setTimeLeft(Math.max(0, windowExpiresAt - Date.now()));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [windowExpiresAt]);
 
   // Firestore docs may miss attempts fields on some tests; use safe defaults.
   const attemptsAllowed = Math.max(
@@ -94,6 +119,17 @@ export function TestCard({ test, attemptsUsed = 0, onView, onStart, onUnlock }: 
             ) : (
               <span className="text-destructive">No attempts remaining</span>
             )}
+          </div>
+        )}
+
+        {/* Access window countdown */}
+        {!test.isLocked && timeLeft !== null && (
+          <div className={cn(
+            "flex items-center gap-1 text-xs font-medium",
+            timeLeft < 5 * 60 * 1000 ? "text-red-600" : "text-amber-600"
+          )}>
+            <Timer className="h-3 w-3" />
+            {formatTimeLeft(timeLeft)}
           </div>
         )}
 
