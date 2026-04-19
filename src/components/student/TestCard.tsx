@@ -1,12 +1,15 @@
-import { Clock, FileText, Lock, Unlock, Play, Eye } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Clock, FileText, Lock, Unlock, Play, Eye, Timer } from "lucide-react";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Test } from "@/mock/studentMock";
+import { useTenant } from "@/contexts/TenantProvider";
 
 interface TestCardProps {
   test: Test;
+  attemptsUsed?: number;
   onView: (testId: string) => void;
   onStart: (testId: string) => void;
   onUnlock: (testId: string) => void;
@@ -27,19 +30,48 @@ const subjectColors: Record<string, string> = {
   "Biology": "bg-pastel-cream",
 };
 
-export function TestCard({ test, onView, onStart, onUnlock }: TestCardProps) {
-  const parseNum = (value: unknown, fallback: number) => {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : fallback;
-  };
+function formatTimeLeft(ms: number): string {
+  if (ms <= 0) return "Expired";
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m left`;
+  if (m > 0) return `${m}m ${s}s left`;
+  return `${s}s left`;
+}
+
+function safeNum(v: any, fallback: number) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+export function TestCard({ test, attemptsUsed = 0, onView, onStart, onUnlock }: TestCardProps) {
+  const { tenant } = useTenant();
+
+  const windowExpiresAt = (test as any).windowExpiresAt as number | null | undefined;
+  const [timeLeft, setTimeLeft] = useState<number | null>(
+    windowExpiresAt ? Math.max(0, windowExpiresAt - Date.now()) : null
+  );
+
+  useEffect(() => {
+    if (!windowExpiresAt) return;
+    const tick = () => setTimeLeft(Math.max(0, windowExpiresAt - Date.now()));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [windowExpiresAt]);
 
   // Firestore docs may miss attempts fields on some tests; use safe defaults.
   const attemptsAllowed = Math.max(
     1,
-    parseNum((test as any).attemptsAllowed ?? (test as any).maxAttempts, 3)
+    safeNum(
+      (test as any).attemptsAllowed ?? (test as any).maxAttempts,
+      tenant?.testDefaults?.attemptsAllowed ?? 3
+    )
   );
-  const attemptsUsed = Math.max(0, parseNum((test as any).attemptsUsed, 0));
-  const attemptsRemaining = Math.max(0, attemptsAllowed - attemptsUsed);
+  const attemptsUsedSafe = Math.max(0, safeNum(attemptsUsed, 0));
+  const attemptsRemaining = Math.max(0, attemptsAllowed - attemptsUsedSafe);
 
   return (
     <Card className={cn(
@@ -87,6 +119,17 @@ export function TestCard({ test, onView, onStart, onUnlock }: TestCardProps) {
             ) : (
               <span className="text-destructive">No attempts remaining</span>
             )}
+          </div>
+        )}
+
+        {/* Access window countdown */}
+        {!test.isLocked && timeLeft !== null && (
+          <div className={cn(
+            "flex items-center gap-1 text-xs font-medium",
+            timeLeft < 5 * 60 * 1000 ? "text-red-600" : "text-amber-600"
+          )}>
+            <Timer className="h-3 w-3" />
+            {formatTimeLeft(timeLeft)}
           </div>
         )}
 

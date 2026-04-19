@@ -21,6 +21,7 @@ export interface Test {
   difficulty: 'Easy' | 'Medium' | 'Hard';
   isLocked: boolean;
   price: number;
+  windowExpiresAt?: number | null;
   attemptsAllowed: number;
   attemptsUsed: number;
   sections: TestSection[];
