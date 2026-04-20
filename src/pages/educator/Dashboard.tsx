@@ -120,7 +120,7 @@ type EducatorProfileDoc = {
   tenantSlug?: string;
 };
 
-type TopPerformerFilter = "overall" | "subject" | "test";
+type TopPerformerFilter = "subject" | "test";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -244,9 +244,9 @@ export default function EducatorDashboard() {
   const [seatsLoaded, setSeatsLoaded] = useState(false);
   const [seatTxLoaded, setSeatTxLoaded] = useState(false);
   const [threadsLoaded, setThreadsLoaded] = useState(false);
-  const [topPerformerFilter, setTopPerformerFilter] = useState<TopPerformerFilter>("overall");
+  const [topPerformerFilter, setTopPerformerFilter] = useState<TopPerformerFilter>("test");
   const [selectedTopSubject, setSelectedTopSubject] = useState("all");
-  const [selectedTopTest, setSelectedTopTest] = useState("all");
+  const [selectedTopTest, setSelectedTopTest] = useState("");
   const [topPerformerLimit, setTopPerformerLimit] = useState("10");
   const [copiedCoachingUrl, setCopiedCoachingUrl] = useState(false);
   const [studentGrowthPeriod, setStudentGrowthPeriod] = useState("30");
@@ -571,16 +571,22 @@ export default function EducatorDashboard() {
   }, [completedAttempts]);
 
   const topPerformerTests = useMemo(() => {
-    const out = new Map<string, string>();
+    const out = new Map<string, { label: string; latestMs: number }>();
     completedAttempts.forEach((attempt) => {
       const title = String(attempt.testTitle || "Untitled Test").trim() || "Untitled Test";
       const key = attempt.testId ? `id:${attempt.testId}` : `title:${title}`;
-      if (!out.has(key)) out.set(key, title);
+      const attemptMs = toMillis(attempt.submittedAt || attempt.updatedAt || attempt.createdAt) || 0;
+      const existing = out.get(key);
+
+      if (!existing || attemptMs > existing.latestMs) {
+        out.set(key, { label: title, latestMs: attemptMs });
+      }
     });
 
     return Array.from(out.entries())
-      .map(([value, label]) => ({ value, label }))
-      .sort((a, b) => a.label.localeCompare(b.label));
+      .map(([value, meta]) => ({ value, label: meta.label, latestMs: meta.latestMs }))
+      .sort((a, b) => b.latestMs - a.latestMs)
+      .map(({ value, label }) => ({ value, label }));
   }, [completedAttempts]);
 
 
@@ -591,8 +597,11 @@ export default function EducatorDashboard() {
   }, [topPerformerFilter, selectedTopSubject, topPerformerSubjects]);
 
   useEffect(() => {
-    if (topPerformerFilter === "test" && selectedTopTest !== "all" && !topPerformerTests.some((test) => test.value === selectedTopTest)) {
-      setSelectedTopTest("all");
+    if (topPerformerFilter !== "test") return;
+
+    const hasCurrent = topPerformerTests.some((test) => test.value === selectedTopTest);
+    if (!hasCurrent) {
+      setSelectedTopTest(topPerformerTests[0]?.value || "");
     }
   }, [topPerformerFilter, selectedTopTest, topPerformerTests]);
 
@@ -603,7 +612,9 @@ export default function EducatorDashboard() {
       );
     }
 
-    if (topPerformerFilter === "test" && selectedTopTest !== "all") {
+    if (topPerformerFilter === "test") {
+      if (!selectedTopTest) return [];
+
       if (selectedTopTest.startsWith("id:")) {
         return completedAttempts.filter((attempt) => `id:${attempt.testId || ""}` === selectedTopTest);
       }
@@ -939,6 +950,11 @@ export default function EducatorDashboard() {
             <p className="text-xs md:text-sm text-muted-foreground">
               Ranked by best score first, then average accuracy based on selected filters.
             </p>
+            {topPerformerFilter === "test" ? (
+              <p className="text-xs text-muted-foreground mt-1">
+                Latest completed test: <span className="font-medium text-foreground">{topPerformerTests[0]?.label || "—"}</span>
+              </p>
+            ) : null}
           </div>
 
           <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
@@ -950,7 +966,6 @@ export default function EducatorDashboard() {
                 <SelectValue placeholder="Select ranking type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="overall">Overall Toppers</SelectItem>
                 <SelectItem value="subject">Subject-wise Toppers</SelectItem>
                 <SelectItem value="test">Particular Test Toppers</SelectItem>
               </SelectContent>
@@ -992,7 +1007,6 @@ export default function EducatorDashboard() {
                   <SelectValue placeholder="Select test" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All tests</SelectItem>
                   {topPerformerTests.map((test) => (
                     <SelectItem key={test.value} value={test.value}>
                       {test.label}

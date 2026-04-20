@@ -65,6 +65,7 @@ import { motion } from "framer-motion";
 import { useTenant } from "@/contexts/TenantProvider";
 import { uploadToImageKit } from "@/lib/imagekitUpload";
 import { aiFeatureFlags, getAiFeatureDisabledMessage } from "@/lib/aiFeatureFlags";
+import { DEFAULT_EDUCATOR_THEME, isThemeUnlocked, sanitizeEducatorTheme } from "@/lib/themeFeatureFlags";
 import { useAIStream } from "@/hooks/useAIStream";
 
 // --- Types ---
@@ -124,7 +125,7 @@ export default function WebsiteSettings() {
   const heroInputRef = useRef<HTMLInputElement | null>(null);
 
   // NEW: Theme selection
-  const [themeId, setThemeId] = useState<"theme1" | "theme2" | "theme3">("theme1");
+  const [themeId, setThemeId] = useState<"theme1" | "theme2" | "theme3">(DEFAULT_EDUCATOR_THEME);
 
   // NEW: Social handles
   const [socials, setSocials] = useState<SocialLinks>({});
@@ -154,6 +155,8 @@ export default function WebsiteSettings() {
   }, [availableTests]);
 
   const isAiWebsiteContentEnabled = aiFeatureFlags.websiteContent;
+  const theme1Unlocked = isThemeUnlocked("theme1");
+  const theme3Unlocked = isThemeUnlocked("theme3");
 
   // --- AI Generation Function with streaming ---
   const handleGenerateWithAI = async () => {
@@ -235,7 +238,7 @@ export default function WebsiteSettings() {
           setTestimonials(data.testimonials || []);
 
           // NEW: theme + socials
-          setThemeId((data.themeId || "theme1") as any);
+          setThemeId(sanitizeEducatorTheme(data.themeId));
           setSocials((data.socials || {}) as SocialLinks);
           
           // Load Featured Tests selection
@@ -322,6 +325,11 @@ export default function WebsiteSettings() {
 
     try {
       const educatorRef = doc(db, "educators", firebaseUser.uid);
+      const safeThemeId = sanitizeEducatorTheme(themeId);
+
+      if (safeThemeId !== themeId) {
+        setThemeId(safeThemeId);
+      }
       
       // Construct the config object with ALL fields
       const websiteConfig: any = {
@@ -329,7 +337,7 @@ export default function WebsiteSettings() {
         tagline,
         logoUrl,
         heroImage,
-        themeId,
+        themeId: safeThemeId,
         socials: {
           website: socials.website || "",
           instagram: socials.instagram || "",
@@ -568,11 +576,11 @@ export default function WebsiteSettings() {
             </DialogContent>
           </Dialog>
 
-          {!isAiWebsiteContentEnabled ? (
+          {/* {!isAiWebsiteContentEnabled ? (
             <p className="text-xs text-muted-foreground">
               {getAiFeatureDisabledMessage("websiteContent")}
             </p>
-          ) : null}
+          ) : null} */}
 
           <Button onClick={handleSave} disabled={saving} className="gradient-bg text-white shadow-md">
             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
@@ -608,15 +616,23 @@ export default function WebsiteSettings() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <button
                   type="button"
-                  onClick={() => setThemeId("theme1")}
+                  onClick={() => {
+                    if (!theme1Unlocked) return;
+                    setThemeId("theme1");
+                  }}
+                  disabled={!theme1Unlocked}
                   className={
                     `text-left rounded-xl border p-4 transition-all hover:bg-muted/40 ` +
-                    (themeId === "theme1" ? "border-primary ring-1 ring-primary/20 bg-primary/5" : "border-border")
+                    (!theme1Unlocked
+                      ? "border-border opacity-60 cursor-not-allowed"
+                      : themeId === "theme1"
+                        ? "border-primary ring-1 ring-primary/20 bg-primary/5"
+                        : "border-border")
                   }
                 >
                   <div className="font-semibold">Theme 1</div>
                   <div className="text-xs text-muted-foreground mt-1">Classic Univ.Live landing</div>
-                  <div className="text-xs mt-3">✅ Available</div>
+                  <div className="text-xs mt-3">{theme1Unlocked ? "Available" : "Locked by config"}</div>
                 </button>
 
                 <button
@@ -634,15 +650,23 @@ export default function WebsiteSettings() {
 
                 <button
                   type="button"
-                  onClick={() => setThemeId("theme3")}
+                  onClick={() => {
+                    if (!theme3Unlocked) return;
+                    setThemeId("theme3");
+                  }}
+                  disabled={!theme3Unlocked}
                   className={
                     `text-left rounded-xl border p-4 transition-all hover:bg-muted/40 ` +
-                    (themeId === "theme3" ? "border-primary ring-1 ring-primary/20 bg-primary/5" : "border-border")
+                    (!theme3Unlocked
+                      ? "border-border opacity-60 cursor-not-allowed"
+                      : themeId === "theme3"
+                        ? "border-primary ring-1 ring-primary/20 bg-primary/5"
+                        : "border-border")
                   }
                 >
                   <div className="font-semibold">Theme 3</div>
                   <div className="text-xs text-muted-foreground mt-1">More advanced</div>
-                  <div className="text-xs mt-3">New arrival</div>
+                  <div className="text-xs mt-3">{theme3Unlocked ? "New arrival" : "Locked by config"}</div>
                 </button>
               </div>
               <p className="text-xs text-muted-foreground">

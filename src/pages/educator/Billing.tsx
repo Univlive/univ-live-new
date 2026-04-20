@@ -277,7 +277,7 @@ export default function Billing() {
         </Card>
       </div>
 
-      <Card>
+      {/* <Card>
         <CardHeader>
           <CardTitle>Plans</CardTitle>
           <p className="text-sm text-muted-foreground">
@@ -312,7 +312,7 @@ export default function Billing() {
             ))}
           </div>
         </CardContent>
-      </Card>
+      </Card> */}
 
       <Dialog open={newSeatPopupOpen} onOpenChange={setNewSeatPopupOpen}>
         <DialogContent className="sm:max-w-md">

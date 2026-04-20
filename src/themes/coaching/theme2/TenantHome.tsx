@@ -328,28 +328,29 @@ export default function TenantHomeTheme2() {
   // ];
 
   return (
-    <div id="top" className="min-h-screen bg-[#FAFAFA] text-zinc-900 selection:bg-indigo-100 selection:text-indigo-900" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
+    <div id="top" className="min-h-screen overflow-x-hidden bg-[#FAFAFA] text-zinc-900 selection:bg-indigo-100 selection:text-indigo-900" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
       {/* NAVBAR */}
       <nav className="sticky top-0 z-50 bg-[#FAFAFA]/80 backdrop-blur-xl border-b border-zinc-200/50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-20">
-          <Link to="/" className="flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-16 sm:h-20">
+          <Link to="/" className="flex items-center gap-2 sm:gap-3 min-w-0">
             {logoUrl ? (
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl overflow-hidden border border-zinc-200 bg-zinc-50 flex-shrink-0">
+              <div className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl overflow-hidden border border-zinc-200 bg-zinc-50 flex-shrink-0">
                 <img src={logoUrl} alt={`${coachingName} logo`} className="h-full w-full object-contain" />
               </div>
             ) : (
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-950 text-white shadow-sm flex-shrink-0">
+              <div className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl bg-zinc-950 text-white shadow-sm flex-shrink-0">
                 <span className="text-base font-bold">
                   {coachingName?.trim()?.[0]?.toUpperCase() || "U"}
                 </span>
               </div>
             )}
-            <span className="text-xl font-bold tracking-tight text-zinc-950">
+            {/* Coaching Name */}
+            <span className="text-base sm:text-xl font-bold tracking-tight text-zinc-950 truncate max-w-[11rem] sm:max-w-[20rem] hidden lg:block">
               {coachingName}
             </span>
           </Link>
 
-          <div className="hidden md:flex items-center gap-8">
+          <div className="hidden md:flex items-center gap-6 lg:gap-8">
             {navLinks.map((l) => (
               <a
                 key={l.label}
@@ -361,19 +362,19 @@ export default function TenantHomeTheme2() {
             ))}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <Link to="/login?role=student">
               <Button variant="ghost" className="hidden md:inline-flex rounded-full px-6 font-semibold hover:bg-zinc-100">
                 Log in
               </Button>
             </Link>
             <Link to="/signup">
-              <Button className="rounded-full px-7 bg-zinc-950 text-white hover:bg-zinc-800 font-semibold shadow-sm">
+              <Button className="rounded-full px-4 py-2 sm:px-7 sm:py-2.5 text-sm sm:text-base bg-zinc-950 text-white hover:bg-zinc-800 font-semibold shadow-sm">
                 Get Started
               </Button>
             </Link>
 
-            <button className="ml-2 md:hidden p-2 text-zinc-600" onClick={() => setMobileOpen((s) => !s)}>
+            <button className="md:hidden p-2 text-zinc-600" onClick={() => setMobileOpen((s) => !s)}>
               {mobileOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
             </button>
           </div>
@@ -381,7 +382,7 @@ export default function TenantHomeTheme2() {
 
         {/* Mobile Menu */}
         {mobileOpen && (
-          <div className="absolute top-20 left-0 w-full bg-white border-b border-zinc-200 p-4 md:hidden shadow-xl">
+          <div className="absolute top-16 sm:top-20 left-0 w-full bg-white border-b border-zinc-200 p-4 md:hidden shadow-xl max-h-[calc(100vh-4rem)] sm:max-h-[calc(100vh-5rem)] overflow-y-auto">
             {navLinks.map((l) => (
               <a
                 key={l.label}
@@ -404,9 +405,9 @@ export default function TenantHomeTheme2() {
       </nav>
 
       {/* HERO SECTION */}
-      <section className="relative pt-20 pb-24 lg:pt-32 lg:pb-32 overflow-hidden">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
-          <div className="grid lg:grid-cols-2 gap-16 items-center">
+      <section className="relative pt-14 pb-16 sm:pt-20 sm:pb-24 lg:pt-32 lg:pb-32 overflow-hidden ">
+        <div className="max-w-7xl mx-auto px-4 sm:px-4 lg:px-8 relative">
+          <div className="grid lg:grid-cols-2 gap-10 sm:gap-12 lg:gap-16 items-center md:justify-center">
             
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -414,13 +415,13 @@ export default function TenantHomeTheme2() {
               transition={{ duration: 0.6, ease: "easeOut" }}
               className="max-w-2xl"
             >
-              <div className="inline-flex items-center gap-2 rounded-full bg-white border border-zinc-200 px-4 py-1.5 shadow-sm mb-8">
+              <div className="inline-flex items-center gap-2 rounded-full bg-white border border-zinc-200 px-4 py-1.5 shadow-sm mb-6 sm:mb-8">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-600">
                   {tagline}
                 </span>
               </div>
 
-              <h1 className="text-3xl sm:text-5xl lg:text-[72px] font-extrabold tracking-tighter text-zinc-950 leading-[1.05] mb-6">
+              <h1 className="text-3xl sm:text-5xl lg:text-[64px] font-extrabold tracking-tighter text-zinc-950 leading-[1.05] mb-6">
                 Your CUET Preparation<br/>
                 <span className="text-zinc-500">Starts With {coachingName}</span>
               </h1>
@@ -434,13 +435,13 @@ export default function TenantHomeTheme2() {
               </div>
 
               {(stats?.length > 0) && (
-                <div className="flex items-center gap-6 pt-2">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6 pt-2">
                   <div className="flex items-center gap-1">
                     {[1, 2, 3, 4, 5].map((i) => (
-                      <Star key={i} className="h-5 w-5 fill-orange-400 text-orange-400" />
+                      <Star key={i} className="h-4 w-4 sm:h-5 sm:w-5 fill-orange-400 text-orange-400" />
                     ))}
                   </div>
-                  <div className="flex gap-4">
+                  <div className="flex flex-wrap gap-3 sm:gap-4">
                     {stats.slice(0, 2).map((s, idx) => (
                       <div key={idx} className="text-sm font-medium text-zinc-600">
                         <span className="font-bold text-zinc-950">{s.value}</span> {s.label}
@@ -474,15 +475,15 @@ export default function TenantHomeTheme2() {
       </section>
 
       {/* NEW FEATURES SECTION */}
-      <section id="features" className="py-24 bg-white border-y border-zinc-100">
+      <section id="features" className="py-16 sm:py-20 lg:py-24 bg-white border-y border-zinc-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-3xl mx-auto mb-16">
+          <div className="text-center max-w-3xl mx-auto mb-12 sm:mb-16">
             <div className="inline-flex items-center justify-center rounded-full bg-zinc-100 px-4 py-1.5 mb-6">
               <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-600">
                 WHY CHOOSE US
               </span>
             </div>
-            <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-zinc-950 leading-tight">
+            <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-zinc-950 leading-tight">
               Everything you need to <br className="hidden sm:block" /> dominate your exams
             </h2>
           </div>
@@ -493,7 +494,7 @@ export default function TenantHomeTheme2() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.5, delay: 0.1 }}
-              className="bg-[#FAFAFA] rounded-[2rem] p-8 border border-zinc-100 shadow-sm"
+              className="bg-[#FAFAFA] rounded-[2rem] p-6 sm:p-8 border border-zinc-100 shadow-sm"
             >
               <div className="h-12 w-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-6">
                 <Target className="h-6 w-6" />
@@ -509,7 +510,7 @@ export default function TenantHomeTheme2() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.5, delay: 0.2 }}
-              className="bg-[#FAFAFA] rounded-[2rem] p-8 border border-zinc-100 shadow-sm"
+              className="bg-[#FAFAFA] rounded-[2rem] p-6 sm:p-8 border border-zinc-100 shadow-sm"
             >
               <div className="h-12 w-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-6">
                 <Brain className="h-6 w-6" />
@@ -525,7 +526,7 @@ export default function TenantHomeTheme2() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.5, delay: 0.3 }}
-              className="bg-[#FAFAFA] rounded-[2rem] p-8 border border-zinc-100 shadow-sm"
+              className="bg-[#FAFAFA] rounded-[2rem] p-6 sm:p-8 border border-zinc-100 shadow-sm"
             >
               <div className="h-12 w-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-6">
                 <Clock className="h-6 w-6" />
@@ -540,11 +541,11 @@ export default function TenantHomeTheme2() {
       </section>
 
       {/* NEW: WHAT WE STAND FOR */}
-      <section className="py-24 bg-[#FAFAFA]">
+      <section className="py-16 sm:py-20 lg:py-24 bg-[#FAFAFA]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-           <div className="grid lg:grid-cols-2 gap-16 items-center">
+           <div className="grid lg:grid-cols-2 gap-10 sm:gap-12 lg:gap-16 items-center">
              <div>
-                <h2 className="text-4xl font-extrabold tracking-tight text-zinc-950 mb-6">
+                <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-zinc-950 mb-6">
                   What we stand for
                 </h2>
                 <p className="text-lg text-zinc-600 mb-8 leading-relaxed">
@@ -571,13 +572,13 @@ export default function TenantHomeTheme2() {
       </section>
 
       {/* TEST SERIES SECTION */}
-      <section id="tests" className="py-24 bg-white border-t border-zinc-100">
+      <section id="tests" className="py-16 sm:py-20 lg:py-24 bg-white border-t border-zinc-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           
           {/* NEW: OUR TESTS (CUET Style Subject Cards) */}
           <div className="mb-12 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
             <div>
-              <h2 className="text-4xl font-extrabold tracking-tight text-zinc-950 mb-4">
+              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-zinc-950 mb-4">
                 Our Tests
               </h2>
               <p className="text-zinc-500">Master every subject with dedicated mock tests.</p>
@@ -597,18 +598,18 @@ export default function TenantHomeTheme2() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ duration: 0.4, delay: idx * 0.05 }}
-                className="bg-white border border-zinc-200 rounded-[2rem] p-6 shadow-[0_4px_20px_rgb(0,0,0,0.03)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] transition-all duration-300 relative overflow-hidden group"
+                className="bg-white border border-zinc-200 rounded-[2rem] p-5 sm:p-6 shadow-[0_4px_20px_rgb(0,0,0,0.03)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] transition-all duration-300 relative overflow-hidden group"
               >
                 {/* NTA logo */}
                 <div className="absolute right-6 top-6 h-12 w-12 bg-white rounded-full flex items-center justify-center border-2 border-zinc-100 shadow-sm overflow-hidden p-1 z-10">
                    <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQs7iboUwzXcYfbV94AQ5DctkCyCVqRc-0zwA&s" alt="NTA Logo" className="w-full h-full object-contain" />
                 </div>
 
-                <div className="pr-16 mb-8">
+                <div className="pr-14 sm:pr-16 mb-8">
                   <h3 className="text-xl font-bold text-zinc-950 mb-2">{subject.title}</h3>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                     <span className="text-sm font-medium text-zinc-500">{subject.totalTests} Total Tests</span>
-                    <span className="bg-green-600 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm relative after:content-[''] after:absolute after:right-[-6px] after:top-0 after:border-t-[8px] after:border-b-[8px] after:border-l-[6px] after:border-t-transparent after:border-b-transparent after:border-l-green-600">
+                    <span className="bg-green-600 text-white text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm relative sm:after:content-[''] sm:after:absolute sm:after:right-[-6px] sm:after:top-0 sm:after:border-t-[8px] sm:after:border-b-[8px] sm:after:border-l-[6px] sm:after:border-t-transparent sm:after:border-b-transparent sm:after:border-l-green-600">
                       Expert-Curated Test(s)
                     </span>
                   </div>
@@ -628,15 +629,15 @@ export default function TenantHomeTheme2() {
       </section>
 
       {/* UPDATED TESTIMONIALS */}
-      <section id="reviews" className="py-24 bg-[#FAFAFA]">
+      <section id="reviews" className="py-16 sm:py-20 lg:py-24 bg-[#FAFAFA]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-3xl mx-auto mb-16">
+          <div className="text-center max-w-3xl mx-auto mb-12 sm:mb-16">
             <div className="inline-flex items-center justify-center rounded-full bg-indigo-50 border border-indigo-100 px-4 py-1.5 mb-6">
               <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-600">
                 PROOF THAT IT WORKS
               </span>
             </div>
-            <h2 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-zinc-950 leading-tight">
+            <h2 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-zinc-950 leading-tight">
               Happy students sharing experiences :
             </h2>
           </div>
@@ -653,7 +654,7 @@ export default function TenantHomeTheme2() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ duration: 0.5, delay: idx * 0.1 }}
-                className="bg-white rounded-[2rem] p-8 sm:p-10 border border-zinc-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col items-center text-center"
+                className="bg-white rounded-[2rem] p-6 sm:p-10 border border-zinc-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col items-center text-center"
               >
                 <div className="flex gap-1 mb-6">
                   {Array.from({ length: Math.max(1, Math.min(5, t.rating || 5)) }).map((_, i) => (
@@ -661,7 +662,7 @@ export default function TenantHomeTheme2() {
                   ))}
                 </div>
                 
-                <p className="text-lg text-zinc-600 leading-relaxed mb-8 flex-1">
+                <p className="text-base sm:text-lg text-zinc-600 leading-relaxed mb-8 flex-1">
                   "{t.text}"
                 </p>
 
@@ -690,16 +691,16 @@ export default function TenantHomeTheme2() {
       </section>
 
       {/* NEW CONTACT SECTION */}
-      <section id="contact" className="py-24 bg-white border-y border-zinc-100">
+      <section id="contact" className="py-16 sm:py-20 lg:py-24 bg-white border-y border-zinc-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-           <div className="grid lg:grid-cols-2 gap-16 items-center">
+           <div className="grid lg:grid-cols-2 gap-10 sm:gap-12 lg:gap-16 items-center">
              <div>
                <div className="inline-flex items-center justify-center rounded-full bg-zinc-100 px-4 py-1.5 mb-6">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-600">
                     GET IN TOUCH
                   </span>
                 </div>
-                <h2 className="text-5xl lg:text-6xl font-extrabold tracking-tight text-zinc-950 mb-6 leading-tight">
+                <h2 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-zinc-950 mb-6 leading-tight">
                   Let's Talk.
                 </h2>
                 <p className="text-lg text-zinc-500 mb-10 max-w-md">
@@ -709,7 +710,7 @@ export default function TenantHomeTheme2() {
                 
              </div>
 
-             <div className="bg-[#FAFAFA] border border-zinc-200 rounded-[2.5rem] p-8 sm:p-12">
+             <div className="bg-[#FAFAFA] border border-zinc-200 rounded-[2.5rem] p-6 sm:p-12">
                 <h3 className="text-2xl font-bold text-zinc-950 mb-8">Follow Our Socials</h3>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   {Object.entries(socials).length > 0 ? (
@@ -726,10 +727,10 @@ export default function TenantHomeTheme2() {
                           href={href}
                           target={isExternal ? "_blank" : undefined}
                           rel={isExternal ? "noopener noreferrer" : undefined}
-                          className="flex flex-col items-center justify-center gap-3 bg-white border border-zinc-100 p-6 rounded-2xl hover:shadow-md hover:-translate-y-1 transition-all"
+                          className="flex flex-col items-center justify-center gap-2 sm:gap-3 bg-white border border-zinc-100 p-4 sm:p-6 rounded-2xl hover:shadow-md hover:-translate-y-1 transition-all"
                         >
-                          <Icon className="h-8 w-8 text-zinc-700" />
-                          <span className="text-sm font-semibold text-zinc-900">
+                          <Icon className="h-7 w-7 sm:h-8 sm:w-8 text-zinc-700" />
+                          <span className="text-xs sm:text-sm font-semibold text-zinc-900 text-center">
                             {socialLabelMap[k] || k}
                           </span>
                         </a>
@@ -748,9 +749,9 @@ export default function TenantHomeTheme2() {
 
 
       {/* NEW BOTTOM CTA CARD (Purple Gradient Style) */}
-      <section className="py-24 bg-[#FAFAFA]">
+      <section className="py-16 sm:py-20 lg:py-24 bg-[#FAFAFA]">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="bg-gradient-to-r from-violet-500 to-indigo-500 rounded-[2.5rem] p-10 sm:p-16 lg:p-20 text-center relative overflow-hidden shadow-[0_20px_50px_rgb(99,102,241,0.2)]">
+          <div className="bg-gradient-to-r from-violet-500 to-indigo-500 rounded-[2rem] sm:rounded-[2.5rem] p-7 sm:p-12 lg:p-20 text-center relative overflow-hidden shadow-[0_20px_50px_rgb(99,102,241,0.2)]">
             {/* Sparkles/Floating decorative elements */}
             <Sparkles className="absolute top-10 right-12 h-8 w-8 text-white/40" />
             <Sparkles className="absolute bottom-12 left-10 h-6 w-6 text-white/30" />
@@ -760,18 +761,18 @@ export default function TenantHomeTheme2() {
                 <Sparkles className="h-3.5 w-3.5" /> Start Today
               </div>
 
-              <h2 className="text-4xl sm:text-5xl md:text-6xl font-extrabold tracking-tight text-white mb-10 max-w-3xl leading-[1.1]">
+              <h2 className="text-3xl sm:text-5xl md:text-6xl font-extrabold tracking-tight text-white mb-8 sm:mb-10 max-w-3xl leading-[1.1]">
                 Ready to Begin Your Journey at {coachingName}?
               </h2>
               
               <div className="flex flex-col sm:flex-row justify-center gap-4 w-full sm:w-auto">
                 <Link to="/login?role=student" className="w-full sm:w-auto">
-                  <Button className="w-full rounded-full bg-white text-indigo-600 hover:bg-zinc-50 px-10 py-7 text-lg font-bold shadow-xl">
+                  <Button className="w-full rounded-full bg-white text-indigo-600 hover:bg-zinc-50 px-8 sm:px-10 py-5 sm:py-7 text-base sm:text-lg font-bold shadow-xl">
                     Get Started For Free <ArrowRight className="ml-2 h-5 w-5" />
                   </Button>
                 </Link>
                 <Link to="/courses" className="w-full sm:w-auto">
-                  <Button variant="outline" className="w-full rounded-full bg-transparent border-white/30 text-white hover:bg-white/10 px-10 py-7 text-lg font-bold">
+                  <Button variant="outline" className="w-full rounded-full bg-transparent border-white/30 text-white hover:bg-white/10 px-8 sm:px-10 py-5 sm:py-7 text-base sm:text-lg font-bold">
                     Browse All Tests
                   </Button>
                 </Link>
@@ -782,9 +783,9 @@ export default function TenantHomeTheme2() {
       </section>
 
       {/* FOOTER */}
-      <footer className="bg-white border-t border-zinc-200 pt-16 pb-8">
+      <footer className="bg-white border-t border-zinc-200 pt-12 sm:pt-16 pb-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-16">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-10 md:gap-12 mb-12 sm:mb-16">
             <div className="md:col-span-1">
               <div className="flex items-center gap-2 mb-4">
                 {logoUrl ? (
@@ -852,11 +853,11 @@ export default function TenantHomeTheme2() {
             </div>
           </div>
 
-          <div className="border-t border-zinc-200 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="border-t border-zinc-200 pt-8 flex flex-col md:flex-row items-center justify-between gap-3 sm:gap-4 text-center md:text-left">
             <p className="text-sm font-medium text-zinc-500">
               © {new Date().getFullYear()} {coachingName}. All rights reserved.
             </p>
-            <div className="flex gap-6 text-sm font-medium text-zinc-500">
+            <div className="flex flex-wrap justify-center md:justify-start gap-4 sm:gap-6 text-sm font-medium text-zinc-500">
               <Link to="/privacy-policy" className="hover:text-zinc-950">Privacy Policy</Link>
               <Link to="/terms-of-use" className="hover:text-zinc-950">Terms of Service</Link>
             </div>
