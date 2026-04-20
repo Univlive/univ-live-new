@@ -10,6 +10,7 @@ import { HtmlView } from "@/lib/safeHtml";
 import { useAuth } from "@/contexts/AuthProvider";
 import { useTenant } from "@/contexts/TenantProvider";
 import { db } from "@/lib/firebase";
+import { logError } from "@/lib/errorLogger";
 import {
   Sheet,
   SheetContent,
@@ -222,6 +223,7 @@ export default function StudentCBTAttempt() {
           setLastSavedAt(Date.now());
         } catch (e) {
           console.error(e);
+          logError(e, "cbt:save-progress");
           toast.error("Failed to save progress");
         } finally {
           setSaving(false);
@@ -489,6 +491,7 @@ export default function StudentCBTAttempt() {
         }
       } catch (e: any) {
         console.error(e);
+        logError(e, "cbt:load-test");
         if (!mounted) return;
         setLoadError(e?.message || "Failed to load test");
       } finally {
@@ -632,6 +635,7 @@ export default function StudentCBTAttempt() {
       setStartDialogOpen(false);
     } catch (e) {
       console.error(e);
+      logError(e, "cbt:start-test");
       toast.error("Failed to start test");
     }
   };
@@ -821,6 +825,7 @@ export default function StudentCBTAttempt() {
       navigate(`/student/results/${attemptId}?fromTest=true${isAutoSubmit ? "&auto=1" : ""}`);
     } catch (e) {
       console.error(e);
+      logError(e, "cbt:submit-test");
       toast.error("Failed to submit test");
     } finally {
       setSaving(false);
