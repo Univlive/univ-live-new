@@ -13,6 +13,11 @@ import QuestionsManager from "./QuestionsManager";
 type TestMeta = {
   title?: string;
   subject?: string;
+  source?: string;
+  originSource?: string;
+  linkedAdminTestId?: string;
+  originalTestId?: string;
+  isQuestionSourceShared?: boolean;
 };
 
 export default function ManageQuestionsPage() {
@@ -43,6 +48,11 @@ export default function ManageQuestionsPage() {
           setTestMeta({
             title: String(data?.title || ""),
             subject: String(data?.subject || ""),
+            source: String(data?.source || ""),
+            originSource: String(data?.originSource || ""),
+            linkedAdminTestId: String(data?.linkedAdminTestId || ""),
+            originalTestId: String(data?.originalTestId || ""),
+            isQuestionSourceShared: data?.isQuestionSourceShared === true,
           });
         }
         setTestLoading(false);
@@ -86,6 +96,16 @@ export default function ManageQuestionsPage() {
     );
   }
 
+  const isAdminLinked =
+    testMeta.originSource === "admin" ||
+    testMeta.source === "imported" ||
+    testMeta.source === "linked_admin" ||
+    testMeta.isQuestionSourceShared === true ||
+    Boolean(testMeta.linkedAdminTestId) ||
+    Boolean(testMeta.originalTestId);
+
+  const adminSourceTestId = testMeta.linkedAdminTestId || testMeta.originalTestId || testId;
+
   return (
     <QuestionsManager
       mode="page"
@@ -93,6 +113,9 @@ export default function ManageQuestionsPage() {
       testTitle={testMeta.title}
       testSubject={testMeta.subject}
       educatorUid={firebaseUser.uid}
+      readOnly={isAdminLinked}
+      questionSource={isAdminLinked ? "admin" : "educator"}
+      questionSourceTestId={isAdminLinked ? adminSourceTestId : undefined}
       onClose={() => navigate("/educator/test-series")}
     />
   );
