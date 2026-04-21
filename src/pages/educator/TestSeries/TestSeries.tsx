@@ -74,6 +74,7 @@ import {
   getDocs,
   onSnapshot,
   query,
+  setDoc,
   serverTimestamp,
   updateDoc,
   where,
@@ -438,6 +439,24 @@ export default function TestSeries() {
     return groups;
   }, [bankTests, search]);
 
+  const importedAdminTestIds = useMemo(() => {
+    const ids = new Set<string>();
+
+    myTests.forEach((test: any) => {
+      const linkedId = String(test?.linkedAdminTestId || test?.originalTestId || "").trim();
+      const isImportedFromAdmin =
+        test?.originSource === "admin" ||
+        test?.source === "imported" ||
+        test?.source === "linked_admin";
+
+      if (linkedId && isImportedFromAdmin) {
+        ids.add(linkedId);
+      }
+    });
+
+    return ids;
+  }, [myTests]);
+
   const folderState = {
     createFolderOpen,
     setCreateFolderOpen,
@@ -499,15 +518,19 @@ export default function TestSeries() {
     }
   };
 
-  // Import admin test (metadata + questions) into educator library copy
+  // Import admin test as a shared reference (no question copy)
   const handleImport = async (bankTest: any) => {
     if (!currentUser) return;
+
+    if (importedAdminTestIds.has(bankTest.id)) {
+      toast.info("Already added to your library");
+      return;
+    }
+
     setImportingId(bankTest.id);
 
     try {
-      // Copy metadata to educators/{uid}/my_tests
       const meta: any = pruneUndefined({
-        // whitelisted fields (keeps compatibility + avoids copying weird transient fields)
         title: bankTest.title ?? "",
         description: bankTest.description ?? "",
         subject: bankTest.subject ?? "",
@@ -517,49 +540,32 @@ export default function TestSeries() {
         sections: bankTest.sections ?? [],
         instructions: bankTest.instructions ?? "",
 
-        // attempts & marking
         attemptsAllowed: globalAttemptsAllowed,
         markingScheme: bankTest.markingScheme ?? undefined,
 
-        // marks config (omit if missing - Firestore rejects undefined)
         positiveMarks:
           bankTest.positiveMarks != null ? Number(bankTest.positiveMarks) : undefined,
         negativeMarks:
           bankTest.negativeMarks != null ? Number(bankTest.negativeMarks) : undefined,
 
-        // provenance
-        source: "imported",
+        source: "linked_admin",
         originSource: "admin",
+        linkedAdminTestId: bankTest.id,
         originalTestId: bankTest.id,
+        isQuestionSourceShared: true,
 
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         createdBy: currentUser.uid,
-        questionsCount: 0,
+        questionsCount: Math.max(
+          0,
+          Number(bankTest.questionsCount ?? bankTest.questionCount ?? bankTest.totalQuestions ?? 0)
+        ),
       });
 
-      const newTestRef = await addDoc(collection(db, "educators", currentUser.uid, "my_tests"), meta);
+      await setDoc(doc(db, "educators", currentUser.uid, "my_tests", bankTest.id), meta);
 
-      // Copy questions from test_series/{id}/questions → educators/{uid}/my_tests/{new}/questions
-      const questionsSnap = await getDocs(collection(db, "test_series", bankTest.id, "questions"));
-      const batch = writeBatch(db);
-      let activeCount = 0;
-
-      questionsSnap.forEach((qDoc) => {
-        const data = qDoc.data();
-        if (data?.isActive !== false) activeCount += 1;
-        const newQRef = doc(collection(db, "educators", currentUser.uid, "my_tests", newTestRef.id, "questions"));
-        batch.set(newQRef, {
-          ...data,
-          importedFromTestId: bankTest.id,
-          importedAt: serverTimestamp(),
-        });
-      });
-
-      await batch.commit();
-      await updateDoc(newTestRef, { questionsCount: activeCount, updatedAt: serverTimestamp() });
-
-      toast.success("Imported to your library");
+      toast.success("Added as linked admin test");
       setActiveTab("library");
     } catch (e) {
       console.error(e);
@@ -747,6 +753,16 @@ export default function TestSeries() {
                         ) : (
                           group.tests.map((test) => (
                             <motion.div key={test.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                              {(() => {
+                                const isAdminLinked =
+                                  test.originSource === "admin" ||
+                                  test.source === "imported" ||
+                                  test.source === "linked_admin" ||
+                                  test.isQuestionSourceShared === true ||
+                                  !!test.linkedAdminTestId ||
+                                  !!test.originalTestId;
+
+                                return (
                               <Card className="h-full flex flex-col hover:shadow-md transition-shadow relative">
                                 <CardHeader>
                                   <CardTitle className="flex justify-between items-start gap-2">
@@ -801,7 +817,11 @@ export default function TestSeries() {
                                       <span className="flex items-center gap-1 shrink-0">
                                         <Clock className="h-3 w-3" /> {Number(test.durationMinutes || 0)}m
                                       </span>
-                                      {test.source === "imported" ? (
+                                      {isAdminLinked ? (
+                                        <Badge variant="outline" className="text-[10px] py-0 px-2 h-5 shrink-0">
+                                          Admin Linked
+                                        </Badge>
+                                      ) : test.source === "imported" ? (
                                         <Badge variant="secondary" className="text-[10px] py-0 px-2 h-5 shrink-0">
                                           Imported
                                         </Badge>
@@ -814,6 +834,7 @@ export default function TestSeries() {
                                       <span className="text-[9px] font-bold text-muted-foreground uppercase">Attempts:</span>
                                       <Select
                                         value={String(test.attemptsAllowed || 3)}
+                                        // disabled={isAdminLinked}
                                         onValueChange={(v) => handleUpdateTestAttempts(test.id, Number(v))}
                                       >
                                         <SelectTrigger className="h-6 w-[45px] text-[10px] font-bold rounded-md bg-background border-none shadow-none focus:ring-0">
@@ -836,11 +857,13 @@ export default function TestSeries() {
                                         navigate(`/educator/test-series/${test.id}/questions`);
                                       }}
                                     >
-                                      <Edit className="mr-2 h-3 w-3" /> Manage Questions
+                                      <Edit className="mr-2 h-3 w-3" /> {isAdminLinked ? "View Questions" : "Manage Questions"}
                                     </Button>
                                   </div>
                                 </CardContent>
                               </Card>
+                                );
+                              })()}
                             </motion.div>
                           ))
                         )}
@@ -883,7 +906,10 @@ export default function TestSeries() {
 
                     {isExpanded && (
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pl-4">
-                        {group.tests.map((test) => (
+                        {group.tests.map((test) => {
+                          const alreadyLinked = importedAdminTestIds.has(test.id);
+
+                          return (
                           <Card key={test.id} className="bg-muted/30 border-dashed hover:border-primary transition-colors">
                             <CardHeader>
                               <CardTitle className="flex justify-between items-start">
@@ -898,8 +924,16 @@ export default function TestSeries() {
                                 <span>•</span>
                                 <span>{test.level || "—"}</span>
                               </div>
-                              <Button className="w-full rounded-xl" disabled={importingId === test.id} onClick={() => handleImport(test)}>
-                                {importingId === test.id ? (
+                              <Button
+                                className="w-full rounded-xl"
+                                disabled={importingId === test.id || alreadyLinked}
+                                onClick={() => handleImport(test)}
+                              >
+                                {alreadyLinked ? (
+                                  <>
+                                    <CheckCircle2 className="mr-2 h-4 w-4" /> Added to Library
+                                  </>
+                                ) : importingId === test.id ? (
                                   <Loader2 className="animate-spin h-4 w-4" />
                                 ) : (
                                   <>
@@ -909,7 +943,7 @@ export default function TestSeries() {
                               </Button>
                             </CardContent>
                           </Card>
-                        ))}
+                        )})}
                       </div>
                     )}
                   </div>
