@@ -161,34 +161,41 @@ export default function StudentAttemptDetails() {
 
         if (!educatorId || !testId) throw new Error("Attempt is missing test reference.");
 
-        // 2) Load test + questions (educator test first, fallback to global)
-        const sources = [
-          {
-            testDoc: doc(db, "educators", educatorId, "my_tests", testId),
-            qCol: collection(db, "educators", educatorId, "my_tests", testId, "questions"),
-          },
-          {
-            testDoc: doc(db, "test_series", testId),
-            qCol: collection(db, "test_series", testId, "questions"),
-          },
-        ];
-
         let qs: AttemptQuestion[] = [];
-        let found = false;
 
-        for (const s of sources) {
-          const tSnap = await getDoc(s.testDoc);
-          if (!tSnap.exists()) continue;
+        const educatorTestSnap = await getDoc(doc(db, "educators", educatorId, "my_tests", testId));
 
-          const qSnap = await getDocs(s.qCol);
+        if (educatorTestSnap.exists()) {
+          const localTest = educatorTestSnap.data() as any;
+          const linkedAdminTestId = String(localTest?.linkedAdminTestId || localTest?.originalTestId || "").trim();
+          const isAdminLinked =
+            localTest?.originSource === "admin" ||
+            localTest?.source === "imported" ||
+            localTest?.source === "linked_admin" ||
+            localTest?.isQuestionSourceShared === true ||
+            Boolean(linkedAdminTestId);
+
+          const qCol =
+            isAdminLinked && linkedAdminTestId
+              ? collection(db, "test_series", linkedAdminTestId, "questions")
+              : collection(db, "educators", educatorId, "my_tests", testId, "questions");
+
+          const qSnap = await getDocs(qCol);
           qs = qSnap.docs
             .map((d) => mapQuestion(d.id, d.data()))
             .sort((a, b) => a.sortOrder - b.sortOrder);
-          found = true;
-          break;
         }
 
-        if (!found) throw new Error("Test not found for this attempt.");
+        if (!qs.length) {
+          const globalTestSnap = await getDoc(doc(db, "test_series", testId));
+          if (!globalTestSnap.exists()) throw new Error("Test not found for this attempt.");
+
+          const qSnap = await getDocs(collection(db, "test_series", testId, "questions"));
+          qs = qSnap.docs
+            .map((d) => mapQuestion(d.id, d.data()))
+            .sort((a, b) => a.sortOrder - b.sortOrder);
+        }
+
         if (!qs.length) throw new Error("Questions not found for this attempt.");
 
         if (!mounted) return;

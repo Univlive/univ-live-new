@@ -322,36 +322,52 @@ export default function StudentResults() {
 
         if (!a.educatorId || !a.testId) throw new Error("Attempt is missing test reference.");
 
-        // 2) Load test + questions (educator test first, fallback)
-        const sources = [
-          {
-            testDoc: doc(db, "educators", a.educatorId, "my_tests", a.testId),
-            qCol: collection(db, "educators", a.educatorId, "my_tests", a.testId, "questions"),
-          },
-          {
-            testDoc: doc(db, "test_series", a.testId),
-            qCol: collection(db, "test_series", a.testId, "questions"),
-          },
-        ];
-
         let testData: TestDoc | null = null;
         let qs: { id: string; data: QuestionDoc }[] = [];
 
-        for (const s of sources) {
-          const tSnap = await getDoc(s.testDoc);
-          if (!tSnap.exists()) continue;
+        const educatorTestSnap = await getDoc(doc(db, "educators", a.educatorId, "my_tests", a.testId));
 
-          testData = tSnap.data() as TestDoc;
-          const qSnap = await getDocs(s.qCol);
-          qs = qSnap.docs
-            .map((d) => ({ id: d.id, data: d.data() as QuestionDoc }))
-            .sort((a, b) => {
-              const aOrder = safeNumber(a.data.questionOrder, Number.MAX_SAFE_INTEGER);
-              const bOrder = safeNumber(b.data.questionOrder, Number.MAX_SAFE_INTEGER);
-              return aOrder - bOrder;
-            });
-          break;
+        if (educatorTestSnap.exists()) {
+          const localTest = educatorTestSnap.data() as any;
+          const linkedAdminTestId = String(localTest?.linkedAdminTestId || localTest?.originalTestId || "").trim();
+          const isAdminLinked =
+            localTest?.originSource === "admin" ||
+            localTest?.source === "imported" ||
+            localTest?.source === "linked_admin" ||
+            localTest?.isQuestionSourceShared === true ||
+            Boolean(linkedAdminTestId);
+
+          if (isAdminLinked && linkedAdminTestId) {
+            const adminTestSnap = await getDoc(doc(db, "test_series", linkedAdminTestId));
+            if (adminTestSnap.exists()) {
+              testData = adminTestSnap.data() as TestDoc;
+            } else {
+              testData = localTest as TestDoc;
+            }
+
+            const qSnap = await getDocs(collection(db, "test_series", linkedAdminTestId, "questions"));
+            qs = qSnap.docs.map((d) => ({ id: d.id, data: d.data() as QuestionDoc }));
+          } else {
+            testData = localTest as TestDoc;
+            const qSnap = await getDocs(collection(db, "educators", a.educatorId, "my_tests", a.testId, "questions"));
+            qs = qSnap.docs.map((d) => ({ id: d.id, data: d.data() as QuestionDoc }));
+          }
         }
+
+        if (!testData || !qs.length) {
+          const globalTestSnap = await getDoc(doc(db, "test_series", a.testId));
+          if (globalTestSnap.exists()) {
+            testData = globalTestSnap.data() as TestDoc;
+            const qSnap = await getDocs(collection(db, "test_series", a.testId, "questions"));
+            qs = qSnap.docs.map((d) => ({ id: d.id, data: d.data() as QuestionDoc }));
+          }
+        }
+
+        qs = qs.sort((a, b) => {
+          const aOrder = safeNumber(a.data.questionOrder, Number.MAX_SAFE_INTEGER);
+          const bOrder = safeNumber(b.data.questionOrder, Number.MAX_SAFE_INTEGER);
+          return aOrder - bOrder;
+        });
 
         if (!testData) throw new Error("Test not found for this attempt.");
         if (!qs.length) throw new Error("Questions not found for this attempt.");

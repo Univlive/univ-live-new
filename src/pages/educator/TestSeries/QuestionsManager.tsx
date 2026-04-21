@@ -240,6 +240,7 @@ type SortableQuestionListItemProps = {
     q: TestQuestion;
     displayOrder: number;
     dragDisabled: boolean;
+    readOnly: boolean;
     onOpenEdit: (q: TestQuestion) => void;
     onDuplicate: (q: TestQuestion) => void;
     onDelete: (id: string) => void;
@@ -250,6 +251,7 @@ function SortableQuestionListItem({
     q,
     displayOrder,
     dragDisabled,
+    readOnly,
     onOpenEdit,
     onDuplicate,
     onDelete,
@@ -277,20 +279,24 @@ function SortableQuestionListItem({
             <div className="flex items-start gap-2">
 
                 {/* Drag Handle */}
-                <Button
-                    data-drag-handle
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 rounded-lg text-muted-foreground mt-0.5 cursor-grab active:cursor-grabbing shrink-0"
-                    onClick={(e) => e.stopPropagation()}
-                    aria-label="Drag to reorder"
-                    {...attributes}
-                    {...listeners}
-                    disabled={dragDisabled}
-                >
-                    <GripVertical className="h-4 w-4" />
-                </Button>
+                {readOnly ? (
+                    <div className="h-7 w-7 shrink-0" />
+                ) : (
+                    <Button
+                        data-drag-handle
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 rounded-lg text-muted-foreground mt-0.5 cursor-grab active:cursor-grabbing shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="Drag to reorder"
+                        {...attributes}
+                        {...listeners}
+                        disabled={dragDisabled}
+                    >
+                        <GripVertical className="h-4 w-4" />
+                    </Button>
+                )}
 
                 {/* Content */}
                 <div className="w-full min-w-0">
@@ -322,18 +328,20 @@ function SortableQuestionListItem({
                             </div>
                         </div>
 
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="rounded-xl text-destructive shrink-0"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onDelete(q.id);
-                            }}
-                            aria-label="Delete question"
-                        >
-                            <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {!readOnly ? (
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="rounded-xl text-destructive shrink-0"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDelete(q.id);
+                                }}
+                                aria-label="Delete question"
+                            >
+                                <Trash2 className="h-4 w-4" />
+                            </Button>
+                        ) : null}
                     </div>
 
                     {/* Meta */}
@@ -365,16 +373,18 @@ function SortableQuestionListItem({
                             )}
                         </div>
 
-                        <div
-                            className="flex items-center gap-2"
-                            onClick={(e) => e.stopPropagation()}
-                            onPointerDown={(e) => e.stopPropagation()}
-                        >
-                            <Switch
-                                checked={isPublished}
-                                onCheckedChange={(checked) => onToggleActive(q, checked)}
-                            />
-                        </div>
+                        {!readOnly ? (
+                            <div
+                                className="flex items-center gap-2"
+                                onClick={(e) => e.stopPropagation()}
+                                onPointerDown={(e) => e.stopPropagation()}
+                            >
+                                <Switch
+                                    checked={isPublished}
+                                    onCheckedChange={(checked) => onToggleActive(q, checked)}
+                                />
+                            </div>
+                        ) : null}
 
                     </div>
                 </div>
@@ -390,6 +400,9 @@ const QuestionsManager = ({
     educatorUid,
     onClose,
     mode = "modal",
+    readOnly = false,
+    questionSource = "educator",
+    questionSourceTestId,
 }: {
     testId: string;
     testTitle?: string;
@@ -397,6 +410,9 @@ const QuestionsManager = ({
     educatorUid: string;
     onClose: () => void;
     mode?: "modal" | "page";
+    readOnly?: boolean;
+    questionSource?: "educator" | "admin";
+    questionSourceTestId?: string;
 }) => {
     const isPageMode = mode === "page";
     const [questions, setQuestions] = useState<TestQuestion[]>([]);
@@ -456,12 +472,16 @@ const QuestionsManager = ({
         })
     );
 
-    const qCol = useMemo(
-        () => collection(db, "educators", educatorUid, "my_tests", testId, "questions"),
-        [educatorUid, testId]
-    );
+    const resolvedQuestionSourceTestId = questionSourceTestId || testId;
+    const qCol = useMemo(() => {
+        if (questionSource === "admin") {
+            return collection(db, "test_series", resolvedQuestionSourceTestId, "questions");
+        }
+        return collection(db, "educators", educatorUid, "my_tests", testId, "questions");
+    }, [questionSource, resolvedQuestionSourceTestId, educatorUid, testId]);
 
     async function syncTestQuestionCount() {
+        if (readOnly || questionSource === "admin") return;
         try {
             const snap = await getDocs(qCol);
             let activeCount = 0;
@@ -482,7 +502,8 @@ const QuestionsManager = ({
             qCol,
             (snap) => {
                 const rows = snap.docs.map((d) => normalizeQuestionDoc(d.id, d.data()));
-                setQuestions(sortQuestionsForDisplay(rows));
+                const sorted = sortQuestionsForDisplay(rows);
+                setQuestions(sorted);
                 setLoading(false);
             },
             () => {
@@ -491,7 +512,7 @@ const QuestionsManager = ({
             }
         );
         return () => unsub();
-    }, [qCol]);
+    }, [qCol, readOnly]);
 
     useEffect(() => {
         if (!importBusy) return;
@@ -564,7 +585,7 @@ const QuestionsManager = ({
         return !areSnapshotsEqual(editorSnapshot, currentEditorSnapshot);
     }, [editorOpen, editorSnapshot, currentEditorSnapshot]);
 
-    const dndEnabled = searchQ.trim().length === 0;
+    const dndEnabled = !readOnly && searchQ.trim().length === 0;
 
     const questionNumberById = useMemo(() => {
         const numberMap = new Map<string, number>();
@@ -784,6 +805,7 @@ const QuestionsManager = ({
     }
 
     function openNew() {
+        if (readOnly) return;
         requestEditorAction({ type: "open-new" });
     }
 
@@ -920,6 +942,10 @@ const QuestionsManager = ({
     }
 
     async function saveQuestion(): Promise<boolean> {
+        if (readOnly) {
+            toast.info("This test is read-only.");
+            return false;
+        }
         if (saving) return false;
 
         const trimmedQuestion = formQuestion.trim();
@@ -1010,6 +1036,10 @@ const QuestionsManager = ({
     }
 
     async function deleteQuestion(id: string) {
+        if (readOnly) {
+            toast.info("This test is read-only.");
+            return;
+        }
         if (!confirm("Delete this question?")) return;
         try {
             await deleteDoc(doc(qCol, id));
@@ -1034,6 +1064,10 @@ const QuestionsManager = ({
     }
 
     async function duplicateQuestion(q: TestQuestion) {
+        if (readOnly) {
+            toast.info("This test is read-only.");
+            return;
+        }
         try {
             await addDoc(qCol, {
                 questionOrder: getNextQuestionOrder(),
@@ -1079,11 +1113,16 @@ const QuestionsManager = ({
     }
 
     async function toggleActive(q: TestQuestion, next: boolean) {
+        if (readOnly) {
+            toast.info("This test is read-only.");
+            return;
+        }
         const previous = isQuestionPublished(q.isActive);
         await updateQuestionPublishState(q.id, next, previous, true);
     }
 
     function handleEditorPublishChange(next: boolean) {
+        if (readOnly) return;
         const previous = formActive;
         setFormActive(next);
 
@@ -1093,6 +1132,10 @@ const QuestionsManager = ({
 
     // Upload pdf starts here....
     async function handlePdfSelected(file: File | null) {
+        if (readOnly) {
+            toast.info("This test is read-only.");
+            return;
+        }
         if (!isAiPdfImportEnabled) {
             toast.error(getAiFeatureDisabledMessage("pdfImport"));
             return;
@@ -1355,9 +1398,11 @@ const QuestionsManager = ({
             >
                 <div className="p-4 border-b flex items-center justify-between">
                     <div className="min-w-0">
-                        <h2 className="font-bold text-lg">Manage Questions</h2>
+                        <h2 className="font-bold text-lg">{readOnly ? "View Questions" : "Manage Questions"}</h2>
                         <p className="text-xs text-muted-foreground">
-                            Add questions manually or import them from a PDF with AI. Saved questions stay in the same Firestore path.
+                            {readOnly
+                                ? "Read-only mode for admin-imported test."
+                                : "Add questions manually or import them from a PDF with AI. Saved questions stay in the same Firestore path."}
                         </p>
                     </div>
                     {isPageMode ? (
@@ -1378,38 +1423,133 @@ const QuestionsManager = ({
                                 <div className="flex items-center justify-between gap-2">
                                     <div className="min-w-0">
                                         <h3 className="text-lg font-semibold">
-                                            {editingId ? "Edit Question" : "Question Workspace"}
+                                            {editingId ? (readOnly ? "Question Preview" : "Edit Question") : "Question Workspace"}
                                         </h3>
                                         <p className="text-xs text-muted-foreground">
-                                            Basic text editor for quick question entry.
+                                            {readOnly ? "Preview only. Changes are not allowed." : "Basic text editor for quick question entry."}
                                         </p>
                                     </div>
 
-                                    <div className="flex items-center gap-2">
-                                        <Button variant="outline" className="rounded-xl" onClick={openNew}>
-                                            <Plus className="h-4 w-4 mr-2" /> New
-                                        </Button>
-                                        {editorOpen ? (
-                                            <Button
-                                                variant="outline"
-                                                className="rounded-xl"
-                                                onClick={requestCloseEditor}
-                                            >
-                                                Cancel
+                                    {!readOnly ? (
+                                        <div className="flex items-center gap-2">
+                                            <Button variant="outline" className="rounded-xl" onClick={openNew}>
+                                                <Plus className="h-4 w-4 mr-2" /> New
                                             </Button>
-                                        ) : null}
-                                    </div>
+                                            {editorOpen ? (
+                                                <Button
+                                                    variant="outline"
+                                                    className="rounded-xl"
+                                                    onClick={requestCloseEditor}
+                                                >
+                                                    Cancel
+                                                </Button>
+                                            ) : null}
+                                        </div>
+                                    ) : null}
                                 </div>
 
                                 {!editorOpen ? (
                                     <div className="rounded-2xl border border-dashed border-border bg-muted/15 px-6 py-12 text-center">
-                                        <p className="text-base font-medium">Select a question from the list or create a new one</p>
+                                        <p className="text-base font-medium">{readOnly ? "Select a question from the list" : "Select a question from the list or create a new one"}</p>
                                         <p className="text-sm text-muted-foreground mt-1">
-                                            Compose questions with plain text and keep editing simple.
+                                            {readOnly ? "You can view imported admin questions here." : "Compose questions with plain text and keep editing simple."}
                                         </p>
-                                        <Button className="rounded-xl mt-4" onClick={openNew}>
-                                            <Plus className="h-4 w-4 mr-2" /> Start Writing
-                                        </Button>
+                                        {!readOnly ? (
+                                            <Button className="rounded-xl mt-4" onClick={openNew}>
+                                                <Plus className="h-4 w-4 mr-2" /> Start Writing
+                                            </Button>
+                                        ) : null}
+                                    </div>
+                                ) : readOnly ? (
+                                    /* ── Read-only view for admin-imported tests ── */
+                                    <div className="space-y-5">
+                                        {/* Read-only banner */}
+                                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 flex items-center gap-3">
+                                            <div className="h-8 w-8 rounded-full bg-amber-500/15 flex items-center justify-center shrink-0">
+                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-amber-600" viewBox="0 0 20 20" fill="currentColor">
+                                                    <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                                                </svg>
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-medium text-amber-700 dark:text-amber-400">Admin-imported test — View only</p>
+                                                <p className="text-xs text-muted-foreground">This question was imported from admin and cannot be edited.</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Question content */}
+                                        <div className="space-y-2">
+                                            <Label className="text-muted-foreground">Question</Label>
+                                            <div className="rounded-xl border border-border bg-muted/10 p-4">
+                                                {hasPreviewContent(formQuestion) ? (
+                                                    <HtmlView html={formQuestion} className="text-sm break-words" />
+                                                ) : (
+                                                    <p className="text-sm text-muted-foreground italic">(No question content)</p>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Options */}
+                                        <div className="space-y-3">
+                                            <Label className="text-muted-foreground">Answer Choices</Label>
+                                            <div className="space-y-2">
+                                                {formOptions.map((opt, idx) => {
+                                                    const isCorrect = formCorrect === idx;
+                                                    const hasContent = hasPreviewContent(opt || "");
+                                                    if (!hasContent && !opt?.trim()) return null;
+                                                    return (
+                                                        <div
+                                                            key={idx}
+                                                            className={`rounded-xl border p-3 flex items-start gap-3 ${
+                                                                isCorrect
+                                                                    ? "border-green-500/40 bg-green-500/5"
+                                                                    : "border-border bg-muted/10"
+                                                            }`}
+                                                        >
+                                                            <span className={`text-xs font-bold mt-0.5 shrink-0 ${isCorrect ? "text-green-600" : "text-muted-foreground"}`}>
+                                                                {String.fromCharCode(65 + idx)}.
+                                                            </span>
+                                                            <div className="flex-1 min-w-0">
+                                                                {hasContent ? (
+                                                                    <HtmlView html={opt} className="text-sm break-words" />
+                                                                ) : (
+                                                                    <span className="text-sm">{opt}</span>
+                                                                )}
+                                                            </div>
+                                                            {isCorrect ? (
+                                                                <Badge className="rounded-full text-[10px] bg-green-600 shrink-0">
+                                                                    <CheckCircle2 className="h-3 w-3 mr-1" /> Correct
+                                                                </Badge>
+                                                            ) : null}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+
+                                        {/* Settings summary */}
+                                        <div className="rounded-xl border border-border bg-muted/15 p-4 space-y-3">
+                                            <p className="text-sm font-semibold text-muted-foreground">Question Details</p>
+                                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                                <div className="rounded-lg border border-border bg-background p-3 text-center">
+                                                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Difficulty</p>
+                                                    <p className="text-sm font-semibold mt-1 capitalize">{formDifficulty || "medium"}</p>
+                                                </div>
+                                                <div className="rounded-lg border border-border bg-background p-3 text-center">
+                                                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Marks</p>
+                                                    <p className="text-sm font-semibold mt-1">{formMarks || "—"}</p>
+                                                </div>
+                                                <div className="rounded-lg border border-border bg-background p-3 text-center">
+                                                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Negative</p>
+                                                    <p className="text-sm font-semibold mt-1">{formNegMarks || "—"}</p>
+                                                </div>
+                                                <div className="rounded-lg border border-border bg-background p-3 text-center">
+                                                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Status</p>
+                                                    <p className={`text-sm font-semibold mt-1 ${formActive ? "text-green-600" : "text-amber-600"}`}>
+                                                        {getPublishStatusLabel(formActive)}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 ) : (
                                     <>
@@ -1565,11 +1705,13 @@ const QuestionsManager = ({
                                             )}
                                         </div>
 
-                                        <div className="flex items-center justify-end">
-                                            <Button className="rounded-xl min-w-[160px]" disabled={saving} onClick={saveQuestion}>
-                                                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : editingId ? "Update Question" : "Save Question"}
-                                            </Button>
-                                        </div>
+                                        {!readOnly ? (
+                                            <div className="flex items-center justify-end">
+                                                <Button className="rounded-xl min-w-[160px]" disabled={saving} onClick={saveQuestion}>
+                                                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : editingId ? "Update Question" : "Save Question"}
+                                                </Button>
+                                            </div>
+                                        ) : null}
                                     </>
                                 )}
                             </div>
@@ -1584,24 +1726,30 @@ const QuestionsManager = ({
                                 <div>
                                     <p className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Questions List</p>
                                 </div>
-                                <Button className="w-full rounded-xl" onClick={openNew}>
-                                    <Plus className="mr-2 h-4 w-4" /> Add Question
-                                </Button>
+                                {!readOnly ? (
+                                    <Button className="w-full rounded-xl" onClick={openNew}>
+                                        <Plus className="mr-2 h-4 w-4" /> Add Question
+                                    </Button>
+                                ) : null}
 
-                                <Button
-                                    variant="outline"
-                                    className="w-full rounded-xl"
-                                    onClick={() => pdfInputRef.current?.click()}
-                                    disabled={importBusy || !isAiPdfImportEnabled}
-                                    title={!isAiPdfImportEnabled ? getAiFeatureDisabledMessage("pdfImport") : undefined}
-                                >
-                                    {importBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
-                                    Import PDF with AI
-                                </Button>
-                                {!isAiPdfImportEnabled ? (
-                                    <p className="text-xs text-muted-foreground">
-                                        {getAiFeatureDisabledMessage("pdfImport")}
-                                    </p>
+                                {!readOnly ? (
+                                    <>
+                                        <Button
+                                            variant="outline"
+                                            className="w-full rounded-xl"
+                                            onClick={() => pdfInputRef.current?.click()}
+                                            disabled={importBusy || !isAiPdfImportEnabled}
+                                            title={!isAiPdfImportEnabled ? getAiFeatureDisabledMessage("pdfImport") : undefined}
+                                        >
+                                            {importBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
+                                            Import PDF with AI
+                                        </Button>
+                                        {!isAiPdfImportEnabled ? (
+                                            <p className="text-xs text-muted-foreground">
+                                                {getAiFeatureDisabledMessage("pdfImport")}
+                                            </p>
+                                        ) : null}
+                                    </>
                                 ) : null}
                                 <input
                                     ref={pdfInputRef}
@@ -1617,7 +1765,7 @@ const QuestionsManager = ({
                                     }}
                                 />
 
-                                {importBusy && importProgressUpdates.length > 0 && (
+                                {!readOnly && importBusy && importProgressUpdates.length > 0 && (
                                     <InlineStatusTracker updates={importProgressUpdates} isProcessing={importBusy} />
                                 )}
 
@@ -1632,7 +1780,7 @@ const QuestionsManager = ({
                                 </div>
                             </div>
                             <div className="flex items-center justify-between text-xs text-muted-foreground pb-1">
-                                <span>{dndEnabled ? "Drag with handle to reorder" : "Clear search to reorder questions"}</span>
+                                <span>{readOnly ? "Read-only list" : dndEnabled ? "Drag with handle to reorder" : "Clear search to reorder questions"}</span>
                                 {reordering ? (
                                     <span className="inline-flex items-center gap-1">
                                         <Loader2 className="h-3 w-3 animate-spin" /> Saving order...
@@ -1654,6 +1802,7 @@ const QuestionsManager = ({
                                                 q={q}
                                                 displayOrder={questionNumberById.get(q.id) ?? 0}
                                                 dragDisabled={!dndEnabled || reordering}
+                                                readOnly={readOnly}
                                                 onOpenEdit={openEdit}
                                                 onDuplicate={duplicateQuestion}
                                                 onDelete={deleteQuestion}
@@ -1669,6 +1818,7 @@ const QuestionsManager = ({
                                         q={q}
                                         displayOrder={questionNumberById.get(q.id) ?? 0}
                                         dragDisabled={true}
+                                        readOnly={readOnly}
                                         onOpenEdit={openEdit}
                                         onDuplicate={duplicateQuestion}
                                         onDelete={deleteQuestion}

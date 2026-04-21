@@ -341,42 +341,78 @@ export default function StudentCBTAttempt() {
       setLoadError(null);
 
       try {
-        const sources = [
-          {
-            testDoc: doc(db, "educators", educatorId, "my_tests", testId),
-            qCol: collection(db, "educators", educatorId, "my_tests", testId, "questions"),
-          },
-          {
-            testDoc: doc(db, "test_series", testId),
-            qCol: collection(db, "test_series", testId, "questions"),
-          },
-        ];
-
         let meta: TestMeta | null = null;
         let qs: AttemptQuestion[] = [];
 
-        for (const s of sources) {
-          const tSnap = await getDoc(s.testDoc);
-          if (!tSnap.exists()) continue;
+        const educatorTestRef = doc(db, "educators", educatorId, "my_tests", testId);
+        const educatorTestSnap = await getDoc(educatorTestRef);
 
-          const d = tSnap.data() as any;
-          const durationMinutes = safeNumber(d.durationMinutes, 60);
-          const computedSections = [{ id: "main", name: d.subject || "General" }];
+        if (educatorTestSnap.exists()) {
+          const localTest = educatorTestSnap.data() as any;
+          const linkedAdminTestId = String(localTest?.linkedAdminTestId || localTest?.originalTestId || "").trim();
+          const isAdminLinked =
+            localTest?.originSource === "admin" ||
+            localTest?.source === "imported" ||
+            localTest?.source === "linked_admin" ||
+            localTest?.isQuestionSourceShared === true ||
+            Boolean(linkedAdminTestId);
+
+          let resolvedTest = localTest;
+          let questionSource = collection(db, "educators", educatorId, "my_tests", testId, "questions");
+
+          if (isAdminLinked && linkedAdminTestId) {
+            const adminTestSnap = await getDoc(doc(db, "test_series", linkedAdminTestId));
+            if (adminTestSnap.exists()) {
+              resolvedTest = adminTestSnap.data() as any;
+            }
+            questionSource = collection(db, "test_series", linkedAdminTestId, "questions");
+          }
+
+          const durationMinutes = safeNumber(resolvedTest?.durationMinutes, 60);
+          const computedSections = [{ id: "main", name: resolvedTest?.subject || localTest?.subject || "General" }];
 
           meta = {
-            id: tSnap.id,
-            title: d.title || "Untitled Test",
-            subject: d.subject,
+            id: testId,
+            title: resolvedTest?.title || localTest?.title || "Untitled Test",
+            subject: resolvedTest?.subject || localTest?.subject,
             durationMinutes,
-            sections: Array.isArray(d.sections) && d.sections.length ? d.sections : computedSections,
+            sections:
+              Array.isArray(resolvedTest?.sections) && resolvedTest.sections.length
+                ? resolvedTest.sections
+                : computedSections,
           };
 
-          const qSnap = await getDocs(s.qCol);
+          const qSnap = await getDocs(questionSource);
           qs = qSnap.docs
             .filter((q) => q.data()?.isActive !== false)
             .map((q) => mapQuestion(q.id, q.data()))
             .sort((a, b) => a.sortOrder - b.sortOrder);
-          break;
+        }
+
+        if (!meta || !qs.length) {
+          const globalTestSnap = await getDoc(doc(db, "test_series", testId));
+          if (globalTestSnap.exists()) {
+            const globalTest = globalTestSnap.data() as any;
+            const durationMinutes = safeNumber(globalTest?.durationMinutes, 60);
+            const computedSections = [{ id: "main", name: globalTest?.subject || "General" }];
+
+            meta = {
+              id: testId,
+              title: globalTest?.title || "Untitled Test",
+              subject: globalTest?.subject,
+              durationMinutes,
+              sections:
+                Array.isArray(globalTest?.sections) && globalTest.sections.length
+                  ? globalTest.sections
+                  : computedSections,
+            };
+
+            const qSnap = await getDocs(collection(db, "test_series", testId, "questions"));
+            qs = qSnap.docs
+              .filter((q) => q.data()?.isActive !== false)
+              .map((q) => mapQuestion(q.id, q.data()))
+              .sort((a, b) => a.sortOrder - b.sortOrder);
+          }
         }
 
         if (!meta) throw new Error("Test not found");

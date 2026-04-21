@@ -135,19 +135,30 @@ export default function StudentTestDetails() {
       setLoading(true);
 
       try {
-        const sources = [
-          doc(db, "educators", educatorId!, "my_tests", testId!),
-          doc(db, "test_series", testId!),
-        ];
-
         let data: TestDoc | null = null;
 
-        for (const ref of sources) {
-          const snap = await getDoc(ref);
-          if (snap.exists()) {
-            data = snap.data() as TestDoc;
-            break;
+        const educatorTestSnap = await getDoc(doc(db, "educators", educatorId!, "my_tests", testId!));
+        if (educatorTestSnap.exists()) {
+          const localTest = educatorTestSnap.data() as any;
+          const linkedAdminTestId = String(localTest?.linkedAdminTestId || localTest?.originalTestId || "").trim();
+          const isAdminLinked =
+            localTest?.originSource === "admin" ||
+            localTest?.source === "imported" ||
+            localTest?.source === "linked_admin" ||
+            localTest?.isQuestionSourceShared === true ||
+            Boolean(linkedAdminTestId);
+
+          if (isAdminLinked && linkedAdminTestId) {
+            const adminSnap = await getDoc(doc(db, "test_series", linkedAdminTestId));
+            data = adminSnap.exists() ? (adminSnap.data() as TestDoc) : (localTest as TestDoc);
+          } else {
+            data = localTest as TestDoc;
           }
+        }
+
+        if (!data) {
+          const globalSnap = await getDoc(doc(db, "test_series", testId!));
+          if (globalSnap.exists()) data = globalSnap.data() as TestDoc;
         }
 
         if (!data) throw new Error("Test not found");
