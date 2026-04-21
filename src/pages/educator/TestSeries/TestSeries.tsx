@@ -834,7 +834,7 @@ export default function TestSeries() {
                                       <span className="text-[9px] font-bold text-muted-foreground uppercase">Attempts:</span>
                                       <Select
                                         value={String(test.attemptsAllowed || 3)}
-                                        disabled={isAdminLinked}
+                                        // disabled={isAdminLinked}
                                         onValueChange={(v) => handleUpdateTestAttempts(test.id, Number(v))}
                                       >
                                         <SelectTrigger className="h-6 w-[45px] text-[10px] font-bold rounded-md bg-background border-none shadow-none focus:ring-0">
