@@ -8,7 +8,7 @@ import { Test } from "@/mock/studentMock";
 import { useTenant } from "@/contexts/TenantProvider";
 
 interface TestCardProps {
-  test: Test;
+  test: Test & { isLive?: boolean };
   attemptsUsed?: number;
   onView: (testId: string) => void;
   onStart: (testId: string) => void;
@@ -76,14 +76,21 @@ export function TestCard({ test, attemptsUsed = 0, onView, onStart, onUnlock }: 
   return (
     <Card className={cn(
       "card-soft card-hover border-0 overflow-hidden",
-      subjectColors[test.subject] || "bg-pastel-cream"
+      test.isLive ? "bg-red-50 dark:bg-red-900/10 ring-2 ring-red-500/20" : (subjectColors[test.subject] || "bg-pastel-cream")
     )}>
       <CardContent className="p-5 space-y-4">
         {/* Header */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1">
-            <h3 className="font-semibold text-foreground line-clamp-2">{test.title}</h3>
-            <p className="text-sm text-muted-foreground mt-1">{test.subject}</p>
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="font-semibold text-foreground line-clamp-2">{test.title}</h3>
+              {test.isLive && (
+                <Badge variant="destructive" className="animate-pulse py-0 px-1 text-[10px] h-4">
+                  LIVE
+                </Badge>
+              )}
+            </div>
+            <p className="text-sm text-muted-foreground">{test.subject}</p>
           </div>
           {test.isLocked ? (
             <div className="p-2 rounded-lg bg-destructive/10">
@@ -134,8 +141,14 @@ export function TestCard({ test, attemptsUsed = 0, onView, onStart, onUnlock }: 
         )}
 
         {/* Price */}
-        {test.isLocked && test.price > 0 && (
+        {test.isLocked && test.price > 0 && !test.isLive && (
           <div className="text-sm font-semibold text-primary">₹{test.price}</div>
+        )}
+
+        {test.isLive && (
+          <div className="text-[10px] font-bold text-red-500 uppercase">
+            Available for free during live window
+          </div>
         )}
       </CardContent>
 
