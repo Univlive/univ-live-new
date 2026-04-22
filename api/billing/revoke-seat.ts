@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getAdmin } from "../_lib/firebaseAdmin.js";
 import { requireUser } from "../_lib/requireUser.js";
+import { notifyDiscord } from "../_lib/discordLogger.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
@@ -27,6 +28,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.json({ ok: true });
   } catch (e: any) {
     console.error(e);
+    await notifyDiscord(e, req, "revoke-seat");
     return res.status(500).json({ error: e?.message || "Server error" });
   }
 }

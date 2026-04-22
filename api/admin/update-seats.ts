@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getAdmin } from "../_lib/firebaseAdmin.js";
 import { requireUser } from "../_lib/requireUser.js";
+import { notifyDiscord } from "../_lib/discordLogger.js";
 
 /**
  * Admin-only: Set/override an educator's total seat limit.
@@ -126,6 +127,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (e: any) {
     console.error(e);
+    await notifyDiscord(e, req, "update-seats");
     const msg = String(e?.message || "Server error");
     if (msg === "Forbidden") return res.status(403).json({ error: "Forbidden" });
     return res.status(500).json({ error: msg });

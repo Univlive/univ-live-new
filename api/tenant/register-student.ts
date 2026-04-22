@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getAdmin } from "../_lib/firebaseAdmin.js";
 import { requireUser } from "../_lib/requireUser.js";
+import { notifyDiscord } from "../_lib/discordLogger.js";
 
 function normSlug(x: string) {
   return String(x || "")
@@ -117,6 +118,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.json({ ok: true, educatorId, tenantSlug });
   } catch (e: any) {
     console.error(e);
+    await notifyDiscord(e, req, `register-student:${stage}`);
     const baseMsg = String(e?.message || "Server error");
     const msg = `[register-student:${stage}] ${baseMsg}`;
     if (baseMsg === "Forbidden" || msg.includes("Forbidden")) {

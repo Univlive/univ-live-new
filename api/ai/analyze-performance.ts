@@ -6,6 +6,7 @@ import {
 } from "@google/generative-ai";
 import { initializeStreaming, sendStreamEvent, endStreaming, streamError } from "../_lib/aiStreamingUtils.js";
 import { getGeminiModelNameFromEnv } from "../_lib/geminiModel.js";
+import { notifyDiscord } from "../_lib/discordLogger.js";
 
 // ---------------------------------------------------------------------------
 // Request types (from frontend)
@@ -386,6 +387,7 @@ export default async function handler(
     endStreaming(res);
   } catch (error) {
     console.error("[analyze-performance] Unhandled error:", error);
+    await notifyDiscord(error, req, "analyze-performance");
     try {
       streamError(res, error);
     } catch (streamErr) {

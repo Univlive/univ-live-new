@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthProvider";
 import { useTenant } from "@/contexts/TenantProvider";
 import { db } from "@/lib/firebase";
+import { logError } from "@/lib/errorLogger";
 import {
   Timestamp,
   collection,
@@ -220,6 +221,7 @@ export default function StudentTestDetails() {
         setLoading(false);
       } catch (e: any) {
         console.error(e);
+        logError(e, "test-details:load");
         if (!mounted) return;
         setTest(null);
         setLoading(false);
