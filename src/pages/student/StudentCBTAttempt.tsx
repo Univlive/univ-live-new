@@ -1224,6 +1224,14 @@ export default function StudentCBTAttempt() {
                 <span style={{ fontSize: 11, fontWeight: 400, color: "#3b82f6" }}>
                   {saving ? "⬆ Saving…" : lastSavedAt ? "✓ Saved" : "Ready"}
                 </span>
+                <button
+                  onClick={() => setSubmitDialogOpen(true)}
+                  disabled={!isStarted}
+                  className="mobile-submit-btn"
+                  style={{ display: "none", background: isStarted ? "#22c55e" : "#9ca3af", color: "#fff", border: "none", borderRadius: 4, padding: "4px 12px", fontSize: 12, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed" }}
+                >
+                  SUBMIT
+                </button>
                 {!isStarted && (
                   <button
                     onClick={handleStart}
@@ -1368,6 +1376,7 @@ export default function StudentCBTAttempt() {
             <button
               onClick={() => setSubmitDialogOpen(true)}
               disabled={!isStarted}
+              className="bottom-submit-btn"
               style={{ background: isStarted ? "#22c55e" : "#9ca3af", color: "#fff", border: "none", borderRadius: 4, padding: "7px 22px", fontSize: 13, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed" }}
             >
               SUBMIT
