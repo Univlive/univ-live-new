@@ -1,7 +1,12 @@
 // src/lib/firebase.ts
-import { initializeApp, getApps } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  getFirestore,
+} from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 // Analytics is optional (and should only run in browser)
@@ -21,7 +26,26 @@ const firebaseConfig = {
 export const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+
+// Enable offline persistence with IndexedDB cache.
+// This ensures repeat reads (page navigations, refreshes) are served from the
+// local cache instead of hitting Firestore servers, drastically reducing
+// document read charges. The multi-tab manager keeps the cache consistent
+// across multiple browser tabs.
+export const db = (() => {
+  try {
+    return initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+      }),
+    });
+  } catch {
+    // If Firestore was already initialized (e.g. Vite HMR), fall back to the
+    // existing instance which is already configured.
+    return getFirestore(app);
+  }
+})();
+
 export const storage = getStorage(app);
 
 // Optional analytics (disabled due to loading issues)

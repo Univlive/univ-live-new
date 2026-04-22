@@ -5,6 +5,7 @@ import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { getLocalSessionId, clearLocalSessionId } from "@/lib/session";
 import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export type UserRole = "ADMIN" | "EDUCATOR" | "STUDENT";
 
@@ -34,6 +35,7 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 async function loadProfile(uid: string): Promise<AppUserProfile | null> {
+  if (!uid) return null;
   const userRef = doc(db, "users", uid);
   const userSnap = await getDoc(userRef);
   if (!userSnap.exists()) return null;
@@ -72,40 +74,35 @@ async function loadProfile(uid: string): Promise<AppUserProfile | null> {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<AppUserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const refreshProfile = async () => {
-    const user = firebaseUser || auth.currentUser;
-    if (!user) return;
-    setFirebaseUser(user);
-    const p = await loadProfile(user.uid);
-    setProfile(p);
-    setLoading(false);
-  };
+  const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, async (u) => {
-      setLoading(true);
+    const unsubAuth = onAuthStateChanged(auth, (u) => {
       setFirebaseUser(u);
-      setProfile(null);
-
-      if (!u) {
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const p = await loadProfile(u.uid);
-        setProfile(p);
-      } finally {
-        setLoading(false);
+      setAuthLoading(false);
+      // Immediately invalidate cache to fetch new user data
+      if (u) {
+        queryClient.invalidateQueries({ queryKey: ["userProfile", u.uid] });
+      } else {
+        queryClient.removeQueries({ queryKey: ["userProfile"] });
       }
     });
 
     return () => unsubAuth();
-  }, []);
+  }, [queryClient]);
+
+  const { data: profile = null, isLoading: profileLoading, refetch } = useQuery({
+    queryKey: ["userProfile", firebaseUser?.uid],
+    queryFn: () => loadProfile(firebaseUser!.uid),
+    enabled: !!firebaseUser?.uid,
+    staleTime: 60 * 1000, 
+  });
+
+  const refreshProfile = async () => {
+    await refetch();
+  };
 
   // --- Session Enforcement for Students ---
   useEffect(() => {
@@ -135,13 +132,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return {
       firebaseUser,
       profile,
-      loading,
+      loading: authLoading || (!!firebaseUser && profileLoading),
       uid: firebaseUser?.uid ?? null,
       role: profile?.role ?? null,
       enrolledTenants: profile?.enrolledTenants || [],
       refreshProfile,
     };
-  }, [firebaseUser, profile, loading]);
+  }, [firebaseUser, profile, authLoading, profileLoading]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
