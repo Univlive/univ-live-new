@@ -27,9 +27,6 @@ const sidebarItems = [
   { icon: BookOpen, label: "Test Bank", path: "/admin/tests" },
   { icon: Users, label: "Educators", path: "/admin/educators" },
   { icon: CreditCard, label: "Seat Management", path: "/admin/seat-management" },
-  { icon: GraduationCap, label: "Students", path: "/admin/students" },
-  { icon: BarChart3, label: "Attempts", path: "/admin/attempts" },
-  { icon: MessageSquare, label: "Support", path: "/admin/support" },
   { icon: Library, label: "Question Bank", path: "/admin/question-bank" },
 ];
 
