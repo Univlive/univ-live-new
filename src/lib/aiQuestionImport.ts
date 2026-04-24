@@ -395,7 +395,6 @@ export async function importQuestionsFromPdf(
                 if (event.type === "complete" && event.data) {
                   pageData = event.data as AiImportResponse;
                   pageQuestionsDetected = pageData.items?.length ?? 0;
-                  pageRetryCounts.delete(pageNum);
                   
                   // Report: Questions detected
                   if (pageQuestionsDetected > 0) {
