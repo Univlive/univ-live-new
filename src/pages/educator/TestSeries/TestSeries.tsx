@@ -63,6 +63,7 @@ import { uploadToImageKit } from "@/lib/imagekitUpload";
 // Component
 import CreateCustomTest from "./CreateCustomTest";
 import NewFolderButton from "./NewFolder";
+import ScheduleTest from "./ScheduleTest";
 
 // Firebase
 import { onAuthStateChanged } from "firebase/auth";
@@ -186,6 +187,10 @@ export default function TestSeries() {
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [moveTestOpen, setMoveTestOpen] = useState(false);
   const [testToMove, setTestToMove] = useState<any>(null);
+
+  // Scheduling state
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [testToSchedule, setTestToSchedule] = useState<any>(null);
 
   // Auth + Data
   useEffect(() => {
@@ -776,6 +781,12 @@ export default function TestSeries() {
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent align="end" className="rounded-xl">
                                           <DropdownMenuItem onClick={() => {
+                                            setTestToSchedule(test);
+                                            setScheduleOpen(true);
+                                          }}>
+                                            <Clock className="mr-2 h-4 w-4" /> Schedule Test
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem onClick={() => {
                                             setTestToMove(test);
                                             setMoveTestOpen(true);
                                           }}>
@@ -808,6 +819,13 @@ export default function TestSeries() {
                                 </CardHeader>
                                 <CardContent className="flex-1 flex flex-col gap-4">
                                   <p className="text-sm text-muted-foreground line-clamp-2">{test.description}</p>
+
+                                  {test.startTime && (
+                                    <div className="flex items-center gap-1 text-[10px] font-medium text-amber-600 bg-amber-50 dark:bg-amber-900/10 px-2 py-1 rounded-lg w-fit">
+                                      <Clock className="h-3 w-3" />
+                                      Scheduled: {new Date(test.startTime?.toMillis?.() || test.startTime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                                    </div>
+                                  )}
 
                                   <div className="flex flex-wrap items-center justify-between gap-y-3 mt-auto">
                                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
@@ -877,6 +895,14 @@ export default function TestSeries() {
 
           {/* Move Test Dialog */}
           <MoveTest {...moveTestState}/>
+
+          {/* Schedule Test Dialog */}
+          <ScheduleTest
+            open={scheduleOpen}
+            onOpenChange={setScheduleOpen}
+            test={testToSchedule}
+            userId={currentUser?.uid}
+          />
           
         </TabsContent>
 

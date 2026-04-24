@@ -345,12 +345,14 @@ export default function StudentCBTAttempt() {
       try {
         let meta: TestMeta | null = null;
         let qs: AttemptQuestion[] = [];
+        let localTestData: any = null;
 
         const educatorTestRef = doc(db, "educators", educatorId, "my_tests", testId);
         const educatorTestSnap = await getDoc(educatorTestRef);
 
         if (educatorTestSnap.exists()) {
-          const localTest = educatorTestSnap.data() as any;
+          localTestData = educatorTestSnap.data();
+          const localTest = localTestData as any;
           const linkedAdminTestId = String(localTest?.linkedAdminTestId || localTest?.originalTestId || "").trim();
           const isAdminLinked =
             localTest?.originSource === "admin" ||
@@ -383,6 +385,7 @@ export default function StudentCBTAttempt() {
                 ? resolvedTest.sections
                 : computedSections,
           };
+          (meta as any).price = safeNumber(resolvedTest?.price || localTest?.price, 0);
 
           const qSnap = await getDocs(questionSource);
           qs = qSnap.docs
@@ -408,6 +411,7 @@ export default function StudentCBTAttempt() {
                   ? globalTest.sections
                   : computedSections,
             };
+            (meta as any).price = safeNumber(globalTest?.price, 0);
 
             const qSnap = await getDocs(collection(db, "test_series", testId, "questions"));
             qs = qSnap.docs
@@ -418,6 +422,28 @@ export default function StudentCBTAttempt() {
         }
 
         if (!meta) throw new Error("Test not found");
+
+        // --- SECURITY CHECK ---
+        const unlockId = `${firebaseUser.uid}__${educatorId}__${testId}`;
+        const unlockSnap = await getDoc(doc(db, "testUnlocks", unlockId));
+        let isUnlocked = unlockSnap.exists();
+        if (unlockSnap.exists()) {
+          const ud = unlockSnap.data() as any;
+          if (ud.windowExpiresAt && ud.windowExpiresAt.toMillis() < Date.now()) {
+            isUnlocked = false;
+          }
+        }
+
+        const startTime = localTestData?.startTime ? (typeof localTestData.startTime.toMillis === "function" ? localTestData.startTime.toMillis() : localTestData.startTime) : null;
+        const endTime = localTestData?.endTime ? (typeof localTestData.endTime.toMillis === "function" ? localTestData.endTime.toMillis() : localTestData.endTime) : null;
+        const isLive = startTime && endTime && Date.now() >= startTime && Date.now() <= endTime;
+        const isFree = (meta as any).price <= 0;
+
+        if (!isUnlocked && !isLive && !isFree) {
+          throw new Error("This test is locked. Please unlock it from the test details page.");
+        }
+        // ----------------------
+
         if (!qs.length) throw new Error("No questions found in this test");
 
         if (!mounted) return;

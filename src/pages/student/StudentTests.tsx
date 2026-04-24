@@ -396,11 +396,17 @@ export default function StudentTests() {
                     const unlockEntry = unlockedIds.get(t.id);
                     const windowValid = unlockEntry !== undefined &&
                       (unlockEntry === null || unlockEntry > now);
-                    const locked = !(t.isPublic === true || windowValid);
+
+                    // Check if test is currently live via schedule
+                    const startTime = t.startTime ? (typeof t.startTime.toMillis === "function" ? t.startTime.toMillis() : t.startTime) : null;
+                    const endTime = t.endTime ? (typeof t.endTime.toMillis === "function" ? t.endTime.toMillis() : t.endTime) : null;
+                    const isLive = startTime && endTime && now >= startTime && now <= endTime;
+
+                    const locked = !(t.isPublic === true || windowValid || isLive);
                     return (
                       <TestCard
                         key={t.id}
-                        test={{ ...t, isLocked: locked, windowExpiresAt: unlockEntry ?? null }}
+                        test={{ ...t, isLocked: locked, windowExpiresAt: unlockEntry ?? null, isLive }}
                         attemptsUsed={attemptCounts[t.id] || 0}
                         onView={() => nav(`/student/tests/${t.id}`)}
                         onStart={() => nav(`/student/tests/${t.id}`)}
