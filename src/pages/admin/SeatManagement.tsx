@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDoc, onSnapshot, orderBy, query, where, updateDoc, serverTimestamp, writeBatch, Timestamp } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, where, updateDoc, serverTimestamp, writeBatch, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthProvider";
 import { toast } from "sonner";
@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Search, ShieldCheck, UserX, UserCheck, AlertTriangle } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type TxRow = {
   id: string;
@@ -42,6 +43,12 @@ type EducatorDoc = {
   lastSeatTransactionAt?: Timestamp | null;
 };
 
+type EducatorListItem = {
+    uid: string;
+    displayName: string;
+    email: string;
+};
+
 function fmtTs(ts: Timestamp | null | undefined) {
   if (!ts) return "-";
   try {
@@ -56,6 +63,8 @@ export default function SeatManagement() {
 
   const [tenantSlug, setTenantSlug] = useState("");
   const [educatorId, setEducatorId] = useState("");
+  const [educatorsList, setEducatorsList] = useState<EducatorListItem[]>([]);
+  const [loadingEducators, setLoadingEducators] = useState(false);
 
   const [targetId, setTargetId] = useState<string>("");
 
@@ -78,6 +87,40 @@ export default function SeatManagement() {
   const available = Math.max(0, seatLimit - usedSeats);
 
   const canUpdate = useMemo(() => !!(targetId && firebaseUser), [targetId, firebaseUser]);
+
+  useEffect(() => {
+      const fetchEducators = async () => {
+          setLoadingEducators(true);
+          try {
+              const q = query(collection(db, "users"), where("role", "==", "EDUCATOR"), orderBy("displayName", "asc"));
+              const snap = await getDocs(q);
+              const list = snap.docs.map(d => ({
+                  uid: d.id,
+                  displayName: d.data().displayName || "No Name",
+                  email: d.data().email || "No Email"
+              }));
+              setEducatorsList(list);
+          } catch (e) {
+              console.error("Failed to fetch educators", e);
+              // If orderBy fails (missing index), try without it
+              try {
+                const q2 = query(collection(db, "users"), where("role", "==", "EDUCATOR"));
+                const snap2 = await getDocs(q2);
+                const list2 = snap2.docs.map(d => ({
+                    uid: d.id,
+                    displayName: d.data().displayName || "No Name",
+                    email: d.data().email || "No Email"
+                }));
+                setEducatorsList(list2);
+              } catch (e2) {
+                console.error("Failed to fetch educators fallback", e2);
+              }
+          } finally {
+              setLoadingEducators(false);
+          }
+      };
+      fetchEducators();
+  }, []);
 
   async function postWithToken(path: string, body: Record<string, unknown>) {
     if (!firebaseUser) throw new Error("Not logged in");
@@ -104,7 +147,7 @@ export default function SeatManagement() {
         id = String((tSnap.data() as { educatorId?: string })?.educatorId || "").trim();
       }
 
-      if (!id) throw new Error("Enter educatorId or tenantSlug");
+      if (!id) throw new Error("Select an educator or enter tenantSlug");
       setTargetId(id);
       toast.success("Loaded coaching");
     } catch (e: unknown) {
@@ -260,15 +303,34 @@ export default function SeatManagement() {
         <CardContent className="space-y-3">
           <div className="grid md:grid-cols-3 gap-3">
             <div>
+              <label className="text-sm text-muted-foreground">Select Educator</label>
+              <Select value={educatorId} onValueChange={setEducatorId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose an educator..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {loadingEducators ? (
+                    <div className="flex items-center justify-center p-4">
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : educatorsList.length === 0 ? (
+                    <div className="p-2 text-center text-sm text-muted-foreground">No educators found</div>
+                  ) : (
+                    educatorsList.map((edu) => (
+                      <SelectItem key={edu.uid} value={edu.uid}>
+                        {edu.displayName} ({edu.email})
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <label className="text-sm text-muted-foreground">Tenant Slug (optional)</label>
               <Input value={tenantSlug} onChange={(e) => setTenantSlug(e.target.value)} placeholder="e.g. tayaari-exam" />
             </div>
-            <div>
-              <label className="text-sm text-muted-foreground">Educator UID (optional)</label>
-              <Input value={educatorId} onChange={(e) => setEducatorId(e.target.value)} placeholder="Firebase UID" />
-            </div>
             <div className="flex items-end">
-              <Button onClick={resolveTarget} disabled={loadingTarget} className="w-full">
+              <Button onClick={resolveTarget} disabled={loadingTarget || (!educatorId && !tenantSlug)} className="w-full">
                 {loadingTarget ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
                 Load
               </Button>
