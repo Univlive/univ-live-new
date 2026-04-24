@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import crypto from "crypto";
 import { getAdmin } from "../_lib/firebaseAdmin.js";
 import { readRawBody } from "../_lib/readRawBody.js";
+import { notifyDiscord } from "../_lib/discordLogger.js";
 
 function pickEducatorId(event: any): string {
   return (
@@ -113,6 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).send("OK");
   } catch (e) {
     console.error(e);
+    await notifyDiscord(e, req, "razorpay-webhook");
     return res.status(500).send("Server error");
   }
 }

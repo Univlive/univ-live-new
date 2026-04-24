@@ -369,8 +369,8 @@ export default function TenantHomeTheme2() {
               </Button>
             </Link>
             <Link to="/signup">
-              <Button className="rounded-full px-4 py-2 sm:px-7 sm:py-2.5 text-sm sm:text-base bg-zinc-950 text-white hover:bg-zinc-800 font-semibold shadow-sm">
-                Get Started
+              <Button className="hidden md:inline-flex rounded-full px-4 py-2 sm:px-7 sm:py-2.5 text-sm sm:text-base bg-zinc-950 text-white hover:bg-zinc-800 font-semibold shadow-sm">
+                SignUp
               </Button>
             </Link>
 
@@ -399,6 +399,11 @@ export default function TenantHomeTheme2() {
                   Log in
                 </Button>
               </Link>
+              <Link to="/signup">
+                <Button className="w-full rounded-full bg-zinc-950 text-white hover:bg-zinc-800 font-semibold shadow-sm">
+                   SignUp
+                </Button>
+            </Link>
             </div>
           </div>
         )}
@@ -427,7 +432,7 @@ export default function TenantHomeTheme2() {
               </h1>
 
               <div className="flex flex-col sm:flex-row gap-4 mb-10">
-                <a href="#tests" className="w-full sm:w-auto">
+                <a href="/signup" className="w-full sm:w-auto">
                   <Button className="w-full sm:w-auto rounded-full bg-zinc-950 text-white hover:bg-zinc-800 px-8 py-6 text-base font-semibold shadow-xl shadow-zinc-900/10">
                     Get Started
                   </Button>
