@@ -3,6 +3,7 @@ import { getTenantSlugFromHostname } from "@/lib/tenant";
 import { db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
 import { useAuth } from "@/contexts/AuthProvider";
+import { useQuery } from "@tanstack/react-query";
 
 export type TenantProfile = {
   educatorId: string;
@@ -26,11 +27,55 @@ type TenantContextValue = {
 
 const TenantContext = createContext<TenantContextValue | null>(null);
 
+async function fetchTenantProfile(tenantSlug: string | null): Promise<TenantProfile | null> {
+  if (!tenantSlug) return null;
+
+  // tenants/{slug} -> educatorId
+  const mapSnap = await getDoc(doc(db, "tenants", tenantSlug));
+  if (!mapSnap.exists()) return null;
+
+  const map = mapSnap.data() as any;
+  const educatorId = String(map?.educatorId || "").trim();
+  if (!educatorId) return null;
+
+  // educators/{id} -> metadata + website config
+  const eduSnap = await getDoc(doc(db, "educators", educatorId));
+  const data: any = eduSnap.exists() ? eduSnap.data() : {};
+  const websiteConfig = data?.websiteConfig || {};
+
+  return {
+    educatorId,
+    tenantSlug,
+    coachingName: websiteConfig?.coachingName || data?.coachingName,
+    tagline: websiteConfig?.tagline || data?.tagline,
+    contact: {
+      phone:
+        websiteConfig?.contact?.phone ||
+        websiteConfig?.socials?.phone ||
+        data?.contact?.phone ||
+        data?.phone ||
+        "",
+      email:
+        websiteConfig?.contact?.email ||
+        websiteConfig?.socials?.email ||
+        data?.contact?.email ||
+        data?.email ||
+        "",
+      address:
+        websiteConfig?.contact?.address ||
+        data?.contact?.address ||
+        data?.address ||
+        "",
+    },
+    socials: websiteConfig?.socials || data?.socials,
+    websiteConfig,
+    testDefaults: data?.testDefaults || {},
+  };
+}
+
 export function TenantProvider({ children }: { children: React.ReactNode }) {
   const { profile } = useAuth();
   const [tenantSlug, setTenantSlug] = useState<string | null>(null);
-  const [tenant, setTenant] = useState<TenantProfile | null>(null);
-  const [loading, setLoading] = useState(true);
   const [isTenantDomain, setIsTenantDomain] = useState(false);
 
   useEffect(() => {
@@ -52,83 +97,21 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     setIsTenantDomain(false);
   }, [profile?.tenantSlug]);
 
-  useEffect(() => {
-    let alive = true;
-
-    async function load() {
-      if (!tenantSlug) {
-        setTenant(null);
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      try {
-        // tenants/{slug} -> educatorId
-        const mapSnap = await getDoc(doc(db, "tenants", tenantSlug));
-        if (!alive) return;
-
-        if (!mapSnap.exists()) {
-          setTenant(null);
-          return;
-        }
-
-        const map = mapSnap.data() as any;
-        const educatorId = String(map?.educatorId || "").trim();
-        if (!educatorId) {
-          setTenant(null);
-          return;
-        }
-
-        // educators/{id} -> metadata + website config
-        const eduSnap = await getDoc(doc(db, "educators", educatorId));
-        if (!alive) return;
-
-        const data: any = eduSnap.exists() ? eduSnap.data() : {};
-
-        const websiteConfig = data?.websiteConfig || {};
-
-        setTenant({
-          educatorId,
-          tenantSlug,
-          coachingName: websiteConfig?.coachingName || data?.coachingName,
-          tagline: websiteConfig?.tagline || data?.tagline,
-          contact: {
-            phone:
-              websiteConfig?.contact?.phone ||
-              websiteConfig?.socials?.phone ||
-              data?.contact?.phone ||
-              data?.phone ||
-              "",
-            email:
-              websiteConfig?.contact?.email ||
-              websiteConfig?.socials?.email ||
-              data?.contact?.email ||
-              data?.email ||
-              "",
-            address:
-              websiteConfig?.contact?.address ||
-              data?.contact?.address ||
-              data?.address ||
-              "",
-          },
-          socials: websiteConfig?.socials || data?.socials,
-          websiteConfig,
-          testDefaults: data?.testDefaults || {},
-        });
-      } finally {
-        if (alive) setLoading(false);
-      }
-    }
-
-    load();
-    return () => {
-      alive = false;
-    };
-  }, [tenantSlug]);
+  const { data: tenant = null, isLoading } = useQuery({
+    queryKey: ["tenantProfile", tenantSlug],
+    queryFn: () => fetchTenantProfile(tenantSlug),
+    enabled: tenantSlug !== null,
+    // Provide a longer staleTime for highly static configuration data
+    staleTime: 5 * 60 * 1000,
+  });
 
   return (
-    <TenantContext.Provider value={{ tenant, tenantSlug, isTenantDomain, loading }}>
+    <TenantContext.Provider value={{
+      tenant,
+      tenantSlug,
+      isTenantDomain,
+      loading: isLoading && tenantSlug !== null
+    }}>
       {children}
     </TenantContext.Provider>
   );

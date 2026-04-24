@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle, Save, LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
@@ -159,6 +160,7 @@ async function exitFullscreenSafe() {
 export default function StudentCBTAttempt() {
   const { testId } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const { firebaseUser, profile, loading: authLoading } = useAuth();
   const { tenant, tenantSlug, loading: tenantLoading } = useTenant();
@@ -857,6 +859,11 @@ export default function StudentCBTAttempt() {
 
       localStorage.removeItem(attemptIdStorageKey);
       await exitFullscreenSafe();
+
+      // Invalidate cached attempt counts & dashboard so they refresh immediately
+      queryClient.invalidateQueries({ queryKey: ["studentAttemptCounts"] });
+      queryClient.invalidateQueries({ queryKey: ["studentDashboardAttempts"] });
+      queryClient.invalidateQueries({ queryKey: ["studentRank"] });
 
       navigate(`/student/results/${attemptId}?fromTest=true${isAutoSubmit ? "&auto=1" : ""}`);
     } catch (e) {
