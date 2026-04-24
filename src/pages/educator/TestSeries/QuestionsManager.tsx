@@ -713,13 +713,14 @@ const QuestionsManager = ({
         const newIndex = questions.findIndex((q) => q.id === String(over.id));
         if (oldIndex < 0 || newIndex < 0) return;
 
-        const reordered = arrayMove(questions, oldIndex, newIndex).map((q, index) => ({
+        const reorderedBase = arrayMove(questions, oldIndex, newIndex);
+        const reordered = reorderedBase.map((q, index) => ({
             ...q,
             questionOrder: index + 1,
         }));
 
         setQuestions(reordered);
-        await persistDraggedOrder(reordered);
+        await persistDraggedOrder(reorderedBase);
     }
 
     function resetEditor() {
