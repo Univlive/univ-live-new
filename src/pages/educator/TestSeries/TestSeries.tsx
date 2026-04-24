@@ -178,6 +178,9 @@ export default function TestSeries() {
   // Create custom test dialog fields
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("none");
+  const [educatorTemplates, setEducatorTemplates] = useState<any[]>([]);
+  const [savingTemplate, setSavingTemplate] = useState(false);
 
   // Folder UI state
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
@@ -214,8 +217,17 @@ export default function TestSeries() {
           const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           setFolders(rows);
         },
+      );
+
+      const templatesQ = query(collection(db, "educators", user.uid, "templates"));
+      const unsubTemplates = onSnapshot(
+        templatesQ,
+        (snap) => {
+          const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          setEducatorTemplates(rows);
+        },
         () => {
-          toast.error("Failed to load folders.");
+          toast.error("Failed to load your templates.");
         }
       );
 
@@ -254,6 +266,7 @@ export default function TestSeries() {
 
       return () => {
         unsubFolders();
+        unsubTemplates();
         unsubMy();
         unsubBank();
       };
@@ -261,6 +274,29 @@ export default function TestSeries() {
 
     return () => unsubAuth();
   }, []);
+
+  const handleSaveTemplate = async (templatePayload: any) => {
+    if (!currentUser) {
+      toast.error("Please login again and retry.");
+      return;
+    }
+
+    setSavingTemplate(true);
+    try {
+      await addDoc(collection(db, "educators", currentUser.uid, "templates"), {
+        templateName: String(templatePayload.templateName || templatePayload.title || "Custom template"),
+        ...templatePayload,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      toast.success("Template saved");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to save template");
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
 
   const handleCreateFolder = async () => {
     if (!currentUser) {
@@ -439,6 +475,22 @@ export default function TestSeries() {
     return groups;
   }, [bankTests, search]);
 
+  const templateOptions = useMemo(
+    () => [
+      ...bankTests.map((test: any) => ({
+        id: `admin:${test.id}`,
+        label: String(test?.title || "Untitled template"),
+        group: "admin" as const,
+      })),
+      ...educatorTemplates.map((template: any) => ({
+        id: `edu:${template.id}`,
+        label: String(template?.templateName || template?.title || "Custom template"),
+        group: "educator" as const,
+      })),
+    ],
+    [bankTests, educatorTemplates]
+  );
+
   const importedAdminTestIds = useMemo(() => {
     const ids = new Set<string>();
 
@@ -576,37 +628,102 @@ export default function TestSeries() {
   };
 
   // Create educator custom test (NO question bank import allowed, manual questions only)
-  const handleCreateCustom = async (e: any) => {
-    e.preventDefault();
+  const handleCreateCustom = async (values: any) => {
     if (!currentUser) return;
 
-    const fd = new FormData(e.target);
+    const [templateType, templateId] = String(selectedTemplateId || "none").split(":");
+    const adminTemplate = templateType === "admin" ? bankTests.find((test) => test.id === templateId) : null;
+    const educatorTemplate = templateType === "edu" ? educatorTemplates.find((template) => template.id === templateId) : null;
 
     const payload: any = {
-      title: String(fd.get("title") || ""),
-      description: String(fd.get("description") || ""),
-      subject: String(fd.get("subject") || ""),
-      level: String(fd.get("level") || "General"),
-      durationMinutes: Number(fd.get("duration") || 0),
+      title: String(values.title || ""),
+      description: String(values.description || ""),
+      subject: String(values.subject || ""),
+      level: String(values.level || "General"),
+      durationMinutes: Number(values.durationMinutes || 0),
       attemptsAllowed: globalAttemptsAllowed,
-
-      // educator ownership
       source: "custom",
       originSource: "educator",
       createdBy: currentUser.uid,
-
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       questionsCount: 0,
     };
 
+    if (values.sections) {
+      payload.sections = values.sections;
+    }
+    if (values.markingScheme) {
+      payload.markingScheme = values.markingScheme;
+    }
+
+    if (adminTemplate) {
+      payload.title = adminTemplate.title || payload.title;
+      payload.description = adminTemplate.description || payload.description;
+      payload.subject = adminTemplate.subject || payload.subject;
+      payload.level = adminTemplate.level || payload.level;
+      payload.durationMinutes = Number(adminTemplate.durationMinutes ?? adminTemplate.duration ?? payload.durationMinutes);
+      payload.sections = adminTemplate.sections ?? payload.sections;
+      payload.markingScheme = adminTemplate.markingScheme ?? payload.markingScheme;
+      payload.attemptsAllowed = Number(adminTemplate.attemptsAllowed ?? payload.attemptsAllowed);
+      payload.requiresUnlock = adminTemplate.requiresUnlock ?? true;
+      payload.price = adminTemplate.price ?? 0;
+      payload.isPublished = adminTemplate.isPublished ?? false;
+      payload.source = "custom";
+      payload.originSource = "admin_template";
+      payload.linkedAdminTestId = adminTemplate.id;
+    }
+
+    if (educatorTemplate) {
+      payload.title = educatorTemplate.title || payload.title;
+      payload.description = educatorTemplate.description || payload.description;
+      payload.subject = educatorTemplate.subject || payload.subject;
+      payload.level = educatorTemplate.level || payload.level;
+      payload.durationMinutes = Number(educatorTemplate.durationMinutes ?? payload.durationMinutes);
+      payload.sections = educatorTemplate.sections ?? payload.sections;
+      payload.markingScheme = educatorTemplate.markingScheme ?? payload.markingScheme;
+      payload.attemptsAllowed = Number(educatorTemplate.attemptsAllowed ?? payload.attemptsAllowed);
+      payload.requiresUnlock = educatorTemplate.requiresUnlock ?? payload.requiresUnlock;
+      payload.price = educatorTemplate.price ?? payload.price;
+      payload.isPublished = educatorTemplate.isPublished ?? payload.isPublished;
+      payload.source = "custom";
+      payload.originSource = "educator_template";
+      payload.templateId = educatorTemplate.id;
+    }
+
+    const shouldSaveTemplate = !!values.saveAsTemplate;
+    const templatePayload = shouldSaveTemplate
+      ? {
+          templateName: String(values.templateName || payload.title || "Custom template"),
+          title: payload.title,
+          description: payload.description,
+          subject: payload.subject,
+          level: payload.level,
+          durationMinutes: payload.durationMinutes,
+          attemptsAllowed: payload.attemptsAllowed,
+          requiresUnlock: payload.requiresUnlock,
+          price: payload.price,
+          isPublished: payload.isPublished,
+          markingScheme: payload.markingScheme,
+          syllabus: payload.syllabus,
+          sections: payload.sections,
+          source: "custom_template",
+          originSource: "educator",
+          createdBy: currentUser.uid,
+        }
+      : null;
+
     setCreating(true);
     try {
       await addDoc(collection(db, "educators", currentUser.uid, "my_tests"), payload);
 
-      toast.success("Custom test created");
+      if (templatePayload) {
+        await handleSaveTemplate(templatePayload);
+      }
+
+      toast.success("Test created");
       setCreateOpen(false);
-      e.target.reset?.();
+      setSelectedTemplateId("none");
       setActiveTab("library");
     } catch (err) {
       console.error(err);
@@ -620,7 +737,10 @@ export default function TestSeries() {
     createOpen,
     setCreateOpen,
     handleCreateCustom,
-    creating
+    creating,
+    selectedTemplateId,
+    setSelectedTemplateId,
+    templates: templateOptions,
   }
 
   const moveTestState = {

@@ -5,6 +5,8 @@ import { motion } from "framer-motion";
 import {
   ArrowLeft,
   BookOpen,
+  ChevronDown,
+  ChevronRight,
   Plus,
   Search,
   Trash2,
@@ -68,6 +70,11 @@ import ImageTextarea from "@/components/educator/ImageTextarea";
 
 type Difficulty = "easy" | "medium" | "hard";
 
+type TestSection = {
+  id: string;
+  name: string;
+};
+
 type TestSeries = {
   id: string;
   title: string;
@@ -77,6 +84,7 @@ type TestSeries = {
   positiveMarks?: number;
   negativeMarks?: number;
   questionsCount?: number;
+  sections?: TestSection[];
 };
 
 type QuestionDoc = {
@@ -99,6 +107,7 @@ type QuestionDoc = {
   source?: "manual" | "question_bank" | string;
   bankQuestionId?: string;
   contentFormat?: "text" | "html";
+  sectionId?: string;
 
   createdAtTs?: Timestamp | null;
   updatedAtTs?: Timestamp | null;
@@ -163,6 +172,28 @@ function normalizeDifficulty(v: any): Difficulty {
   return "medium";
 }
 
+function normalizeSections(rawSections: any, subjectFallback?: string): TestSection[] {
+  const parsed = Array.isArray(rawSections)
+    ? rawSections
+        .map((section: any, index: number) => ({
+          id: String(section?.id || `sec_${index + 1}`).trim(),
+          name: String(section?.name || `Section ${index + 1}`).trim(),
+        }))
+        .filter((section) => section.id)
+    : [];
+
+  if (parsed.length > 0) return parsed;
+
+  return [{ id: "main", name: String(subjectFallback || "General").trim() || "General" }];
+}
+
+function resolveSectionId(sectionId: string | undefined, sections: TestSection[]): string {
+  const fallback = sections[0]?.id || "main";
+  const normalized = String(sectionId || "").trim();
+  if (!normalized) return fallback;
+  return sections.some((section) => section.id === normalized) ? normalized : fallback;
+}
+
 const DIFFICULTY_OPTIONS: Difficulty[] = ["easy", "medium", "hard"];
 
 export default function Questions() {
@@ -188,10 +219,15 @@ export default function Questions() {
   const [search, setSearch] = useState("");
   const [difficultyFilter, setDifficultyFilter] = useState<"all" | Difficulty>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [sectionFilter, setSectionFilter] = useState<string>("all");
+
+  // collapsed section IDs in the section-grouped view
+  const [collapsedQSections, setCollapsedQSections] = useState<string[]>([]);
 
   // editor dialog
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [addingToSection, setAddingToSection] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [formQuestion, setFormQuestion] = useState("");
@@ -199,6 +235,7 @@ export default function Questions() {
   const [formCorrect, setFormCorrect] = useState<number>(0);
   const [formExplanation, setFormExplanation] = useState("");
   const [formDifficulty, setFormDifficulty] = useState<Difficulty>("medium");
+  const [formSectionId, setFormSectionId] = useState<string>("main");
   const [formSubject, setFormSubject] = useState("");
   const [formTopic, setFormTopic] = useState("");
   const [formMarks, setFormMarks] = useState<string>("");
@@ -209,6 +246,7 @@ export default function Questions() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkText, setBulkText] = useState("");
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkSectionId, setBulkSectionId] = useState<string>("main");
 
   // import from GLOBAL question bank
   const [qbOpen, setQbOpen] = useState(false);
@@ -219,6 +257,20 @@ export default function Questions() {
   const [qbTopic, setQbTopic] = useState<string>("all");
   const [qbDifficulty, setQbDifficulty] = useState<"all" | Difficulty>("all");
   const [qbSelected, setQbSelected] = useState<Record<string, boolean>>({});
+  const [qbSectionId, setQbSectionId] = useState<string>("main");
+
+  const selectedTestSections = useMemo(
+    () => normalizeSections(selectedTest?.sections, selectedTest?.subject),
+    [selectedTest]
+  );
+  const sectionNameById = useMemo(
+    () =>
+      selectedTestSections.reduce<Record<string, string>>((acc, section) => {
+        acc[section.id] = section.name;
+        return acc;
+      }, {}),
+    [selectedTestSections]
+  );
 
   // Auth
   useEffect(() => {
@@ -254,6 +306,7 @@ export default function Questions() {
             positiveMarks: safeNum(data?.positiveMarks, undefined as any),
             negativeMarks: safeNum(data?.negativeMarks, undefined as any),
             questionsCount: safeNum(data?.questionsCount, 0),
+            sections: normalizeSections(data?.sections, safeStr(data?.subject, "General")),
           };
         });
         setTests(rows);
@@ -288,6 +341,23 @@ export default function Questions() {
     if (testId && testId !== selectedTestId) setSelectedTestId(testId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testId]);
+
+  useEffect(() => {
+    const fallbackSectionId = selectedTestSections[0]?.id || "main";
+
+    if (!selectedTestSections.some((section) => section.id === formSectionId)) {
+      setFormSectionId(fallbackSectionId);
+    }
+    if (!selectedTestSections.some((section) => section.id === bulkSectionId)) {
+      setBulkSectionId(fallbackSectionId);
+    }
+    if (!selectedTestSections.some((section) => section.id === qbSectionId)) {
+      setQbSectionId(fallbackSectionId);
+    }
+    if (sectionFilter !== "all" && !selectedTestSections.some((section) => section.id === sectionFilter)) {
+      setSectionFilter("all");
+    }
+  }, [selectedTestSections, formSectionId, bulkSectionId, qbSectionId, sectionFilter]);
 
   // Load questions
   useEffect(() => {
@@ -325,6 +395,7 @@ export default function Questions() {
             source: safeStr(data?.source, undefined as any) as any,
             bankQuestionId: safeStr(data?.bankQuestionId, "") || undefined,
             contentFormat: (safeStr(data?.contentFormat, "") as any) || undefined,
+            sectionId: safeStr(data?.sectionId, "") || undefined,
             createdAtTs: (data?.createdAt as Timestamp) || null,
             updatedAtTs: (data?.updatedAt as Timestamp) || null,
           };
@@ -390,6 +461,7 @@ export default function Questions() {
         setQbSubject("all");
         setQbTopic("all");
         setQbDifficulty("all");
+        setQbSectionId(selectedTestSections[0]?.id || "main");
       } catch (e) {
         console.error(e);
         toast({
@@ -405,7 +477,7 @@ export default function Questions() {
     return () => {
       alive = false;
     };
-  }, [uid, qbOpen]);
+  }, [uid, qbOpen, selectedTestSections]);
 
   const qbSubjects = useMemo(() => {
     const s = new Set<string>();
@@ -470,6 +542,7 @@ export default function Questions() {
           correctOption: safeNum(q.correctOption, 0),
           explanation: q.explanation || "",
           difficulty: normalizeDifficulty(q.difficulty),
+          sectionId: resolveSectionId(qbSectionId, selectedTestSections),
           subject: q.subject || selectedTest?.subject || "",
           topic: q.topic || "",
           isActive: true,
@@ -530,6 +603,10 @@ export default function Questions() {
       const active = x.isActive !== false;
       if (statusFilter === "active" && !active) return false;
       if (statusFilter === "inactive" && active) return false;
+      if (sectionFilter !== "all") {
+        const currentSectionId = resolveSectionId(x.sectionId, selectedTestSections);
+        if (currentSectionId !== sectionFilter) return false;
+      }
 
       if (!q) return true;
 
@@ -544,7 +621,23 @@ export default function Questions() {
 
       return hay.includes(q);
     });
-  }, [questions, search, difficultyFilter, statusFilter]);
+  }, [questions, search, difficultyFilter, statusFilter, sectionFilter, selectedTestSections]);
+
+  // Group filtered questions by section
+  const questionsBySection = useMemo(() => {
+    const map: Record<string, QuestionDoc[]> = {};
+    // Initialize all sections with empty arrays
+    selectedTestSections.forEach((section) => {
+      map[section.id] = [];
+    });
+    // Distribute filtered questions into sections
+    filtered.forEach((q) => {
+      const sid = resolveSectionId(q.sectionId, selectedTestSections);
+      if (!map[sid]) map[sid] = [];
+      map[sid].push(q);
+    });
+    return map;
+  }, [filtered, selectedTestSections]);
 
   // analytics
   const total = questions.length;
@@ -557,11 +650,13 @@ export default function Questions() {
 
   function resetEditor() {
     setEditingId(null);
+    setAddingToSection(null);
     setFormQuestion("");
     setFormOptions(["", "", "", ""]);
     setFormCorrect(0);
     setFormExplanation("");
     setFormDifficulty("medium");
+    setFormSectionId(selectedTestSections[0]?.id || "main");
     setFormSubject(selectedTest?.subject || "");
     setFormTopic("");
     setFormMarks(selectedTest?.positiveMarks != null ? String(selectedTest.positiveMarks) : "");
@@ -575,7 +670,27 @@ export default function Questions() {
       return;
     }
     resetEditor();
+    setAddingToSection(null);
     setEditorOpen(true);
+  }
+
+  function openCreateForSection(sectionId: string) {
+    if (!selectedTestId) {
+      toast({ title: "Select a test first", description: "Choose a test to add questions." });
+      return;
+    }
+    resetEditor();
+    setFormSectionId(sectionId);
+    setAddingToSection(sectionId);
+    setEditorOpen(true);
+    // Make sure this section is expanded
+    setCollapsedQSections((prev) => prev.filter((id) => id !== sectionId));
+  }
+
+  function toggleQSectionCollapse(sectionId: string) {
+    setCollapsedQSections((prev) =>
+      prev.includes(sectionId) ? prev.filter((id) => id !== sectionId) : [...prev, sectionId]
+    );
   }
 
   function openEdit(q: QuestionDoc) {
@@ -589,6 +704,7 @@ export default function Questions() {
     setFormCorrect(Number.isFinite(q.correctOption) ? q.correctOption : 0);
     setFormExplanation(q.explanation || "");
     setFormDifficulty(q.difficulty || "medium");
+    setFormSectionId(resolveSectionId(q.sectionId, selectedTestSections));
     setFormSubject(q.subject || selectedTest?.subject || "");
     setFormTopic(q.topic || "");
     setFormMarks(q.marks != null ? String(q.marks) : (selectedTest?.positiveMarks != null ? String(selectedTest.positiveMarks) : ""));
@@ -623,6 +739,7 @@ export default function Questions() {
 
     const marks = formMarks.trim() === "" ? undefined : safeNum(formMarks, undefined as any);
     const negativeMarks = formNegMarks.trim() === "" ? undefined : safeNum(formNegMarks, undefined as any);
+    const normalizedSectionId = resolveSectionId(formSectionId, selectedTestSections);
 
     setSaving(true);
     try {
@@ -632,6 +749,7 @@ export default function Questions() {
         correctOption: formCorrect,
         explanation: formExplanation.trim() || "",
         difficulty: formDifficulty,
+        sectionId: normalizedSectionId,
         subject: formSubject.trim() || selectedTest?.subject || "",
         topic: formTopic.trim() || "",
         isActive: !!formActive,
@@ -724,6 +842,7 @@ export default function Questions() {
         correctOption: q.correctOption,
         explanation: q.explanation || "",
         difficulty: q.difficulty,
+        sectionId: resolveSectionId(q.sectionId, selectedTestSections),
         subject: q.subject || "",
         topic: q.topic || "",
         marks: q.marks ?? null,
@@ -777,6 +896,10 @@ export default function Questions() {
           correctOption: correct,
           explanation: String(item?.explanation || ""),
           difficulty: normalizeDifficulty(item?.difficulty),
+          sectionId: resolveSectionId(
+            String(item?.sectionId || item?.section || "").trim() || bulkSectionId,
+            selectedTestSections
+          ),
           subject: String(item?.subject || selectedTest?.subject || ""),
           topic: String(item?.topic || ""),
           isActive: item?.isActive !== false,
@@ -925,6 +1048,22 @@ export default function Questions() {
                   {DIFFICULTY_OPTIONS.map((d) => (
                     <SelectItem key={d} value={d}>
                       {d.charAt(0).toUpperCase() + d.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Section</Label>
+              <Select value={formSectionId} onValueChange={setFormSectionId}>
+                <SelectTrigger className="rounded-xl h-11">
+                  <SelectValue placeholder="Select section" />
+                </SelectTrigger>
+                <SelectContent>
+                  {selectedTestSections.map((section) => (
+                    <SelectItem key={section.id} value={section.id}>
+                      {section.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1083,6 +1222,25 @@ export default function Questions() {
                 className="min-h-[220px] rounded-xl"
               />
 
+              <div className="space-y-2">
+                <Label>Default Section</Label>
+                <Select value={bulkSectionId} onValueChange={setBulkSectionId}>
+                  <SelectTrigger className="rounded-xl">
+                    <SelectValue placeholder="Select section" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectedTestSections.map((section) => (
+                      <SelectItem key={section.id} value={section.id}>
+                        {section.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Used when a JSON item does not provide sectionId.
+                </p>
+              </div>
+
               <div className="flex gap-2 justify-end">
                 <Button variant="outline" className="rounded-xl" onClick={() => setBulkOpen(false)} disabled={bulkSaving}>
                   Cancel
@@ -1167,6 +1325,22 @@ export default function Questions() {
                       <SelectItem value="easy">Easy</SelectItem>
                       <SelectItem value="medium">Medium</SelectItem>
                       <SelectItem value="hard">Hard</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="lg:col-span-12">
+                  <Label className="text-xs">Add To Section</Label>
+                  <Select value={qbSectionId} onValueChange={setQbSectionId}>
+                    <SelectTrigger className="rounded-xl mt-1">
+                      <SelectValue placeholder="Select section" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {selectedTestSections.map((section) => (
+                        <SelectItem key={section.id} value={section.id}>
+                          {section.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1313,6 +1487,20 @@ export default function Questions() {
           </div>
 
           <div className="flex gap-2 flex-wrap">
+            <Select value={sectionFilter} onValueChange={setSectionFilter}>
+              <SelectTrigger className="w-[180px] rounded-xl">
+                <SelectValue placeholder="Section" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Sections</SelectItem>
+                {selectedTestSections.map((section) => (
+                  <SelectItem key={section.id} value={section.id}>
+                    {section.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
             <Select value={difficultyFilter} onValueChange={(v: any) => setDifficultyFilter(v)}>
               <SelectTrigger className="w-[160px] rounded-xl">
                 <SelectValue placeholder="Difficulty" />
@@ -1343,6 +1531,7 @@ export default function Questions() {
                 setSearch("");
                 setDifficultyFilter("all");
                 setStatusFilter("all");
+                setSectionFilter("all");
               }}
             >
               Reset
@@ -1381,21 +1570,10 @@ export default function Questions() {
                 </div>
               </CardContent>
             </Card>
-          ) : filtered.length === 0 ? (
-            <Card className="border-border/50">
-              <CardContent className="p-10 text-center text-muted-foreground">
-                No questions found.
-                <div className="mt-4">
-                  <Button className="rounded-xl gradient-bg text-white" onClick={openCreate}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add your first question
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
           ) : (
-            <div className="space-y-3">
-              {editorOpen && !editingId && (
+            <div className="space-y-4">
+              {/* Inline editor for new questions (shows at top when no specific section is targeted) */}
+              {editorOpen && !editingId && addingToSection === null && (
                 <Card className="border-primary/40 shadow-md ring-1 ring-primary/20">
                   <CardContent className="p-6">
                     {renderInlineEditor()}
@@ -1403,155 +1581,238 @@ export default function Questions() {
                 </Card>
               )}
 
-              {filtered.map((q, idx) => {
-                const isHtml = q.contentFormat === "html" || q.source === "question_bank" || /<\w+[\s\S]*>/i.test(q.question || "");
-                const correctText = q.options?.[q.correctOption] || "";
-                const correctTextPlain = stripHtml(correctText);
-                const isEditing = editingId === q.id && editorOpen;
+              {/* Section-grouped question display */}
+              {selectedTestSections.map((section) => {
+                const sectionQuestions = questionsBySection[section.id] || [];
+                const isCollapsed = collapsedQSections.includes(section.id);
+                const isAddingHere = addingToSection === section.id;
 
                 return (
                   <motion.div
-                    key={q.id}
+                    key={section.id}
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: Math.min(0.2, idx * 0.02) }}
+                    transition={{ duration: 0.25 }}
                   >
-                    <Card className={cn(
-                      "border-border/50 hover:shadow-sm transition-all duration-300",
-                      isEditing && "border-primary/40 shadow-md ring-1 ring-primary/20"
-                    )}>
-                      <CardContent className="p-4">
-                        {isEditing ? (
-                          renderInlineEditor()
-                        ) : (
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center gap-2 mb-2">
-                                <Badge variant="secondary" className={cn("rounded-full", difficultyBadge(q.difficulty))}>
-                                  {q.difficulty}
-                                </Badge>
-                                {q.subject ? (
-                                  <Badge variant="secondary" className="rounded-full">
-                                    {q.subject}
-                                  </Badge>
-                                ) : null}
-                                {q.topic ? (
-                                  <Badge variant="secondary" className="rounded-full">
-                                    {q.topic}
-                                  </Badge>
-                                ) : null}
-
-                                {q.isActive !== false ? (
-                                  <Badge variant="secondary" className="rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                                    <CheckCircle2 className="h-3 w-3 mr-1" />
-                                    published
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="secondary" className="rounded-full bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-300">
-                                    <XCircle className="h-3 w-3 mr-1" />
-                                    draft
-                                  </Badge>
-                                )}
-                              </div>
-
-                              {isHtml ? (
-                                <div
-                                  className="prose prose-sm dark:prose-invert max-w-none leading-snug line-clamp-3"
-                                  dangerouslySetInnerHTML={{ __html: q.question }}
-                                />
-                              ) : (
-                                <p className="font-medium text-foreground leading-snug line-clamp-3">
-                                  {q.question}
-                                </p>
-                              )}
-
-                              {q.options?.length ? (
-                                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                  {q.options.slice(0, 4).map((opt, i) => (
-                                    <div
-                                      key={i}
-                                      className={cn(
-                                        "text-sm p-2 rounded-xl border",
-                                        i === q.correctOption
-                                          ? "border-primary/40 bg-primary/5"
-                                          : "border-border bg-muted/20"
-                                      )}
-                                    >
-                                      <span className="text-xs text-muted-foreground mr-2">
-                                        {String.fromCharCode(65 + i)}.
-                                      </span>
-                                      {isHtml ? (
-                                        <span
-                                          className={cn(i === q.correctOption && "font-medium")}
-                                          dangerouslySetInnerHTML={{ __html: opt }}
-                                        />
-                                      ) : (
-                                        <span className={cn(i === q.correctOption && "font-medium")}>
-                                          {opt}
-                                        </span>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : null}
-
-                              <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                                <span>Correct: <span className="font-medium text-foreground">{correctTextPlain || "—"}</span></span>
-                                <span>Marks: <span className="font-medium text-foreground">{q.marks ?? selectedTest?.positiveMarks ?? "—"}</span></span>
-                                <span>Neg: <span className="font-medium text-foreground">{q.negativeMarks ?? selectedTest?.negativeMarks ?? "—"}</span></span>
-                                <span>Used: <span className="font-medium text-foreground">{q.usageCount ?? 0}</span></span>
-                                <span>Updated: <span className="font-medium text-foreground">{fmtDate(q.updatedAtTs || q.createdAtTs || null)}</span></span>
-                              </div>
-                            </div>
-
-                            <div className="flex flex-col items-end gap-2">
-                              <div className="flex items-center gap-2">
-                                <Switch
-                                  checked={q.isActive !== false}
-                                  onCheckedChange={(checked) => toggleActive(q, checked)}
-                                />
-                              </div>
-
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  className="rounded-xl"
-                                  onClick={() => openEdit(q)}
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  className="rounded-xl"
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(q.question);
-                                    toast({ title: "Copied", description: "Question text copied." });
-                                  }}
-                                >
-                                  <Copy className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  className="rounded-xl text-destructive"
-                                  onClick={() => deleteQuestion(q)}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
+                    <Card className="border-border/50 overflow-hidden">
+                      {/* Section Header */}
+                      <div
+                        className="flex items-center justify-between p-4 cursor-pointer hover:bg-muted/30 transition-colors border-b border-border/50"
+                        onClick={() => toggleQSectionCollapse(section.id)}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-primary/10 text-primary">
+                            {isCollapsed ? (
+                              <ChevronRight className="h-4 w-4" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4" />
+                            )}
                           </div>
-                        )}
-
-                        {!isEditing && q.explanation ? (
-                          <div className="mt-4 p-3 rounded-xl bg-muted/30 border border-border">
-                            <p className="text-xs text-muted-foreground mb-1">Explanation</p>
-                            <p className="text-sm text-foreground whitespace-pre-wrap">{q.explanation}</p>
+                          <div>
+                            <p className="font-semibold text-foreground">{section.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {sectionQuestions.length} question{sectionQuestions.length !== 1 ? "s" : ""}
+                            </p>
                           </div>
-                        ) : null}
-                      </CardContent>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary" className="rounded-full">
+                            {sectionQuestions.length}
+                          </Badge>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-xl"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openCreateForSection(section.id);
+                            }}
+                          >
+                            <Plus className="h-3.5 w-3.5 mr-1.5" />
+                            Add Question
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Section Content (collapsible) */}
+                      {!isCollapsed && (
+                        <div className="divide-y divide-border/30">
+                          {/* Inline editor for this section */}
+                          {isAddingHere && (
+                            <div className="p-6 border-b border-border/30 bg-primary/5">
+                              {renderInlineEditor()}
+                            </div>
+                          )}
+
+                          {sectionQuestions.length === 0 && !isAddingHere ? (
+                            <div className="p-8 text-center text-muted-foreground">
+                              <p className="text-sm">No questions in this section yet.</p>
+                              <Button
+                                className="rounded-xl gradient-bg text-white mt-3"
+                                size="sm"
+                                onClick={() => openCreateForSection(section.id)}
+                              >
+                                <Plus className="h-3.5 w-3.5 mr-1.5" />
+                                Add first question
+                              </Button>
+                            </div>
+                          ) : (
+                            sectionQuestions.map((q, idx) => {
+                              const isHtml = q.contentFormat === "html" || q.source === "question_bank" || /<\w+[\s\S]*>/i.test(q.question || "");
+                              const correctText = q.options?.[q.correctOption] || "";
+                              const correctTextPlain = stripHtml(correctText);
+                              const isEditing = editingId === q.id && editorOpen;
+
+                              return (
+                                <motion.div
+                                  key={q.id}
+                                  initial={{ opacity: 0, y: 4 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  transition={{ delay: Math.min(0.15, idx * 0.02) }}
+                                >
+                                  <div className={cn(
+                                    "p-4 hover:bg-muted/10 transition-all duration-200",
+                                    isEditing && "bg-primary/5 ring-1 ring-primary/20"
+                                  )}>
+                                    {isEditing ? (
+                                      renderInlineEditor()
+                                    ) : (
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0 flex-1">
+                                          <div className="flex flex-wrap items-center gap-2 mb-2">
+                                            <span className="text-xs font-mono text-muted-foreground">Q{idx + 1}</span>
+                                            <Badge variant="secondary" className={cn("rounded-full", difficultyBadge(q.difficulty))}>
+                                              {q.difficulty}
+                                            </Badge>
+                                            {q.subject ? (
+                                              <Badge variant="secondary" className="rounded-full">
+                                                {q.subject}
+                                              </Badge>
+                                            ) : null}
+                                            {q.topic ? (
+                                              <Badge variant="secondary" className="rounded-full">
+                                                {q.topic}
+                                              </Badge>
+                                            ) : null}
+
+                                            {q.isActive !== false ? (
+                                              <Badge variant="secondary" className="rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                                                <CheckCircle2 className="h-3 w-3 mr-1" />
+                                                published
+                                              </Badge>
+                                            ) : (
+                                              <Badge variant="secondary" className="rounded-full bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-300">
+                                                <XCircle className="h-3 w-3 mr-1" />
+                                                draft
+                                              </Badge>
+                                            )}
+                                          </div>
+
+                                          {isHtml ? (
+                                            <div
+                                              className="prose prose-sm dark:prose-invert max-w-none leading-snug line-clamp-3"
+                                              dangerouslySetInnerHTML={{ __html: q.question }}
+                                            />
+                                          ) : (
+                                            <p className="font-medium text-foreground leading-snug line-clamp-3">
+                                              {q.question}
+                                            </p>
+                                          )}
+
+                                          {q.options?.length ? (
+                                            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                              {q.options.slice(0, 4).map((opt, i) => (
+                                                <div
+                                                  key={i}
+                                                  className={cn(
+                                                    "text-sm p-2 rounded-xl border",
+                                                    i === q.correctOption
+                                                      ? "border-primary/40 bg-primary/5"
+                                                      : "border-border bg-muted/20"
+                                                  )}
+                                                >
+                                                  <span className="text-xs text-muted-foreground mr-2">
+                                                    {String.fromCharCode(65 + i)}.
+                                                  </span>
+                                                  {isHtml ? (
+                                                    <span
+                                                      className={cn(i === q.correctOption && "font-medium")}
+                                                      dangerouslySetInnerHTML={{ __html: opt }}
+                                                    />
+                                                  ) : (
+                                                    <span className={cn(i === q.correctOption && "font-medium")}>
+                                                      {opt}
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          ) : null}
+
+                                          <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                                            <span>Correct: <span className="font-medium text-foreground">{correctTextPlain || "—"}</span></span>
+                                            <span>Marks: <span className="font-medium text-foreground">{q.marks ?? selectedTest?.positiveMarks ?? "—"}</span></span>
+                                            <span>Neg: <span className="font-medium text-foreground">{q.negativeMarks ?? selectedTest?.negativeMarks ?? "—"}</span></span>
+                                            <span>Used: <span className="font-medium text-foreground">{q.usageCount ?? 0}</span></span>
+                                            <span>Updated: <span className="font-medium text-foreground">{fmtDate(q.updatedAtTs || q.createdAtTs || null)}</span></span>
+                                          </div>
+                                        </div>
+
+                                        <div className="flex flex-col items-end gap-2">
+                                          <div className="flex items-center gap-2">
+                                            <Switch
+                                              checked={q.isActive !== false}
+                                              onCheckedChange={(checked) => toggleActive(q, checked)}
+                                            />
+                                          </div>
+
+                                          <div className="flex items-center gap-2">
+                                            <Button
+                                              variant="outline"
+                                              size="icon"
+                                              className="rounded-xl"
+                                              onClick={() => openEdit(q)}
+                                            >
+                                              <Edit className="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                              variant="outline"
+                                              size="icon"
+                                              className="rounded-xl"
+                                              onClick={() => {
+                                                navigator.clipboard.writeText(q.question);
+                                                toast({ title: "Copied", description: "Question text copied." });
+                                              }}
+                                            >
+                                              <Copy className="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                              variant="outline"
+                                              size="icon"
+                                              className="rounded-xl text-destructive"
+                                              onClick={() => deleteQuestion(q)}
+                                            >
+                                              <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {!isEditing && q.explanation ? (
+                                      <div className="mt-4 p-3 rounded-xl bg-muted/30 border border-border">
+                                        <p className="text-xs text-muted-foreground mb-1">Explanation</p>
+                                        <p className="text-sm text-foreground whitespace-pre-wrap">{q.explanation}</p>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </motion.div>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
                     </Card>
                   </motion.div>
                 );

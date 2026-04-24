@@ -9,6 +9,11 @@ import {
     X,
     CheckCircle2,
     FileUp,
+    ChevronDown,
+    ChevronRight,
+    Edit,
+    Copy,
+    XCircle,
 } from "lucide-react";
 
 import {
@@ -81,6 +86,15 @@ import { db } from "@/lib/firebase";
 
 type Difficulty = "easy" | "medium" | "hard";
 
+type TestSection = {
+    id: string;
+    name: string;
+};
+
+function uid(prefix = "id") {
+    return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+}
+
 type TestQuestion = {
     id: string;
     questionOrder?: number;
@@ -109,9 +123,34 @@ type TestQuestion = {
     rawImportBlock?: string;
     questionImageUrl?: string;
 
+    // Section support
+    sectionId?: string;
+
     createdAt?: any;
     updatedAt?: any;
 };
+
+function normalizeSections(rawSections: any, subjectFallback?: string): TestSection[] {
+    const parsed = Array.isArray(rawSections)
+        ? rawSections
+            .map((section: any, index: number) => ({
+                id: String(section?.id || `sec_${index + 1}`).trim(),
+                name: String(section?.name || `Section ${index + 1}`).trim(),
+            }))
+            .filter((section) => section.id)
+        : [];
+
+    if (parsed.length > 0) return parsed;
+
+    return [{ id: "main", name: String(subjectFallback || "General").trim() || "General" }];
+}
+
+function resolveSectionId(sectionId: string | undefined, sections: TestSection[]): string {
+    const fallback = sections[0]?.id || "main";
+    const normalized = String(sectionId || "").trim();
+    if (!normalized) return fallback;
+    return sections.some((section) => section.id === normalized) ? normalized : fallback;
+}
 
 type EditorDraftSnapshot = {
     question: string;
@@ -240,6 +279,7 @@ type SortableQuestionListItemProps = {
     q: TestQuestion;
     displayOrder: number;
     dragDisabled: boolean;
+    hideDragHandle?: boolean;
     readOnly: boolean;
     onOpenEdit: (q: TestQuestion) => void;
     onDuplicate: (q: TestQuestion) => void;
@@ -251,6 +291,7 @@ function SortableQuestionListItem({
     q,
     displayOrder,
     dragDisabled,
+    hideDragHandle,
     readOnly,
     onOpenEdit,
     onDuplicate,
@@ -279,7 +320,7 @@ function SortableQuestionListItem({
             <div className="flex items-start gap-2">
 
                 {/* Drag Handle */}
-                {readOnly ? (
+                {readOnly || hideDragHandle ? (
                     <div className="h-7 w-7 shrink-0" />
                 ) : (
                     <Button
@@ -393,10 +434,162 @@ function SortableQuestionListItem({
     );
 }
 
+type SortableSectionCardProps = {
+    section: TestSection;
+    index: number;
+    questions: TestQuestion[];
+    collapsed: boolean;
+    readOnly: boolean;
+    onToggleCollapse: (sectionId: string) => void;
+    onRename: (sectionId: string, name: string) => void;
+    onDelete: (sectionId: string) => void;
+    onAddQuestion: (sectionId: string) => void;
+    onOpenEdit: (q: TestQuestion) => void;
+    onDuplicate: (q: TestQuestion) => void;
+    onDeleteQuestion: (id: string) => void;
+    onToggleActive: (q: TestQuestion, next: boolean) => void;
+};
+
+function SortableSectionCard({
+    section,
+    index,
+    questions,
+    collapsed,
+    readOnly,
+    onToggleCollapse,
+    onRename,
+    onDelete,
+    onAddQuestion,
+    onOpenEdit,
+    onDuplicate,
+    onDeleteQuestion,
+    onToggleActive,
+}: SortableSectionCardProps) {
+    const [draftName, setDraftName] = useState(section.name);
+
+    useEffect(() => {
+        setDraftName(section.name);
+    }, [section.name]);
+
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+        id: section.id,
+        disabled: readOnly,
+    });
+
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+    };
+
+    return (
+        <div
+            ref={setNodeRef}
+            style={style}
+            className={`rounded-2xl border bg-background ${isDragging ? "opacity-70" : ""}`}
+        >
+            <div className="p-4 border-b flex flex-col gap-3">
+                <div className="flex items-start gap-3">
+                    {readOnly ? (
+                        <div className="h-9 w-9 shrink-0" />
+                    ) : (
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-9 w-9 rounded-xl text-muted-foreground cursor-grab active:cursor-grabbing shrink-0"
+                            onClick={(event) => event.stopPropagation()}
+                            aria-label="Drag section"
+                            {...attributes}
+                            {...listeners}
+                        >
+                            <GripVertical className="h-4 w-4" />
+                        </Button>
+                    )}
+
+                    <div className="flex-1 min-w-0 space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                            <Badge variant="secondary" className="rounded-full">
+                                Section {index + 1}
+                            </Badge>
+                            <div className="flex items-center gap-2">
+                                {!readOnly ? (
+                                    <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => onAddQuestion(section.id)}>
+                                        <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Question
+                                    </Button>
+                                ) : null}
+                                <Button type="button" variant="ghost" size="icon" className="rounded-xl" onClick={() => onToggleCollapse(section.id)}>
+                                    {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                </Button>
+                                {!readOnly ? (
+                                    <Button type="button" variant="ghost" size="icon" className="rounded-xl text-destructive" onClick={() => onDelete(section.id)}>
+                                        <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                ) : null}
+                            </div>
+                        </div>
+
+                        {readOnly ? (
+                            <p className="text-sm font-medium truncate">{section.name || `Section ${index + 1}`}</p>
+                        ) : (
+                            <Input
+                                value={draftName}
+                                onChange={(event) => setDraftName(event.target.value)}
+                                onBlur={() => {
+                                    const nextName = draftName.trim() || `Section ${index + 1}`;
+                                    if (nextName !== section.name) {
+                                        onRename(section.id, nextName);
+                                    }
+                                }}
+                                placeholder={`Section ${index + 1}`}
+                                className="rounded-xl"
+                            />
+                        )}
+
+                        <p className="text-xs text-muted-foreground">{questions.length} question{questions.length === 1 ? "" : "s"}</p>
+                    </div>
+                </div>
+            </div>
+
+            {!collapsed ? (
+                <div className="p-4 space-y-2">
+                    {questions.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-border bg-muted/10 px-4 py-6 text-center text-sm text-muted-foreground">
+                            <p>No questions in this section yet.</p>
+                            {!readOnly ? (
+                                <Button type="button" className="rounded-xl mt-3" onClick={() => onAddQuestion(section.id)}>
+                                    <Plus className="h-4 w-4 mr-2" /> Add first question
+                                </Button>
+                            ) : null}
+                        </div>
+                    ) : (
+                        <div className="space-y-2">
+                            {questions.map((question, questionIndex) => (
+                                <SortableQuestionListItem
+                                    key={question.id}
+                                    q={question}
+                                    displayOrder={questionIndex + 1}
+                                    dragDisabled={true}
+                                    hideDragHandle
+                                    readOnly={readOnly}
+                                    onOpenEdit={onOpenEdit}
+                                    onDuplicate={onDuplicate}
+                                    onDelete={onDeleteQuestion}
+                                    onToggleActive={onToggleActive}
+                                />
+                            ))}
+                        </div>
+                    )}
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
 const QuestionsManager = ({
     testId,
     testTitle,
     testSubject,
+    testSections,
     educatorUid,
     onClose,
     mode = "modal",
@@ -407,6 +600,7 @@ const QuestionsManager = ({
     testId: string;
     testTitle?: string;
     testSubject?: string;
+    testSections?: TestSection[];
     educatorUid: string;
     onClose: () => void;
     mode?: "modal" | "page";
@@ -427,6 +621,7 @@ const QuestionsManager = ({
     const [formOptions, setFormOptions] = useState<string[]>(["", "", "", ""]);
     const [formCorrect, setFormCorrect] = useState(0);
     const [formDifficulty, setFormDifficulty] = useState<Difficulty>("medium");
+    const [formSectionId, setFormSectionId] = useState("");
     const [formSubject, setFormSubject] = useState("");
     const [formTopic, setFormTopic] = useState("");
     const [formMarks, setFormMarks] = useState("");
@@ -450,6 +645,12 @@ const QuestionsManager = ({
     const previewCropImageRef = useRef<HTMLImageElement | null>(null);
 
     const [saving, setSaving] = useState(false);
+
+    // Section-related state
+    const [addingToSection, setAddingToSection] = useState<string | null>(null);
+    const [collapsedQSections, setCollapsedQSections] = useState<string[]>([]);
+    const [managedSections, setManagedSections] = useState<TestSection[]>(() => normalizeSections(testSections, testSubject));
+    const [newSectionName, setNewSectionName] = useState("");
 
     const [importPreviewOpen, setImportPreviewOpen] = useState(false);
     const [importBusy, setImportBusy] = useState(false);
@@ -479,6 +680,11 @@ const QuestionsManager = ({
         }
         return collection(db, "educators", educatorUid, "my_tests", testId, "questions");
     }, [questionSource, resolvedQuestionSourceTestId, educatorUid, testId]);
+
+    const selectedTestSections = useMemo(
+        () => normalizeSections(testSections, testSubject),
+        [testSections, testSubject]
+    );
 
     async function syncTestQuestionCount() {
         if (readOnly || questionSource === "admin") return;
@@ -546,6 +752,16 @@ const QuestionsManager = ({
         setFormActive(isQuestionPublished(current.isActive));
     }, [editingId, questions]);
 
+    useEffect(() => {
+        setManagedSections(selectedTestSections);
+    }, [selectedTestSections]);
+
+    useEffect(() => {
+        if (!managedSections.length) return;
+        setCollapsedQSections((prev) => prev.filter((sectionId) => managedSections.some((section) => section.id === sectionId)));
+        setFormSectionId((current) => resolveSectionId(current, managedSections));
+    }, [managedSections]);
+
     const filteredQuestions = useMemo(() => {
         const q = searchQ.trim().toLowerCase();
         if (!q) return questions;
@@ -554,6 +770,22 @@ const QuestionsManager = ({
             return hay.includes(q);
         });
     }, [questions, searchQ]);
+
+    // Group filtered questions by section
+    const questionsBySection = useMemo(() => {
+        const map: Record<string, TestQuestion[]> = {};
+        // Initialize all sections with empty arrays
+        managedSections.forEach((section) => {
+            map[section.id] = [];
+        });
+        // Distribute filtered questions into sections
+        filteredQuestions.forEach((q) => {
+            const sid = resolveSectionId(q.sectionId, managedSections);
+            if (!map[sid]) map[sid] = [];
+            map[sid].push(q);
+        });
+        return map;
+    }, [filteredQuestions, managedSections]);
 
     const previewOptions = useMemo(
         () =>
@@ -728,6 +960,7 @@ const QuestionsManager = ({
         setFormOptions(["", "", "", ""]);
         setFormCorrect(0);
         setFormDifficulty("medium");
+        setFormSectionId(resolveSectionId(addingToSection || managedSections[0]?.id, managedSections));
         setFormSubject("");
         setFormTopic("");
         setFormMarks("");
@@ -767,6 +1000,7 @@ const QuestionsManager = ({
         const parsedCorrect = Number.isFinite(q.correctOption) ? q.correctOption : 0;
         setFormCorrect(Math.min(Math.max(0, parsedCorrect), existingOptions.length - 1));
         setFormDifficulty(q.difficulty || "medium");
+        setFormSectionId(resolveSectionId(q.sectionId, managedSections));
         setFormSubject(q.subject || "");
         setFormTopic(q.topic || "");
         setFormMarks(q.marks != null ? String(q.marks) : "");
@@ -784,6 +1018,7 @@ const QuestionsManager = ({
         if (action.type === "close-editor") {
             setEditorOpen(false);
             resetEditor();
+            setAddingToSection(null);
             return;
         }
         if (action.type === "open-new") {
@@ -806,6 +1041,108 @@ const QuestionsManager = ({
 
     function openNew() {
         if (readOnly) return;
+        requestEditorAction({ type: "open-new" });
+    }
+
+    async function addSection() {
+        if (readOnly) return;
+
+        const name = newSectionName.trim();
+        if (!name) {
+            toast.error("Section name is required");
+            return;
+        }
+
+        const nextSections = [...managedSections, { id: uid("section"), name }];
+        setManagedSections(nextSections);
+        setNewSectionName("");
+
+        try {
+            await updateTestSections(nextSections);
+            toast.success("Section added");
+        } catch (error) {
+            console.error(error);
+            toast.error("Failed to add section");
+        }
+    }
+
+    async function renameSection(sectionId: string, name: string) {
+        if (readOnly) return;
+        const nextSections = managedSections.map((section) => (section.id === sectionId ? { ...section, name } : section));
+        setManagedSections(nextSections);
+        try {
+            await updateTestSections(nextSections);
+        } catch (error) {
+            console.error(error);
+            toast.error("Failed to rename section");
+        }
+    }
+
+    async function removeSection(sectionId: string) {
+        if (readOnly) return;
+        if (managedSections.length <= 1) {
+            toast.error("At least one section is required");
+            return;
+        }
+
+        if (!window.confirm("Delete this section? Questions in it will move to the first section.")) return;
+
+        const fallbackSectionId = managedSections.find((section) => section.id !== sectionId)?.id || managedSections[0]?.id || "main";
+        const nextSections = managedSections.filter((section) => section.id !== sectionId);
+        const nextQuestions = questions.map((question) =>
+            resolveSectionId(question.sectionId, managedSections) === sectionId ? { ...question, sectionId: fallbackSectionId } : question
+        );
+
+        setManagedSections(nextSections);
+        setQuestions(nextQuestions);
+
+        try {
+            await updateTestSections(nextSections);
+
+            const batch = writeBatch(db);
+            nextQuestions.forEach((question) => {
+                batch.update(doc(qCol, question.id), {
+                    sectionId: question.sectionId || fallbackSectionId,
+                    updatedAt: serverTimestamp(),
+                });
+            });
+            await batch.commit();
+
+            await resequenceQuestionsForSections(nextSections, nextQuestions);
+            toast.success("Section deleted");
+        } catch (error) {
+            console.error(error);
+            toast.error("Failed to delete section");
+        }
+    }
+
+    async function reorderSections(nextSections: TestSection[]) {
+        if (readOnly) return;
+        setManagedSections(nextSections);
+        try {
+            await updateTestSections(nextSections);
+            await resequenceQuestionsForSections(nextSections, questions);
+        } catch (error) {
+            console.error(error);
+            toast.error("Failed to reorder sections");
+        }
+    }
+
+    function handleSectionDragEnd(event: DragEndEvent) {
+        const { active, over } = event;
+        if (!over || active.id === over.id) return;
+
+        const oldIndex = managedSections.findIndex((section) => section.id === String(active.id));
+        const newIndex = managedSections.findIndex((section) => section.id === String(over.id));
+        if (oldIndex < 0 || newIndex < 0) return;
+
+        const nextSections = arrayMove(managedSections, oldIndex, newIndex);
+        void reorderSections(nextSections);
+    }
+
+    function openNewInSection(sectionId: string) {
+        if (readOnly) return;
+        setAddingToSection(sectionId);
         requestEditorAction({ type: "open-new" });
     }
 
@@ -969,7 +1306,9 @@ const QuestionsManager = ({
             question: formQuestion,
             options: normalizedOptions,
             correctOption: Number(formCorrect) || 0,
+            explanation: "",
             difficulty: formDifficulty || "medium",
+            sectionId: resolveSectionId(formSectionId, managedSections),
             subject: formSubject || "",
             topic: formTopic || "",
             isActive: !!formActive,
@@ -985,20 +1324,54 @@ const QuestionsManager = ({
         setSaving(true);
         try {
             if (!editingId) {
-                await addDoc(qCol, {
+                const newRef = await addDoc(qCol, {
                     ...payload,
                     questionOrder: getNextQuestionOrder(),
                     createdAt: serverTimestamp(),
                     source: "manual",
                 });
+
+                await resequenceQuestionsForSections(managedSections, [
+                    ...questions,
+                    {
+                        id: newRef.id,
+                        question: formQuestion,
+                        options: normalizedOptions,
+                        correctOption: Number(formCorrect) || 0,
+                        explanation: "",
+                        difficulty: formDifficulty || "medium",
+                        sectionId: resolveSectionId(formSectionId, managedSections),
+                        subject: formSubject || "",
+                        topic: formTopic || "",
+                        marks: formMarks.trim() !== "" ? Number(formMarks) : undefined,
+                        negativeMarks: formNegMarks.trim() !== "" ? Number(formNegMarks) : undefined,
+                        isActive: !!formActive,
+                        questionOrder: getNextQuestionOrder(),
+                    } as TestQuestion,
+                ]);
+
                 toast.success("Question added");
             } else {
                 await updateDoc(doc(qCol, editingId), payload);
+
+                await resequenceQuestionsForSections(
+                    managedSections,
+                    questions.map((question) =>
+                        question.id === editingId
+                            ? {
+                                  ...question,
+                                  ...payload,
+                              }
+                            : question
+                    )
+                );
+
                 toast.success("Question updated");
             }
             await syncTestQuestionCount();
             setEditorOpen(false);
             resetEditor();
+            setAddingToSection(null);
             return true;
         } catch (e) {
             console.error(e);
@@ -1069,13 +1442,14 @@ const QuestionsManager = ({
             return;
         }
         try {
-            await addDoc(qCol, {
+            const newDocRef = await addDoc(qCol, {
                 questionOrder: getNextQuestionOrder(),
                 question: q.question,
                 options: q.options || ["", "", "", ""],
                 correctOption: q.correctOption ?? 0,
                 explanation: q.explanation || "",
                 difficulty: q.difficulty || "medium",
+                sectionId: resolveSectionId(q.sectionId, managedSections),
                 subject: q.subject || "",
                 topic: q.topic || "",
                 marks: q.marks ?? null,
@@ -1086,6 +1460,15 @@ const QuestionsManager = ({
                 source: "manual",
                 duplicatedAt: serverTimestamp(),
             });
+            await resequenceQuestionsForSections(managedSections, [
+                ...questions,
+                {
+                    ...q,
+                    id: newDocRef.id,
+                    sectionId: resolveSectionId(q.sectionId, managedSections),
+                    questionOrder: getNextQuestionOrder(),
+                },
+            ]);
             await syncTestQuestionCount();
             toast.success("Duplicated");
         } catch (e) {
@@ -1333,12 +1716,54 @@ const QuestionsManager = ({
             difficulty,
             subject: data?.subject ? String(data.subject) : "",
             topic: data?.topic ? String(data.topic) : "",
+            sectionId: data?.sectionId ? String(data.sectionId) : "",
             marks: marks,
             negativeMarks: negativeMarks,
             isActive: isQuestionPublished(data?.isActive),
             createdAt: data?.createdAt,
             updatedAt: data?.updatedAt,
         };
+    }
+
+    async function updateTestSections(nextSections: TestSection[]) {
+        if (readOnly || questionSource === "admin") return;
+        await updateDoc(doc(db, "educators", educatorUid, "my_tests", testId), {
+            sections: nextSections,
+            updatedAt: serverTimestamp(),
+        });
+    }
+
+    async function resequenceQuestionsForSections(nextSections: TestSection[], nextQuestions: TestQuestion[]) {
+        if (readOnly || questionSource === "admin") return;
+
+        const ordered: TestQuestion[] = [];
+        nextSections.forEach((section) => {
+            const sectionQuestions = nextQuestions.filter((question) => resolveSectionId(question.sectionId, nextSections) === section.id);
+            ordered.push(...sortQuestionsForDisplay(sectionQuestions));
+        });
+
+        const updates = ordered
+            .map((question, index) => ({
+                id: question.id,
+                nextOrder: index + 1,
+                currentOrder: Number.isFinite(Number(question.questionOrder)) ? Number(question.questionOrder) : null,
+            }))
+            .filter((item) => item.currentOrder !== item.nextOrder);
+
+        if (!updates.length) return;
+
+        const CHUNK_SIZE = 450;
+        for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
+            const batch = writeBatch(db);
+            const chunk = updates.slice(i, i + CHUNK_SIZE);
+            chunk.forEach((item) => {
+                batch.update(doc(qCol, item.id), {
+                    questionOrder: item.nextOrder,
+                    updatedAt: serverTimestamp(),
+                });
+            });
+            await batch.commit();
+        }
     }
 
     async function saveImportedQuestions() {
@@ -1608,7 +2033,7 @@ const QuestionsManager = ({
 
                                             <div className="space-y-4 rounded-xl border border-border bg-muted/15 p-4">
                                                 <p className="text-sm font-semibold">Question Settings</p>
-                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                                                     <div className="space-y-2">
                                                         <Label>Mark as Correct Option</Label>
                                                         <Select value={String(formCorrect)} onValueChange={(v) => setFormCorrect(Number(v))}>
@@ -1639,15 +2064,31 @@ const QuestionsManager = ({
                                                         </Select>
                                                     </div>
 
-                                                    <div className="flex items-center justify-between p-3 rounded-xl bg-background border border-border mt-0 sm:mt-6">
-                                                        <div className="min-w-0">
-                                                            <p className="text-sm font-medium">{getPublishStatusLabel(formActive)}</p>
-                                                            <p className="text-xs text-muted-foreground">
-                                                                {formActive ? "Visible in published list" : "Saved as draft until published"}
-                                                            </p>
-                                                        </div>
-                                                        <Switch checked={formActive} onCheckedChange={handleEditorPublishChange} />
+                                                    <div className="space-y-2">
+                                                        <Label>Section</Label>
+                                                        <Select value={formSectionId} onValueChange={setFormSectionId}>
+                                                            <SelectTrigger className="rounded-xl">
+                                                                <SelectValue placeholder="Select section" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {managedSections.map((section) => (
+                                                                    <SelectItem key={section.id} value={section.id}>
+                                                                        {section.name}
+                                                                    </SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
                                                     </div>
+                                                </div>
+
+                                                <div className="flex items-center justify-between p-3 rounded-xl bg-background border border-border">
+                                                    <div className="min-w-0">
+                                                        <p className="text-sm font-medium">{getPublishStatusLabel(formActive)}</p>
+                                                        <p className="text-xs text-muted-foreground">
+                                                            {formActive ? "Visible in published list" : "Saved as draft until published"}
+                                                        </p>
+                                                    </div>
+                                                    <Switch checked={formActive} onCheckedChange={handleEditorPublishChange} />
                                                 </div>
 
                                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1724,12 +2165,26 @@ const QuestionsManager = ({
                         <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-4 space-y-3">
                             <div className="p-4 border-b space-y-3 ">
                                 <div>
-                                    <p className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Questions List</p>
+                                    <p className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Sections</p>
                                 </div>
+
                                 {!readOnly ? (
-                                    <Button className="w-full rounded-xl" onClick={openNew}>
-                                        <Plus className="mr-2 h-4 w-4" /> Add Question
-                                    </Button>
+                                    <div className="space-y-2">
+                                        <div className="flex gap-2">
+                                            <Input
+                                                value={newSectionName}
+                                                onChange={(event) => setNewSectionName(event.target.value)}
+                                                placeholder="New section name"
+                                                className="rounded-xl"
+                                            />
+                                            <Button className="rounded-xl shrink-0" onClick={addSection} type="button">
+                                                <Plus className="mr-2 h-4 w-4" /> Add Section
+                                            </Button>
+                                        </div>
+                                        <Button className="w-full rounded-xl" onClick={() => openNewInSection(managedSections[0]?.id || "main")}>
+                                            <Plus className="mr-2 h-4 w-4" /> Add Question
+                                        </Button>
+                                    </div>
                                 ) : null}
 
                                 {!readOnly ? (
@@ -1780,7 +2235,7 @@ const QuestionsManager = ({
                                 </div>
                             </div>
                             <div className="flex items-center justify-between text-xs text-muted-foreground pb-1">
-                                <span>{readOnly ? "Read-only list" : dndEnabled ? "Drag with handle to reorder" : "Clear search to reorder questions"}</span>
+                                <span>{readOnly ? "Read-only sections" : "Drag sections to reorder"}</span>
                                 {reordering ? (
                                     <span className="inline-flex items-center gap-1">
                                         <Loader2 className="h-3 w-3 animate-spin" /> Saving order...
@@ -1791,40 +2246,46 @@ const QuestionsManager = ({
                                 <div className="flex justify-center py-6">
                                     <Loader2 className="animate-spin text-muted-foreground" />
                                 </div>
-                            ) : filteredQuestions.length === 0 ? (
-                                <p className="text-center text-sm text-muted-foreground py-10">No questions yet.</p>
-                            ) : dndEnabled ? (
-                                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                                    <SortableContext items={filteredQuestions.map((q) => q.id)} strategy={verticalListSortingStrategy}>
-                                        {filteredQuestions.map((q) => (
-                                            <SortableQuestionListItem
-                                                key={q.id}
-                                                q={q}
-                                                displayOrder={questionNumberById.get(q.id) ?? 0}
-                                                dragDisabled={!dndEnabled || reordering}
-                                                readOnly={readOnly}
-                                                onOpenEdit={openEdit}
-                                                onDuplicate={duplicateQuestion}
-                                                onDelete={deleteQuestion}
-                                                onToggleActive={toggleActive}
-                                            />
-                                        ))}
-                                    </SortableContext>
-                                </DndContext>
                             ) : (
-                                filteredQuestions.map((q) => (
-                                    <SortableQuestionListItem
-                                        key={q.id}
-                                        q={q}
-                                        displayOrder={questionNumberById.get(q.id) ?? 0}
-                                        dragDisabled={true}
-                                        readOnly={readOnly}
-                                        onOpenEdit={openEdit}
-                                        onDuplicate={duplicateQuestion}
-                                        onDelete={deleteQuestion}
-                                        onToggleActive={toggleActive}
-                                    />
-                                ))
+                                managedSections.length === 0 ? (
+                                    <p className="text-center text-sm text-muted-foreground py-10">No sections yet.</p>
+                                ) : (
+                                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleSectionDragEnd}>
+                                        <SortableContext items={managedSections.map((section) => section.id)} strategy={verticalListSortingStrategy}>
+                                            <div className="space-y-4">
+                                                {managedSections.map((section, index) => {
+                                                    const sectionQuestions = questionsBySection[section.id] || [];
+                                                    const collapsed = collapsedQSections.includes(section.id);
+
+                                                    return (
+                                                        <SortableSectionCard
+                                                            key={section.id}
+                                                            section={section}
+                                                            index={index}
+                                                            questions={sectionQuestions}
+                                                            collapsed={collapsed}
+                                                            readOnly={readOnly}
+                                                            onToggleCollapse={(sectionId) => {
+                                                                setCollapsedQSections((prev) =>
+                                                                    prev.includes(sectionId)
+                                                                        ? prev.filter((id) => id !== sectionId)
+                                                                        : [...prev, sectionId]
+                                                                );
+                                                            }}
+                                                            onRename={renameSection}
+                                                            onDelete={removeSection}
+                                                            onAddQuestion={openNewInSection}
+                                                            onOpenEdit={openEdit}
+                                                            onDuplicate={duplicateQuestion}
+                                                            onDeleteQuestion={deleteQuestion}
+                                                            onToggleActive={toggleActive}
+                                                        />
+                                                    );
+                                                })}
+                                            </div>
+                                        </SortableContext>
+                                    </DndContext>
+                                )
                             )}
                         </div>
                     </div>
