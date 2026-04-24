@@ -96,21 +96,28 @@ function extractAnswerKeyPairs(text: string): Array<{ questionNumber: number; co
 
   const pairs: Array<{ questionNumber: number; correctOption: number }> = [];
 
-  // Matches common formats: "12-A", "Q12: B", "12) (C)", "12. D"
-  const regex = /(?:^|[\s,;|])(?:q(?:uestion)?\s*)?(\d{1,4})\s*[-.):\]]\s*\(?([A-D])\)?(?=$|[\s,;|])/gi;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(value)) !== null) {
-    const questionNumber = Number(match[1]);
-    const letter = String(match[2] || "").toUpperCase();
-    const correctOption = letter.charCodeAt(0) - 65;
-    if (
-      Number.isFinite(questionNumber) &&
-      questionNumber > 0 &&
-      Number.isFinite(correctOption) &&
-      correctOption >= 0 &&
-      correctOption <= 3
-    ) {
-      pairs.push({ questionNumber, correctOption });
+  const patterns = [
+    // Matches: "12-A", "Q12: B", "12) (C)", "12. D"
+    /(?:^|[\s,;|])(?:q(?:uestion)?\s*)?(\d{1,4})\s*[-.):\]]\s*\(?([A-D])\)?(?=$|[\s,;|])/gi,
+    // Matches loose keys: "12 A", "Q12 B"
+    /(?:^|[\s,;|])(?:q(?:uestion)?\s*)?(\d{1,4})\s+\(?([A-D])\)?(?=$|[\s,;|])/gi,
+  ];
+
+  for (const regex of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(value)) !== null) {
+      const questionNumber = Number(match[1]);
+      const letter = String(match[2] || "").toUpperCase();
+      const correctOption = letter.charCodeAt(0) - 65;
+      if (
+        Number.isFinite(questionNumber) &&
+        questionNumber > 0 &&
+        Number.isFinite(correctOption) &&
+        correctOption >= 0 &&
+        correctOption <= 3
+      ) {
+        pairs.push({ questionNumber, correctOption });
+      }
     }
   }
 
@@ -134,22 +141,25 @@ function reconcileTrailingAnswerKey(items: Omit<AiImportPreviewItem, "include">[
   if (!answerMap.size) return items;
 
   return items.map((item) => {
-    if (hasValidCorrectOption(item)) return item;
+    const hasQuestion = Boolean(String(item.question || "").trim());
+    const hasEnoughOptions = Array.isArray(item.options) && item.options.length >= 2;
+    if (!hasQuestion || !hasEnoughOptions) return item;
 
     const combined = `${item.rawBlock || ""}\n${item.question || ""}`;
-    const questionNumber = extractQuestionNumber(combined);
+    const questionNumber =
+      extractQuestionNumber(combined) ||
+      (Number.isFinite(Number(item.sourceIndex)) && Number(item.sourceIndex) > 0
+        ? Number(item.sourceIndex)
+        : null);
     if (!questionNumber) return item;
 
     const mappedOption = answerMap.get(questionNumber);
     if (typeof mappedOption !== "number") return item;
-    if (!Array.isArray(item.options) || mappedOption < 0 || mappedOption >= item.options.length) return item;
+    if (mappedOption < 0 || mappedOption >= item.options.length) return item;
 
     const nextReasons = (item.reasons || []).filter(
       (reason) => !String(reason || "").toLowerCase().includes("correct option")
     );
-
-    const hasQuestion = Boolean(String(item.question || "").trim());
-    const hasEnoughOptions = item.options.length >= 2;
 
     const reconciledStatus: AiImportStatus = hasQuestion && hasEnoughOptions ? "ready" : "partial";
 
