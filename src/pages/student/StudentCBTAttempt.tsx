@@ -1228,7 +1228,7 @@ export default function StudentCBTAttempt() {
                   onClick={() => setSubmitDialogOpen(true)}
                   disabled={!isStarted}
                   className="mobile-submit-btn"
-                  style={{ display: "none", background: isStarted ? "#22c55e" : "#9ca3af", color: "#fff", border: "none", borderRadius: 4, padding: "4px 12px", fontSize: 12, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed" }}
+                  style={{ background: isStarted ? "#22c55e" : "#9ca3af", color: "#fff", border: "none", borderRadius: 4, padding: "4px 12px", fontSize: 12, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed" }}
                 >
                   SUBMIT
                 </button>
@@ -1377,7 +1377,7 @@ export default function StudentCBTAttempt() {
               onClick={() => setSubmitDialogOpen(true)}
               disabled={!isStarted}
               className="bottom-submit-btn"
-              style={{ background: isStarted ? "#22c55e" : "#9ca3af", color: "#fff", border: "none", borderRadius: 4, padding: "7px 22px", fontSize: 13, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed" }}
+              style={{ display: "none", background: isStarted ? "#22c55e" : "#9ca3af", color: "#fff", border: "none", borderRadius: 4, padding: "7px 22px", fontSize: 13, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed" }}
             >
               SUBMIT
             </button>
