@@ -62,6 +62,7 @@ import { uploadToImageKit } from "@/lib/imagekitUpload";
 
 // Component
 import CreateCustomTest from "./CreateCustomTest";
+import CreateEducatorTemplate from "./CreateEducatorTemplate";
 import NewFolderButton from "./NewFolder";
 
 // Firebase
@@ -181,6 +182,7 @@ export default function TestSeries() {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("none");
   const [educatorTemplates, setEducatorTemplates] = useState<any[]>([]);
   const [savingTemplate, setSavingTemplate] = useState(false);
+  const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
 
   // Folder UI state
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
@@ -244,9 +246,8 @@ export default function TestSeries() {
         }
       );
 
-      // BANK tests: root test_series where source == "admin"
-      // NOTE: admin tests created via admin TestForm.tsx use { source: "admin" }
-      const bankQ = query(collection(db, "test_series"), where("source", "==", "admin"));
+      // BANK tests: root templates collection
+      const bankQ = query(collection(db, "templates"));
       const unsubBank = onSnapshot(
         bankQ,
         (snap) => {
@@ -533,14 +534,14 @@ export default function TestSeries() {
       if (!testsSnap.empty) {
         const CHUNK_SIZE = 450;
         const docs = testsSnap.docs;
-        
+
         for (let i = 0; i < docs.length; i += CHUNK_SIZE) {
           const batch = writeBatch(db);
           const chunk = docs.slice(i, i + CHUNK_SIZE);
           chunk.forEach((d) => {
-            batch.update(d.ref, { 
-              attemptsAllowed: val, 
-              updatedAt: serverTimestamp() 
+            batch.update(d.ref, {
+              attemptsAllowed: val,
+              updatedAt: serverTimestamp()
             });
           });
           await batch.commit();
@@ -635,13 +636,15 @@ export default function TestSeries() {
     const adminTemplate = templateType === "admin" ? bankTests.find((test) => test.id === templateId) : null;
     const educatorTemplate = templateType === "edu" ? educatorTemplates.find((template) => template.id === templateId) : null;
 
+    // Start with the values exactly as submitted by the CreateCustomTest dialog.
+    // The dialog has already pre-filled them from the template and allowed the user to edit.
     const payload: any = {
       title: String(values.title || ""),
       description: String(values.description || ""),
       subject: String(values.subject || ""),
       level: String(values.level || "General"),
       durationMinutes: Number(values.durationMinutes || 0),
-      attemptsAllowed: globalAttemptsAllowed,
+      attemptsAllowed: values.attemptsAllowed || globalAttemptsAllowed,
       source: "custom",
       originSource: "educator",
       createdBy: currentUser.uid,
@@ -652,74 +655,42 @@ export default function TestSeries() {
 
     if (values.sections) {
       payload.sections = values.sections;
+      payload.questionsCount = values.sections.reduce((acc: number, s: any) => acc + (Number(s.questionsCount) || 0), 0);
     }
     if (values.markingScheme) {
       payload.markingScheme = values.markingScheme;
     }
+    if (values.syllabus) {
+      payload.syllabus = values.syllabus;
+    }
+    if (values.requiresUnlock !== undefined) {
+      payload.requiresUnlock = values.requiresUnlock;
+    }
+    if (values.price !== undefined) {
+      payload.price = values.price;
+    }
 
+
+    // Add origin metadata (template reference only, NOT admin-linked)
+    // Tests created from templates are fully editable custom tests.
     if (adminTemplate) {
-      payload.title = adminTemplate.title || payload.title;
-      payload.description = adminTemplate.description || payload.description;
-      payload.subject = adminTemplate.subject || payload.subject;
-      payload.level = adminTemplate.level || payload.level;
-      payload.durationMinutes = Number(adminTemplate.durationMinutes ?? adminTemplate.duration ?? payload.durationMinutes);
-      payload.sections = adminTemplate.sections ?? payload.sections;
-      payload.markingScheme = adminTemplate.markingScheme ?? payload.markingScheme;
-      payload.attemptsAllowed = Number(adminTemplate.attemptsAllowed ?? payload.attemptsAllowed);
-      payload.requiresUnlock = adminTemplate.requiresUnlock ?? true;
-      payload.price = adminTemplate.price ?? 0;
-      payload.isPublished = adminTemplate.isPublished ?? false;
-      payload.source = "custom";
-      payload.originSource = "admin_template";
-      payload.linkedAdminTestId = adminTemplate.id;
+      payload.templateRef = { source: "admin", id: adminTemplate.id };
+      if (payload.isPublished === undefined) payload.isPublished = adminTemplate.isPublished ?? false;
+      if (payload.requiresUnlock === undefined) payload.requiresUnlock = adminTemplate.requiresUnlock ?? true;
+      if (payload.price === undefined) payload.price = adminTemplate.price ?? 0;
     }
 
     if (educatorTemplate) {
-      payload.title = educatorTemplate.title || payload.title;
-      payload.description = educatorTemplate.description || payload.description;
-      payload.subject = educatorTemplate.subject || payload.subject;
-      payload.level = educatorTemplate.level || payload.level;
-      payload.durationMinutes = Number(educatorTemplate.durationMinutes ?? payload.durationMinutes);
-      payload.sections = educatorTemplate.sections ?? payload.sections;
-      payload.markingScheme = educatorTemplate.markingScheme ?? payload.markingScheme;
-      payload.attemptsAllowed = Number(educatorTemplate.attemptsAllowed ?? payload.attemptsAllowed);
-      payload.requiresUnlock = educatorTemplate.requiresUnlock ?? payload.requiresUnlock;
-      payload.price = educatorTemplate.price ?? payload.price;
-      payload.isPublished = educatorTemplate.isPublished ?? payload.isPublished;
-      payload.source = "custom";
       payload.originSource = "educator_template";
       payload.templateId = educatorTemplate.id;
+      if (payload.isPublished === undefined) payload.isPublished = educatorTemplate.isPublished ?? false;
+      if (payload.requiresUnlock === undefined) payload.requiresUnlock = educatorTemplate.requiresUnlock ?? true;
+      if (payload.price === undefined) payload.price = educatorTemplate.price ?? 0;
     }
-
-    const shouldSaveTemplate = !!values.saveAsTemplate;
-    const templatePayload = shouldSaveTemplate
-      ? {
-          templateName: String(values.templateName || payload.title || "Custom template"),
-          title: payload.title,
-          description: payload.description,
-          subject: payload.subject,
-          level: payload.level,
-          durationMinutes: payload.durationMinutes,
-          attemptsAllowed: payload.attemptsAllowed,
-          requiresUnlock: payload.requiresUnlock,
-          price: payload.price,
-          isPublished: payload.isPublished,
-          markingScheme: payload.markingScheme,
-          syllabus: payload.syllabus,
-          sections: payload.sections,
-          source: "custom_template",
-          originSource: "educator",
-          createdBy: currentUser.uid,
-        }
-      : null;
 
     setCreating(true);
     try {
       await addDoc(collection(db, "educators", currentUser.uid, "my_tests"), payload);
-
-      if (templatePayload) {
-        await handleSaveTemplate(templatePayload);
-      }
 
       toast.success("Test created");
       setCreateOpen(false);
@@ -741,6 +712,12 @@ export default function TestSeries() {
     selectedTemplateId,
     setSelectedTemplateId,
     templates: templateOptions,
+    bankTests,
+    educatorTemplates,
+    onCreateTemplate: () => {
+      setCreateOpen(false);
+      setCreateTemplateOpen(true);
+    },
   }
 
   const moveTestState = {
@@ -796,7 +773,7 @@ export default function TestSeries() {
           </Select>
         </div>
 
-        
+
         <div className="flex gap-2">
           <div className="relative w-full sm:w-[320px]">
             <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
@@ -808,8 +785,22 @@ export default function TestSeries() {
             />
           </div>
 
-          {/* Create Custom Test */}
-          <CreateCustomTest {...creatCustomTestState} />
+          <div className="flex items-center gap-2">
+            {/* CreateEducatorTemplate is opened programmatically from the template dropdown */}
+            <CreateEducatorTemplate open={createTemplateOpen} onOpenChange={(open) => {
+              setCreateTemplateOpen(open);
+              // Re-open create test dialog after template creation completes
+              if (!open) setCreateOpen(true);
+            }} />
+            <Button className="gradient-bg text-white shadow-lg" onClick={() => setCreateOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" /> Create Custom Test
+            </Button>
+          </div>
+
+          {/* Create Custom Test Dialog (controlled) */}
+          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+            <CreateCustomTest {...creatCustomTestState} />
+          </Dialog>
 
         </div>
       </div>
@@ -883,105 +874,105 @@ export default function TestSeries() {
                                   !!test.originalTestId;
 
                                 return (
-                              <Card className="h-full flex flex-col hover:shadow-md transition-shadow relative">
-                                <CardHeader>
-                                  <CardTitle className="flex justify-between items-start gap-2">
-                                    <span className="truncate text-lg">{test.title}</span>
-                                    <div className="flex items-center gap-1">
-                                      <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl">
-                                            <MoreVertical className="h-4 w-4" />
-                                          </Button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end" className="rounded-xl">
-                                          <DropdownMenuItem onClick={() => {
-                                            setTestToMove(test);
-                                            setMoveTestOpen(true);
-                                          }}>
-                                            <Move className="mr-2 h-4 w-4" /> Move to Folder
-                                          </DropdownMenuItem>
-                                          <DropdownMenuItem
-                                            className="text-destructive"
-                                            onClick={async () => {
-                                              if (!currentUser) return;
-                                              if (!confirm("Delete this test and all its questions?")) return;
-                                              try {
-                                                const qs = await getDocs(collection(db, "educators", currentUser.uid, "my_tests", test.id, "questions"));
-                                                const batch = writeBatch(db);
-                                                qs.forEach((d) => batch.delete(d.ref));
-                                                batch.delete(doc(db, "educators", currentUser.uid, "my_tests", test.id));
-                                                await batch.commit();
-                                                toast.success("Test deleted");
-                                              } catch (e) {
-                                                console.error(e);
-                                                toast.error("Delete failed");
-                                              }
-                                            }}
+                                  <Card className="h-full flex flex-col hover:shadow-md transition-shadow relative">
+                                    <CardHeader>
+                                      <CardTitle className="flex justify-between items-start gap-2">
+                                        <span className="truncate text-lg">{test.title}</span>
+                                        <div className="flex items-center gap-1">
+                                          <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl">
+                                                <MoreVertical className="h-4 w-4" />
+                                              </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end" className="rounded-xl">
+                                              <DropdownMenuItem onClick={() => {
+                                                setTestToMove(test);
+                                                setMoveTestOpen(true);
+                                              }}>
+                                                <Move className="mr-2 h-4 w-4" /> Move to Folder
+                                              </DropdownMenuItem>
+                                              <DropdownMenuItem
+                                                className="text-destructive"
+                                                onClick={async () => {
+                                                  if (!currentUser) return;
+                                                  if (!confirm("Delete this test and all its questions?")) return;
+                                                  try {
+                                                    const qs = await getDocs(collection(db, "educators", currentUser.uid, "my_tests", test.id, "questions"));
+                                                    const batch = writeBatch(db);
+                                                    qs.forEach((d) => batch.delete(d.ref));
+                                                    batch.delete(doc(db, "educators", currentUser.uid, "my_tests", test.id));
+                                                    await batch.commit();
+                                                    toast.success("Test deleted");
+                                                  } catch (e) {
+                                                    console.error(e);
+                                                    toast.error("Delete failed");
+                                                  }
+                                                }}
+                                              >
+                                                <Trash2 className="mr-2 h-4 w-4" /> Delete
+                                              </DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                          </DropdownMenu>
+                                        </div>
+                                      </CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="flex-1 flex flex-col gap-4">
+                                      <p className="text-sm text-muted-foreground line-clamp-2">{test.description}</p>
+
+                                      <div className="flex flex-wrap items-center justify-between gap-y-3 mt-auto">
+                                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                                          <span className="flex items-center gap-1 shrink-0">
+                                            <BookOpen className="h-3 w-3" /> {test.subject || "—"}
+                                          </span>
+                                          <span className="flex items-center gap-1 shrink-0">
+                                            <Clock className="h-3 w-3" /> {Number(test.durationMinutes || 0)}m
+                                          </span>
+                                          {isAdminLinked ? (
+                                            <Badge variant="outline" className="text-[10px] py-0 px-2 h-5 shrink-0">
+                                              Admin Linked
+                                            </Badge>
+                                          ) : test.source === "imported" ? (
+                                            <Badge variant="secondary" className="text-[10px] py-0 px-2 h-5 shrink-0">
+                                              Imported
+                                            </Badge>
+                                          ) : (
+                                            <Badge className="text-[10px] py-0 px-2 h-5 shrink-0">Custom</Badge>
+                                          )}
+                                        </div>
+
+                                        <div className="flex items-center gap-1 bg-muted/30 px-2 py-1 rounded-lg shrink-0">
+                                          <span className="text-[9px] font-bold text-muted-foreground uppercase">Attempts:</span>
+                                          <Select
+                                            value={String(test.attemptsAllowed || 3)}
+                                            // disabled={isAdminLinked}
+                                            onValueChange={(v) => handleUpdateTestAttempts(test.id, Number(v))}
                                           >
-                                            <Trash2 className="mr-2 h-4 w-4" /> Delete
-                                          </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                      </DropdownMenu>
-                                    </div>
-                                  </CardTitle>
-                                </CardHeader>
-                                <CardContent className="flex-1 flex flex-col gap-4">
-                                  <p className="text-sm text-muted-foreground line-clamp-2">{test.description}</p>
+                                            <SelectTrigger className="h-6 w-[45px] text-[10px] font-bold rounded-md bg-background border-none shadow-none focus:ring-0">
+                                              <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent className="rounded-xl">
+                                              <SelectItem value="1">1</SelectItem>
+                                              <SelectItem value="2">2</SelectItem>
+                                              <SelectItem value="3">3</SelectItem>
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                      </div>
 
-                                  <div className="flex flex-wrap items-center justify-between gap-y-3 mt-auto">
-                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-                                      <span className="flex items-center gap-1 shrink-0">
-                                        <BookOpen className="h-3 w-3" /> {test.subject || "—"}
-                                      </span>
-                                      <span className="flex items-center gap-1 shrink-0">
-                                        <Clock className="h-3 w-3" /> {Number(test.durationMinutes || 0)}m
-                                      </span>
-                                      {isAdminLinked ? (
-                                        <Badge variant="outline" className="text-[10px] py-0 px-2 h-5 shrink-0">
-                                          Admin Linked
-                                        </Badge>
-                                      ) : test.source === "imported" ? (
-                                        <Badge variant="secondary" className="text-[10px] py-0 px-2 h-5 shrink-0">
-                                          Imported
-                                        </Badge>
-                                      ) : (
-                                        <Badge className="text-[10px] py-0 px-2 h-5 shrink-0">Custom</Badge>
-                                      )}
-                                    </div>
-
-                                    <div className="flex items-center gap-1 bg-muted/30 px-2 py-1 rounded-lg shrink-0">
-                                      <span className="text-[9px] font-bold text-muted-foreground uppercase">Attempts:</span>
-                                      <Select
-                                        value={String(test.attemptsAllowed || 3)}
-                                        // disabled={isAdminLinked}
-                                        onValueChange={(v) => handleUpdateTestAttempts(test.id, Number(v))}
-                                      >
-                                        <SelectTrigger className="h-6 w-[45px] text-[10px] font-bold rounded-md bg-background border-none shadow-none focus:ring-0">
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent className="rounded-xl">
-                                          <SelectItem value="1">1</SelectItem>
-                                          <SelectItem value="2">2</SelectItem>
-                                          <SelectItem value="3">3</SelectItem>
-                                        </SelectContent>
-                                      </Select>
-                                    </div>
-                                  </div>
-
-                                  <div className="grid grid-cols-1 gap-2 mt-4 pt-4 border-t">
-                                    <Button
-                                      className="gradient-bg text-white rounded-xl shadow-sm"
-                                      size="sm"
-                                      onClick={() => {
-                                        navigate(`/educator/test-series/${test.id}/questions`);
-                                      }}
-                                    >
-                                      <Edit className="mr-2 h-3 w-3" /> {isAdminLinked ? "View Questions" : "Manage Questions"}
-                                    </Button>
-                                  </div>
-                                </CardContent>
-                              </Card>
+                                      <div className="grid grid-cols-1 gap-2 mt-4 pt-4 border-t">
+                                        <Button
+                                          className="gradient-bg text-white rounded-xl shadow-sm"
+                                          size="sm"
+                                          onClick={() => {
+                                            navigate(`/educator/test-series/${test.id}/questions`);
+                                          }}
+                                        >
+                                          <Edit className="mr-2 h-3 w-3" /> {isAdminLinked ? "View Questions" : "Manage Questions"}
+                                        </Button>
+                                      </div>
+                                    </CardContent>
+                                  </Card>
                                 );
                               })()}
                             </motion.div>
@@ -996,8 +987,8 @@ export default function TestSeries() {
           )}
 
           {/* Move Test Dialog */}
-          <MoveTest {...moveTestState}/>
-          
+          <MoveTest {...moveTestState} />
+
         </TabsContent>
 
         {/* Admin Bank */}
@@ -1030,40 +1021,41 @@ export default function TestSeries() {
                           const alreadyLinked = importedAdminTestIds.has(test.id);
 
                           return (
-                          <Card key={test.id} className="bg-muted/30 border-dashed hover:border-primary transition-colors">
-                            <CardHeader>
-                              <CardTitle className="flex justify-between items-start">
-                                <span className="truncate">{test.title}</span>
-                                <Badge variant="outline">Admin</Badge>
-                              </CardTitle>
-                            </CardHeader>
-                            <CardContent className="space-y-4">
-                              <p className="text-sm text-muted-foreground line-clamp-2">{test.description}</p>
-                              <div className="flex gap-2 text-xs text-muted-foreground">
-                                <span className="flex items-center gap-1"><BookOpen className="h-3 w-3" /> {test.subject || "—"}</span>
-                                <span>•</span>
-                                <span>{test.level || "—"}</span>
-                              </div>
-                              <Button
-                                className="w-full rounded-xl"
-                                disabled={importingId === test.id || alreadyLinked}
-                                onClick={() => handleImport(test)}
-                              >
-                                {alreadyLinked ? (
-                                  <>
-                                    <CheckCircle2 className="mr-2 h-4 w-4" /> Added to Library
-                                  </>
-                                ) : importingId === test.id ? (
-                                  <Loader2 className="animate-spin h-4 w-4" />
-                                ) : (
-                                  <>
-                                    <Download className="mr-2 h-4 w-4" /> Import to Library
-                                  </>
-                                )}
-                              </Button>
-                            </CardContent>
-                          </Card>
-                        )})}
+                            <Card key={test.id} className="bg-muted/30 border-dashed hover:border-primary transition-colors">
+                              <CardHeader>
+                                <CardTitle className="flex justify-between items-start">
+                                  <span className="truncate">{test.title}</span>
+                                  <Badge variant="outline">Admin</Badge>
+                                </CardTitle>
+                              </CardHeader>
+                              <CardContent className="space-y-4">
+                                <p className="text-sm text-muted-foreground line-clamp-2">{test.description}</p>
+                                <div className="flex gap-2 text-xs text-muted-foreground">
+                                  <span className="flex items-center gap-1"><BookOpen className="h-3 w-3" /> {test.subject || "—"}</span>
+                                  <span>•</span>
+                                  <span>{test.level || "—"}</span>
+                                </div>
+                                <Button
+                                  className="w-full rounded-xl"
+                                  disabled={importingId === test.id || alreadyLinked}
+                                  onClick={() => handleImport(test)}
+                                >
+                                  {alreadyLinked ? (
+                                    <>
+                                      <CheckCircle2 className="mr-2 h-4 w-4" /> Added to Library
+                                    </>
+                                  ) : importingId === test.id ? (
+                                    <Loader2 className="animate-spin h-4 w-4" />
+                                  ) : (
+                                    <>
+                                      <Download className="mr-2 h-4 w-4" /> Import to Library
+                                    </>
+                                  )}
+                                </Button>
+                              </CardContent>
+                            </Card>
+                          )
+                        })}
                       </div>
                     )}
                   </div>

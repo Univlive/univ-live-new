@@ -31,6 +31,7 @@ import AdminTestForm from "@/pages/admin/TestForm";
 import AdminLayout from "./pages/admin/AdminLayout";
 import AdminQuestionBank from "@/pages/admin/QuestionBank";
 import AdminSeatManagement from "@/pages/admin/SeatManagement";
+import AdminTemplates from "@/pages/admin/Templates";
 
 // Educator Dashboard
 import EducatorLayout from "@/components/educator/EducatorLayout";
@@ -144,6 +145,7 @@ export default function AppRoutes() {
           <Route path="tests/new" element={<AdminTestForm />} />
           <Route path="tests/edit/:id" element={<AdminTestForm />} />
           <Route path="questions/:testId" element={<AdminQuestions />} />
+          <Route path="templates" element={<AdminTemplates />} />
           <Route path="question-bank" element={<AdminQuestionBank />} />
           <Route path="seat-management" element={<AdminSeatManagement />} />
         </Route>

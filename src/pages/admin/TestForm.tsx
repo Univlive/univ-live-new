@@ -68,6 +68,7 @@ import {
   increment,
 } from "firebase/firestore";
 
+import { TagInput } from "@/components/ui/tag-input";
 import ImageTextarea from "@/components/educator/ImageTextarea";
 
 type Difficulty = "Easy" | "Medium" | "Hard";
@@ -750,8 +751,8 @@ export default function TestForm() {
     unanswered: 0,
   });
 
-  // syllabus editor (multiline)
-  const [syllabusText, setSyllabusText] = useState("");
+  // syllabus tags
+  const [syllabusTags, setSyllabusTags] = useState<string[]>([]);
 
   // sections editor
   const [sections, setSections] = useState<Section[]>([
@@ -863,7 +864,7 @@ export default function TestForm() {
         }
 
         const syl = Array.isArray(d?.syllabus) ? d.syllabus.map(String) : [];
-        setSyllabusText(syl.join("\n"));
+        setSyllabusTags(syl);
 
         const rawSections = Array.isArray(d?.sections) ? d.sections : [];
         const parsed: Section[] =
@@ -1143,13 +1144,6 @@ export default function TestForm() {
     }
   }
 
-  function parseSyllabus(text: string) {
-    return text
-      .split("\n")
-      .map((t) => t.trim())
-      .filter(Boolean);
-  }
-
   async function save() {
     if (!firebaseUser?.uid || !isAdmin) return;
 
@@ -1206,7 +1200,7 @@ export default function TestForm() {
         unanswered: safeNum(markingScheme.unanswered, 0),
       },
 
-      syllabus: parseSyllabus(syllabusText),
+      syllabus: syllabusTags,
 
       sections: cleanedSections.map((s: any) => ({
         id: s.id,
@@ -1569,12 +1563,11 @@ export default function TestForm() {
           <CardTitle className="text-base">Syllabus</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          <Label>Topics (one per line)</Label>
-          <Textarea
-            value={syllabusText}
-            onChange={(e) => setSyllabusText(e.target.value)}
-            className="rounded-2xl min-h-[140px]"
-            placeholder={`E.g.\nNumber System\nAlgebra\nTrigonometry\n...`}
+          <Label>Topics</Label>
+          <TagInput 
+            tags={syllabusTags} 
+            setTags={setSyllabusTags} 
+            placeholder="Type a topic and press Enter..." 
           />
         </CardContent>
       </Card>
