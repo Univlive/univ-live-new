@@ -70,13 +70,40 @@ import {
 
 import { TagInput } from "@/components/ui/tag-input";
 import ImageTextarea from "@/components/educator/ImageTextarea";
+import { Slider } from "@/components/ui/slider";
+
+function getDifficultyLabel(level: number): string {
+  if (level <= 0.3) return "Easy";
+  if (level <= 0.7) return "Medium";
+  return "Hard";
+}
+
+function getDifficultyColor(level: number): string {
+  if (level <= 0.3) return "text-green-600";
+  if (level <= 0.7) return "text-yellow-600";
+  return "text-red-600";
+}
+
+function normalizeLegacyDifficulty(level?: string | number): number {
+  if (typeof level === "number") return Math.max(0, Math.min(1, level));
+  const s = String(level || "").toLowerCase().trim();
+  if (s === "easy") return 0.15;
+  if (s === "medium" || s === "general") return 0.5;
+  if (s === "hard") return 0.85;
+  return 0.5;
+}
 
 type Difficulty = "Easy" | "Medium" | "Hard";
 
 type Section = {
   id: string;
   name: string;
-  questionsCount: number; // display only (admin can set, questions page can override later)
+  questionsCount: number;
+  attemptConstraints?: {
+    min: number;
+    max: number;
+  } | null;
+  selectionRule?: "UPTO" | "EXACT" | null;
   durationMinutes?: number;
 };
 
@@ -171,6 +198,10 @@ function difficultyBadge(d: Difficulty) {
   if (d === "Easy") return "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400";
   if (d === "Hard") return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
   return "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400";
+}
+
+function difficultyBadgeFromLevel(level: number) {
+  return difficultyBadge(getDifficultyLabel(level) as Difficulty);
 }
 
 
@@ -559,6 +590,75 @@ function SortableSectionCard({
         )}
 
         {!collapsed && (
+          <div className="flex flex-col gap-2 p-3 bg-muted/10 rounded-xl border text-xs">
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={!!section.attemptConstraints}
+                onCheckedChange={(checked) => {
+                  onUpdate(section.id, {
+                    attemptConstraints: checked ? { min: 0, max: safeNum(section.questionsCount, 0) } : null,
+                    selectionRule: checked ? (section.selectionRule || 'UPTO') : null,
+                  } as any);
+                }}
+              />
+              <Label className="text-xs font-medium">Attempt Constraints</Label>
+            </div>
+            {section.attemptConstraints && (
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <Label className="text-[10px]">Min</Label>
+                  <Input
+                    type="number"
+                    className="h-7 w-16 text-xs rounded-lg"
+                    value={section.attemptConstraints.min}
+                    onChange={(e) => onUpdate(section.id, {
+                      attemptConstraints: {
+                        ...section.attemptConstraints!,
+                        min: Math.max(0, safeNum(e.target.value, 0)),
+                      },
+                    } as any)}
+                    min={0}
+                    max={section.attemptConstraints.max}
+                  />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Label className="text-[10px]">Max</Label>
+                  <Input
+                    type="number"
+                    className="h-7 w-16 text-xs rounded-lg"
+                    value={section.attemptConstraints.max}
+                    onChange={(e) => onUpdate(section.id, {
+                      attemptConstraints: {
+                        ...section.attemptConstraints!,
+                        max: Math.min(safeNum(section.questionsCount, 0), Math.max(section.attemptConstraints!.min, safeNum(e.target.value, 0))),
+                      },
+                    } as any)}
+                    min={section.attemptConstraints.min}
+                    max={safeNum(section.questionsCount, 0)}
+                  />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Label className="text-[10px]">Rule</Label>
+                  <Select value={section.selectionRule || 'UPTO'} onValueChange={(v) => onUpdate(section.id, { selectionRule: v } as any)}>
+                    <SelectTrigger className="h-7 w-24 text-xs rounded-lg">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="UPTO">Up to</SelectItem>
+                      <SelectItem value="EXACT">Exactly</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-[10px] text-muted-foreground w-full">
+                  Students must attempt {section.selectionRule === 'EXACT' ? 'exactly' : 'up to'} {section.attemptConstraints.max} of {safeNum(section.questionsCount, 0)} questions
+                  {section.attemptConstraints.min > 0 ? ` (minimum ${section.attemptConstraints.min})` : ''}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!collapsed && (
           <>
             {/* Questions in this section */}
             <div className="space-y-3">
@@ -732,7 +832,7 @@ export default function TestForm() {
   // Form fields
   const [title, setTitle] = useState("");
   const [subject, setSubject] = useState<string>("General Test");
-  const [difficulty, setDifficulty] = useState<Difficulty>("Medium");
+  const [difficultyLevel, setDifficultyLevel] = useState<number>(0.5);
   const [description, setDescription] = useState("");
 
   const [durationMinutes, setDurationMinutes] = useState<string>("60");
@@ -756,7 +856,7 @@ export default function TestForm() {
 
   // sections editor
   const [sections, setSections] = useState<Section[]>([
-    { id: uid("sec"), name: "Section 1", questionsCount: 0, durationMinutes: undefined },
+    { id: uid("sec"), name: "Section 1", questionsCount: 0, durationMinutes: undefined, attemptConstraints: null, selectionRule: null },
   ]);
   const [collapsedSectionIds, setCollapsedSectionIds] = useState<string[]>([]);
   const [sectionValidationMap, setSectionValidationMap] = useState<
@@ -839,7 +939,7 @@ export default function TestForm() {
 
         setTitle(String(d?.title || ""));
         setSubject(String(d?.subject || "General Test"));
-        setDifficulty(normalizeDifficulty(d?.level || d?.difficulty));
+        setDifficultyLevel(normalizeLegacyDifficulty(d?.difficultyLevel ?? d?.level ?? d?.difficulty));
         setDescription(String(d?.description || ""));
 
         setDurationMinutes(String(safeNum(d?.durationMinutes ?? d?.duration, 60)));
@@ -873,6 +973,8 @@ export default function TestForm() {
                 id: String(s?.id || `sec_${idx + 1}`),
                 name: String(s?.name || `Section ${idx + 1}`),
                 questionsCount: safeNum(s?.questionsCount, 0),
+                attemptConstraints: s?.attemptConstraints || null,
+                selectionRule: s?.selectionRule || null,
                 durationMinutes:
                   s?.durationMinutes != null
                     ? safeNum(s.durationMinutes, undefined as any)
@@ -880,7 +982,7 @@ export default function TestForm() {
                     ? safeNum(s.duration, undefined as any)
                     : undefined,
               }))
-            : [{ id: uid("sec"), name: "Section 1", questionsCount: 0 }];
+            : [{ id: uid("sec"), name: "Section 1", questionsCount: 0, attemptConstraints: null, selectionRule: null }];
 
         setSections(parsed);
         setCollapsedSectionIds([]);
@@ -957,7 +1059,7 @@ export default function TestForm() {
   function addSection() {
     setSections((prev) => [
       ...prev,
-      { id: uid("sec"), name: `Section ${prev.length + 1}`, questionsCount: 0 },
+      { id: uid("sec"), name: `Section ${prev.length + 1}`, questionsCount: 0, attemptConstraints: null, selectionRule: null },
     ]);
   }
 
@@ -1165,15 +1267,27 @@ export default function TestForm() {
     }
 
     const cleanedSections = sections
-      .map((s, idx) => ({
-        id: String(s.id || `sec_${idx + 1}`),
-        name: String(s.name ?? "").trim(),
-        questionsCount: Math.max(0, safeNum(s.questionsCount, 0)),
-        durationMinutes:
-          s.durationMinutes != null && String(s.durationMinutes) !== ""
-            ? Math.max(0, safeNum(s.durationMinutes, 0))
-            : null,
-      }))
+      .map((s, idx) => {
+        const totalQ = Math.max(0, safeNum(s.questionsCount, 0));
+        const ac = s.attemptConstraints;
+        let validatedConstraints = ac;
+        if (ac) {
+          const min = Math.max(0, Math.min(ac.min, totalQ));
+          const max = Math.max(min, Math.min(ac.max, totalQ));
+          validatedConstraints = { min, max };
+        }
+        return {
+          id: String(s.id || `sec_${idx + 1}`),
+          name: String(s.name ?? "").trim(),
+          questionsCount: totalQ,
+          attemptConstraints: validatedConstraints || null,
+          selectionRule: s.selectionRule || null,
+          durationMinutes:
+            s.durationMinutes != null && String(s.durationMinutes) !== ""
+              ? Math.max(0, safeNum(s.durationMinutes, 0))
+              : null,
+        };
+      })
       .filter((s) => s.name);
 
     if (cleanedSections.length === 0) {
@@ -1183,7 +1297,8 @@ export default function TestForm() {
     const payload: Record<string, any> = {
       title: t,
       subject: subject || "General Test",
-      level: difficulty, // student side reads level/difficulty
+      level: getDifficultyLabel(difficultyLevel),
+      difficultyLevel,
       description: description.trim() || "",
       durationMinutes: dur,
       attemptsAllowed: attempts,
@@ -1206,6 +1321,8 @@ export default function TestForm() {
         id: s.id,
         name: s.name,
         questionsCount: s.questionsCount,
+        attemptConstraints: s.attemptConstraints || null,
+        selectionRule: s.selectionRule || null,
         // store as durationMinutes, keep backward compat too
         durationMinutes: s.durationMinutes,
       })),
@@ -1340,18 +1457,26 @@ export default function TestForm() {
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label>Difficulty</Label>
-              <Select value={difficulty} onValueChange={(v) => setDifficulty(v as Difficulty)}>
-                <SelectTrigger className="rounded-xl">
-                  <SelectValue placeholder="Select difficulty" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Easy">Easy</SelectItem>
-                  <SelectItem value="Medium">Medium</SelectItem>
-                  <SelectItem value="Hard">Hard</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="space-y-2 md:col-span-2">
+              <Label>Difficulty Level</Label>
+              <div className="flex items-center gap-4">
+                <Slider
+                  value={[difficultyLevel]}
+                  onValueChange={(v) => setDifficultyLevel(v[0])}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  className="flex-1"
+                />
+                <span className={`text-sm font-semibold min-w-[70px] text-right ${getDifficultyColor(difficultyLevel)}`}>
+                  {difficultyLevel.toFixed(2)} — {getDifficultyLabel(difficultyLevel)}
+                </span>
+              </div>
+              <div className="flex justify-between text-[10px] text-muted-foreground px-1">
+                <span>Easy (0.0)</span>
+                <span>Medium (0.5)</span>
+                <span>Hard (1.0)</span>
+              </div>
             </div>
 
             <div className="space-y-2">

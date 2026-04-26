@@ -6,17 +6,44 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, Trash2, Loader2, Save } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { addDoc, collection, serverTimestamp, updateDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-// import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import FloatingInput from "../ui/FloatingInput";
 import { TopicMultiSelect } from "@/components/ui/topic-multi-select";
+
+function getDifficultyLabel(level: number): string {
+  if (level <= 0.3) return "Easy";
+  if (level <= 0.7) return "Medium";
+  return "Hard";
+}
+
+function getDifficultyColor(level: number): string {
+  if (level <= 0.3) return "text-green-600";
+  if (level <= 0.7) return "text-yellow-600";
+  return "text-red-600";
+}
+
+function normalizeLegacyDifficulty(level?: string | number): number {
+  if (typeof level === "number") return Math.max(0, Math.min(1, level));
+  const s = String(level || "").toLowerCase().trim();
+  if (s === "easy") return 0.15;
+  if (s === "medium" || s === "general") return 0.5;
+  if (s === "hard") return 0.85;
+  return 0.5;
+}
 
 type Section = {
   id: string;
   name: string;
   questionsCount: number;
+  attemptConstraints?: {
+    min: number;
+    max: number;
+  } | null;
+  selectionRule?: "UPTO" | "EXACT" | null;
   durationMinutes?: number | null;
   markingScheme?: {
     correct: number;
@@ -38,7 +65,9 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
   const [title, setTitle] = useState(templateToEdit?.title || "");
   const [description, setDescription] = useState(templateToEdit?.description || "");
   const [subject, setSubject] = useState(templateToEdit?.subject || "");
-  const [level, setLevel] = useState(templateToEdit?.level || "General");
+  const [difficultyLevel, setDifficultyLevel] = useState<number>(
+    normalizeLegacyDifficulty(templateToEdit?.difficultyLevel ?? templateToEdit?.level)
+  );
   const [durationMinutes, setDurationMinutes] = useState<string>(
     templateToEdit?.durationMinutes?.toString() || "60"
   );
@@ -69,7 +98,7 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
     setTitle(templateToEdit?.title || "");
     setDescription(templateToEdit?.description || "");
     setSubject(templateToEdit?.subject || "");
-    setLevel(templateToEdit?.level || "General");
+    setDifficultyLevel(normalizeLegacyDifficulty(templateToEdit?.difficultyLevel ?? templateToEdit?.level));
     setDurationMinutes(templateToEdit?.durationMinutes?.toString() || "60");
     setAttemptsAllowed(templateToEdit?.attemptsAllowed?.toString() || "3");
     setIsPublished(templateToEdit?.isPublished !== false);
@@ -81,13 +110,17 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
     setSyllabusTags(Array.isArray(templateToEdit?.syllabus) ? templateToEdit.syllabus : []);
     setSections(
       templateToEdit?.sections?.length > 0
-        ? templateToEdit.sections
-        : [{ id: "sec_1", name: "Section 1", questionsCount: 0 }]
+        ? templateToEdit.sections.map((s: any) => ({
+            ...s,
+            attemptConstraints: s.attemptConstraints || null,
+            selectionRule: s.selectionRule || null,
+          }))
+        : [{ id: "sec_1", name: "Section 1", questionsCount: 0, attemptConstraints: null, selectionRule: null }]
     );
   }, [open, templateToEdit]);
 
   const handleAddSection = () => {
-    setSections([...sections, { id: `sec_${Date.now()}`, name: `Section ${sections.length + 1}`, questionsCount: 0 }]);
+    setSections([...sections, { id: `sec_${Date.now()}`, name: `Section ${sections.length + 1}`, questionsCount: 0, attemptConstraints: null, selectionRule: null }]);
   };
 
   const handleRemoveSection = (index: number) => {
@@ -118,7 +151,8 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
         title: title.trim(),
         description: description.trim(),
         subject: subject.trim(),
-        level: level.trim(),
+        level: getDifficultyLabel(difficultyLevel),
+        difficultyLevel,
         durationMinutes: Number(durationMinutes) || 0,
         attemptsAllowed: Number(attemptsAllowed) || 3,
         isPublished,
@@ -128,16 +162,29 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
           unanswered: Number(markingScheme.unanswered),
         },
         syllabus: syllabusTags,
-        sections: sections.map(s => ({
-          name: s.name.trim(),
-          questionsCount: Number(s.questionsCount) || 0,
-          durationMinutes: s.durationMinutes ? Number(s.durationMinutes) : null,
-          markingScheme: s.markingScheme ? {
-            correct: Number(s.markingScheme.correct),
-            incorrect: Number(s.markingScheme.incorrect),
-            unanswered: Number(s.markingScheme.unanswered),
-          } : null,
-        })),
+        sections: sections.map(s => {
+          const totalQ = Number(s.questionsCount) || 0;
+          const ac = s.attemptConstraints;
+          // Validate constraints
+          let validatedConstraints = ac;
+          if (ac) {
+            const min = Math.max(0, Math.min(ac.min, totalQ));
+            const max = Math.max(min, Math.min(ac.max, totalQ));
+            validatedConstraints = { min, max };
+          }
+          return {
+            name: s.name.trim(),
+            questionsCount: totalQ,
+            attemptConstraints: validatedConstraints || null,
+            selectionRule: s.selectionRule || null,
+            durationMinutes: s.durationMinutes ? Number(s.durationMinutes) : null,
+            markingScheme: s.markingScheme ? {
+              correct: Number(s.markingScheme.correct),
+              incorrect: Number(s.markingScheme.incorrect),
+              unanswered: Number(s.markingScheme.unanswered),
+            } : null,
+          };
+        }),
         questionsCount: sections.reduce((acc, s) => acc + (Number(s.questionsCount) || 0), 0),
         source: "admin",
         updatedAt: serverTimestamp(),
@@ -191,9 +238,26 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="space-y-2">
-              <Label>Level</Label>
-              <Input value={level} onChange={(e) => setLevel(e.target.value)} placeholder="e.g. Hard" />
+            <div className="space-y-2 col-span-2">
+              <Label>Difficulty Level</Label>
+              <div className="flex items-center gap-4">
+                <Slider
+                  value={[difficultyLevel]}
+                  onValueChange={(v) => setDifficultyLevel(v[0])}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  className="flex-1"
+                />
+                <span className={`text-sm font-semibold min-w-[70px] text-right ${getDifficultyColor(difficultyLevel)}`}>
+                  {difficultyLevel.toFixed(2)} — {getDifficultyLabel(difficultyLevel)}
+                </span>
+              </div>
+              <div className="flex justify-between text-[10px] text-muted-foreground px-1">
+                <span>Easy (0.0)</span>
+                <span>Medium (0.5)</span>
+                <span>Hard (1.0)</span>
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Duration (min)</Label>
@@ -266,6 +330,73 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
                     <Label>Time (opt)</Label>
                     <Input type="number" value={sec.durationMinutes || ""} onChange={(e) => handleSectionChange(index, 'durationMinutes', e.target.value ? Number(e.target.value) : null)} placeholder="min" />
                   </div>
+
+                {/* Attempt Constraints */}
+                <div className="w-full mt-2 flex flex-col gap-2 p-2 bg-background rounded-lg border text-xs">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={!!sec.attemptConstraints}
+                      onCheckedChange={(checked) => {
+                        handleSectionChange(index, 'attemptConstraints', checked ? { min: 0, max: Number(sec.questionsCount) || 0 } : null);
+                        if (checked && !sec.selectionRule) {
+                          handleSectionChange(index, 'selectionRule', 'UPTO');
+                        }
+                        if (!checked) {
+                          handleSectionChange(index, 'selectionRule', null);
+                        }
+                      }}
+                    />
+                    <Label className="text-xs">Attempt Constraints</Label>
+                  </div>
+                  {sec.attemptConstraints && (
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <div className="flex items-center gap-1.5">
+                        <Label className="text-[10px]">Min</Label>
+                        <Input
+                          type="number"
+                          className="h-7 w-16 text-xs"
+                          value={sec.attemptConstraints.min}
+                          onChange={(e) => handleSectionChange(index, 'attemptConstraints', {
+                            ...sec.attemptConstraints!,
+                            min: Math.max(0, Number(e.target.value) || 0),
+                          })}
+                          min={0}
+                          max={sec.attemptConstraints.max}
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Label className="text-[10px]">Max</Label>
+                        <Input
+                          type="number"
+                          className="h-7 w-16 text-xs"
+                          value={sec.attemptConstraints.max}
+                          onChange={(e) => handleSectionChange(index, 'attemptConstraints', {
+                            ...sec.attemptConstraints!,
+                            max: Math.min(Number(sec.questionsCount) || 0, Math.max(sec.attemptConstraints!.min, Number(e.target.value) || 0)),
+                          })}
+                          min={sec.attemptConstraints.min}
+                          max={Number(sec.questionsCount) || 0}
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Label className="text-[10px]">Rule</Label>
+                        <Select value={sec.selectionRule || 'UPTO'} onValueChange={(v) => handleSectionChange(index, 'selectionRule', v)}>
+                          <SelectTrigger className="h-7 w-24 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="UPTO">Up to</SelectItem>
+                            <SelectItem value="EXACT">Exactly</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground w-full">
+                        Students must attempt {sec.selectionRule === 'EXACT' ? 'exactly' : 'up to'} {sec.attemptConstraints.max} of {Number(sec.questionsCount) || 0} questions
+                        {sec.attemptConstraints.min > 0 ? ` (minimum ${sec.attemptConstraints.min})` : ''}
+                      </p>
+                    </div>
+                  )}
+                </div>
                   <div className="w-24 space-y-2 flex flex-col">
                     <Label>Custom Marks</Label>
                     <div className="w-full h-full flex items-center justify-center pt-3 pb-2 ">

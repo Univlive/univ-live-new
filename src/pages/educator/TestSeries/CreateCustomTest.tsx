@@ -8,7 +8,29 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { Slider } from "@/components/ui/slider";
 import { Plus, Loader2, Clock, BookOpen, ListChecks, Sparkles, Trash2 } from "lucide-react";
+
+function getDifficultyLabel(level: number): string {
+  if (level <= 0.3) return "Easy";
+  if (level <= 0.7) return "Medium";
+  return "Hard";
+}
+
+function getDifficultyColor(level: number): string {
+  if (level <= 0.3) return "text-green-600";
+  if (level <= 0.7) return "text-yellow-600";
+  return "text-red-600";
+}
+
+function normalizeLegacyDifficulty(level?: string | number): number {
+  if (typeof level === "number") return Math.max(0, Math.min(1, level));
+  const s = String(level || "").toLowerCase().trim();
+  if (s === "easy") return 0.15;
+  if (s === "medium" || s === "general") return 0.5;
+  if (s === "hard") return 0.85;
+  return 0.5;
+}
 
 type TemplateOption = {
     id: string;
@@ -30,6 +52,11 @@ type FullTemplateData = {
         name?: string;
         questionsCount?: number;
         questionsToAttempt?: number | null;
+        attemptConstraints?: {
+            min: number;
+            max: number;
+        } | null;
+        selectionRule?: "UPTO" | "EXACT" | null;
         durationMinutes?: number | null;
         markingScheme?: {
             correct?: number;
@@ -50,6 +77,7 @@ type FullTemplateData = {
     questionCount?: number;
     totalQuestions?: number;
     templateName?: string;
+    difficultyLevel?: number;
 };
 
 type CreateCustomTestProps = {
@@ -85,7 +113,7 @@ const CreateCustomTest = ({
     const [formTitle, setFormTitle] = useState("");
     const [formDescription, setFormDescription] = useState("");
     const [formSubject, setFormSubject] = useState("");
-    const [formLevel, setFormLevel] = useState("");
+    const [formDifficultyLevel, setFormDifficultyLevel] = useState<number>(0.5);
     const [formDuration, setFormDuration] = useState("60");
     const [formSections, setFormSections] = useState<any[]>([]);
     const [formMarkingScheme, setFormMarkingScheme] = useState<any>({ correct: 4, incorrect: -1, unanswered: 0 });
@@ -96,7 +124,7 @@ const CreateCustomTest = ({
             setFormTitle("");
             setFormDescription("");
             setFormSubject("");
-            setFormLevel("");
+            setFormDifficultyLevel(0.5);
             setFormDuration("60");
             setFormSections([]);
             setFormMarkingScheme({ correct: 4, incorrect: -1, unanswered: 0 });
@@ -118,7 +146,7 @@ const CreateCustomTest = ({
             if (selectedTemplateId === "none" || !selectedTemplateId) {
                 setFormDescription("");
                 setFormSubject("");
-                setFormLevel("");
+                setFormDifficultyLevel(0.5);
                 setFormDuration("60");
                 setFormSections([]);
                 setFormMarkingScheme({ correct: 4, incorrect: -1, unanswered: 0 });
@@ -127,7 +155,7 @@ const CreateCustomTest = ({
         }
         setFormDescription(String(resolvedTemplate.description || ""));
         setFormSubject(String(resolvedTemplate.subject || ""));
-        setFormLevel(String(resolvedTemplate.level || ""));
+        setFormDifficultyLevel(normalizeLegacyDifficulty(resolvedTemplate.difficultyLevel ?? resolvedTemplate.level));
         setFormDuration(String(safeNum(resolvedTemplate.durationMinutes ?? resolvedTemplate.duration, 60)));
         setFormSections(resolvedTemplate.sections ? JSON.parse(JSON.stringify(resolvedTemplate.sections)) : []);
         setFormMarkingScheme(resolvedTemplate.markingScheme ? JSON.parse(JSON.stringify(resolvedTemplate.markingScheme)) : { correct: 4, incorrect: -1, unanswered: 0 });
@@ -147,19 +175,32 @@ const CreateCustomTest = ({
             title: formTitle.trim(),
             description: formDescription.trim(),
             subject: formSubject.trim(),
-            level: formLevel.trim() || "General",
+            level: getDifficultyLabel(formDifficultyLevel),
+            difficultyLevel: formDifficultyLevel,
             durationMinutes: Number(formDuration) || 60,
-            sections: formSections.map(s => ({
-                name: s.name?.trim() || "Section",
-                questionsCount: Number(s.questionsCount) || 0,
-                questionsToAttempt: Number(s.questionsToAttempt) || 0,
-                durationMinutes: s.durationMinutes ? Number(s.durationMinutes) : null,
-                markingScheme: s.markingScheme ? {
-                    correct: Number(s.markingScheme.correct),
-                    incorrect: Number(s.markingScheme.incorrect),
-                    unanswered: Number(s.markingScheme.unanswered),
-                } : null,
-            })),
+            sections: formSections.map(s => {
+                const totalQ = Number(s.questionsCount) || 0;
+                const ac = s.attemptConstraints;
+                let validatedConstraints = ac;
+                if (ac) {
+                    const min = Math.max(0, Math.min(ac.min, totalQ));
+                    const max = Math.max(min, Math.min(ac.max, totalQ));
+                    validatedConstraints = { min, max };
+                }
+                return {
+                    name: s.name?.trim() || "Section",
+                    questionsCount: totalQ,
+                    questionsToAttempt: Number(s.questionsToAttempt) || 0,
+                    attemptConstraints: validatedConstraints || null,
+                    selectionRule: s.selectionRule || null,
+                    durationMinutes: s.durationMinutes ? Number(s.durationMinutes) : null,
+                    markingScheme: s.markingScheme ? {
+                        correct: Number(s.markingScheme.correct),
+                        incorrect: Number(s.markingScheme.incorrect),
+                        unanswered: Number(s.markingScheme.unanswered),
+                    } : null,
+                };
+            }),
             markingScheme: {
                 correct: Number(formMarkingScheme.correct),
                 incorrect: Number(formMarkingScheme.incorrect),
@@ -303,8 +344,20 @@ const CreateCustomTest = ({
                         <Input value={formSubject} onChange={(e) => setFormSubject(e.target.value)} className="rounded-xl" placeholder="e.g. Maths" />
                     </div>
                     <div className="space-y-2">
-                        <Label>Level</Label>
-                        <Input value={formLevel} onChange={(e) => setFormLevel(e.target.value)} className="rounded-xl" placeholder="e.g. Medium" />
+                        <Label>Difficulty Level</Label>
+                        <div className="flex items-center gap-3">
+                            <Slider
+                                value={[formDifficultyLevel]}
+                                onValueChange={(v) => setFormDifficultyLevel(v[0])}
+                                min={0}
+                                max={1}
+                                step={0.05}
+                                className="flex-1"
+                            />
+                            <span className={`text-xs font-semibold min-w-[60px] text-right ${getDifficultyColor(formDifficultyLevel)}`}>
+                                {formDifficultyLevel.toFixed(2)} — {getDifficultyLabel(formDifficultyLevel)}
+                            </span>
+                        </div>
                     </div>
                 </div>
 
@@ -334,7 +387,7 @@ const CreateCustomTest = ({
                 <div className="space-y-3">
                     <div className="flex items-center justify-between">
                         <h3 className="font-semibold text-sm">Sections</h3>
-                        <Button type="button" size="sm" variant="outline" onClick={() => setFormSections([...formSections, { id: `sec_${Date.now()}`, name: `Section ${formSections.length + 1}`, questionsCount: 0, questionsToAttempt: 0 }])}>
+                        <Button type="button" size="sm" variant="outline" onClick={() => setFormSections([...formSections, { id: `sec_${Date.now()}`, name: `Section ${formSections.length + 1}`, questionsCount: 0, questionsToAttempt: 0, attemptConstraints: null, selectionRule: null }])}>
                             <Plus className="h-4 w-4 mr-2" /> Add Section
                         </Button>
                     </div>
@@ -384,6 +437,86 @@ const CreateCustomTest = ({
                                     }}>
                                         <Trash2 className="h-4 w-4" />
                                     </Button>
+                                </div>
+
+                                {/* Attempt Constraints */}
+                                <div className="flex flex-col gap-2 p-2 bg-background rounded-lg border text-xs">
+                                    <div className="flex items-center gap-2">
+                                        <Switch
+                                            checked={!!sec.attemptConstraints}
+                                            onCheckedChange={(checked) => {
+                                                const newSec = [...formSections];
+                                                newSec[index].attemptConstraints = checked ? { min: 0, max: Number(sec.questionsCount) || 0 } : null;
+                                                if (checked && !newSec[index].selectionRule) {
+                                                    newSec[index].selectionRule = 'UPTO';
+                                                }
+                                                if (!checked) {
+                                                    newSec[index].selectionRule = null;
+                                                }
+                                                setFormSections(newSec);
+                                            }}
+                                        />
+                                        <Label className="text-xs">Attempt Constraints</Label>
+                                    </div>
+                                    {sec.attemptConstraints && (
+                                        <div className="flex items-center gap-3 flex-wrap">
+                                            <div className="flex items-center gap-1.5">
+                                                <Label className="text-[10px]">Min</Label>
+                                                <Input
+                                                    type="number"
+                                                    className="h-6 w-14 text-[10px]"
+                                                    value={sec.attemptConstraints.min}
+                                                    onChange={(e) => {
+                                                        const newSec = [...formSections];
+                                                        newSec[index].attemptConstraints = {
+                                                            ...sec.attemptConstraints,
+                                                            min: Math.max(0, Number(e.target.value) || 0),
+                                                        };
+                                                        setFormSections(newSec);
+                                                    }}
+                                                    min={0}
+                                                    max={sec.attemptConstraints.max}
+                                                />
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                                <Label className="text-[10px]">Max</Label>
+                                                <Input
+                                                    type="number"
+                                                    className="h-6 w-14 text-[10px]"
+                                                    value={sec.attemptConstraints.max}
+                                                    onChange={(e) => {
+                                                        const newSec = [...formSections];
+                                                        newSec[index].attemptConstraints = {
+                                                            ...sec.attemptConstraints,
+                                                            max: Math.min(Number(sec.questionsCount) || 0, Math.max(sec.attemptConstraints.min, Number(e.target.value) || 0)),
+                                                        };
+                                                        setFormSections(newSec);
+                                                    }}
+                                                    min={sec.attemptConstraints.min}
+                                                    max={Number(sec.questionsCount) || 0}
+                                                />
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                                <Label className="text-[10px]">Rule</Label>
+                                                <Select value={sec.selectionRule || 'UPTO'} onValueChange={(v) => {
+                                                    const newSec = [...formSections];
+                                                    newSec[index].selectionRule = v;
+                                                    setFormSections(newSec);
+                                                }}>
+                                                    <SelectTrigger className="h-6 w-20 text-[10px]">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="UPTO">Up to</SelectItem>
+                                                        <SelectItem value="EXACT">Exactly</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <p className="text-[10px] text-muted-foreground w-full">
+                                                Attempt {sec.selectionRule === 'EXACT' ? 'exactly' : 'up to'} {sec.attemptConstraints.max} of {Number(sec.questionsCount) || 0} questions
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="flex items-center gap-4 bg-background p-2 rounded-lg border text-xs">

@@ -6,17 +6,36 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, Trash2, Loader2, Save, FileText } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthProvider";
 import { TopicMultiSelect } from "@/components/ui/topic-multi-select";
 
+function getDifficultyLabel(level: number): string {
+  if (level <= 0.3) return "Easy";
+  if (level <= 0.7) return "Medium";
+  return "Hard";
+}
+
+function getDifficultyColor(level: number): string {
+  if (level <= 0.3) return "text-green-600";
+  if (level <= 0.7) return "text-yellow-600";
+  return "text-red-600";
+}
+
 type Section = {
   id: string;
   name: string;
   questionsCount: number;
   questionsToAttempt?: number | null;
+  attemptConstraints?: {
+    min: number;
+    max: number;
+  } | null;
+  selectionRule?: "UPTO" | "EXACT" | null;
   durationMinutes?: number | null;
   markingScheme?: {
     correct: number;
@@ -43,7 +62,7 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [subject, setSubject] = useState("");
-  const [level, setLevel] = useState("General");
+  const [difficultyLevel, setDifficultyLevel] = useState<number>(0.5);
   const [durationMinutes, setDurationMinutes] = useState<string>("60");
   const [syllabusTags, setSyllabusTags] = useState<string[]>([]);
 
@@ -58,7 +77,7 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
   ]);
 
   const handleAddSection = () => {
-    setSections([...sections, { id: `sec_${Date.now()}`, name: `Section ${sections.length + 1}`, questionsCount: 0, questionsToAttempt: null }]);
+    setSections([...sections, { id: `sec_${Date.now()}`, name: `Section ${sections.length + 1}`, questionsCount: 0, questionsToAttempt: null, attemptConstraints: null, selectionRule: null }]);
   };
 
   const handleRemoveSection = (index: number) => {
@@ -97,7 +116,8 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
         title: title.trim(),
         description: description.trim(),
         subject: subject.trim(),
-        level: level.trim(),
+        level: getDifficultyLabel(difficultyLevel),
+        difficultyLevel,
         durationMinutes: Number(durationMinutes) || 0,
         syllabus: syllabusTags,
         markingScheme: {
@@ -105,17 +125,29 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
           incorrect: Number(markingScheme.incorrect),
           unanswered: Number(markingScheme.unanswered),
         },
-        sections: sections.map(s => ({
-          name: s.name.trim(),
-          questionsCount: Number(s.questionsCount) || 0,
-          questionsToAttempt: s.questionsToAttempt ? Number(s.questionsToAttempt) : null,
-          durationMinutes: s.durationMinutes ? Number(s.durationMinutes) : null,
-          markingScheme: s.markingScheme ? {
-            correct: Number(s.markingScheme.correct),
-            incorrect: Number(s.markingScheme.incorrect),
-            unanswered: Number(s.markingScheme.unanswered),
-          } : null,
-        })),
+        sections: sections.map(s => {
+          const totalQ = Number(s.questionsCount) || 0;
+          const ac = s.attemptConstraints;
+          let validatedConstraints = ac;
+          if (ac) {
+            const min = Math.max(0, Math.min(ac.min, totalQ));
+            const max = Math.max(min, Math.min(ac.max, totalQ));
+            validatedConstraints = { min, max };
+          }
+          return {
+            name: s.name.trim(),
+            questionsCount: totalQ,
+            questionsToAttempt: s.questionsToAttempt ? Number(s.questionsToAttempt) : null,
+            attemptConstraints: validatedConstraints || null,
+            selectionRule: s.selectionRule || null,
+            durationMinutes: s.durationMinutes ? Number(s.durationMinutes) : null,
+            markingScheme: s.markingScheme ? {
+              correct: Number(s.markingScheme.correct),
+              incorrect: Number(s.markingScheme.incorrect),
+              unanswered: Number(s.markingScheme.unanswered),
+            } : null,
+          };
+        }),
         createdAt: serverTimestamp(),
       };
 
@@ -127,10 +159,10 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
       setTitle("");
       setDescription("");
       setSubject("");
-      setLevel("General");
+      setDifficultyLevel(0.5);
       setDurationMinutes("60");
       setSyllabusTags([]);
-      setSections([{ id: "sec_1", name: "Section 1", questionsCount: 0 }]);
+      setSections([{ id: "sec_1", name: "Section 1", questionsCount: 0, attemptConstraints: null, selectionRule: null }]);
 
       setOpen(false);
     } catch (error) {
@@ -182,9 +214,26 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Level</Label>
-              <Input value={level} onChange={(e) => setLevel(e.target.value)} placeholder="e.g. Medium" />
+            <div className="space-y-2 col-span-2">
+              <Label>Difficulty Level</Label>
+              <div className="flex items-center gap-4">
+                <Slider
+                  value={[difficultyLevel]}
+                  onValueChange={(v) => setDifficultyLevel(v[0])}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  className="flex-1"
+                />
+                <span className={`text-sm font-semibold min-w-[70px] text-right ${getDifficultyColor(difficultyLevel)}`}>
+                  {difficultyLevel.toFixed(2)} — {getDifficultyLabel(difficultyLevel)}
+                </span>
+              </div>
+              <div className="flex justify-between text-[10px] text-muted-foreground px-1">
+                <span>Easy (0.0)</span>
+                <span>Medium (0.5)</span>
+                <span>Hard (1.0)</span>
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Duration (min)</Label>
@@ -241,6 +290,74 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
                     </Button>
                   )}
                 </div>
+
+                {/* Attempt Constraints */}
+                <div className="flex flex-col gap-2 p-2 bg-background rounded-lg border text-xs">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={!!sec.attemptConstraints}
+                      onCheckedChange={(checked) => {
+                        handleSectionChange(index, 'attemptConstraints', checked ? { min: 0, max: Number(sec.questionsCount) || 0 } : null);
+                        if (checked && !sec.selectionRule) {
+                          handleSectionChange(index, 'selectionRule', 'UPTO');
+                        }
+                        if (!checked) {
+                          handleSectionChange(index, 'selectionRule', null);
+                        }
+                      }}
+                    />
+                    <Label className="text-xs">Attempt Constraints</Label>
+                  </div>
+                  {sec.attemptConstraints && (
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <div className="flex items-center gap-1.5">
+                        <Label className="text-[10px]">Min</Label>
+                        <Input
+                          type="number"
+                          className="h-7 w-16 text-xs"
+                          value={sec.attemptConstraints.min}
+                          onChange={(e) => handleSectionChange(index, 'attemptConstraints', {
+                            ...sec.attemptConstraints!,
+                            min: Math.max(0, Number(e.target.value) || 0),
+                          })}
+                          min={0}
+                          max={sec.attemptConstraints.max}
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Label className="text-[10px]">Max</Label>
+                        <Input
+                          type="number"
+                          className="h-7 w-16 text-xs"
+                          value={sec.attemptConstraints.max}
+                          onChange={(e) => handleSectionChange(index, 'attemptConstraints', {
+                            ...sec.attemptConstraints!,
+                            max: Math.min(Number(sec.questionsCount) || 0, Math.max(sec.attemptConstraints!.min, Number(e.target.value) || 0)),
+                          })}
+                          min={sec.attemptConstraints.min}
+                          max={Number(sec.questionsCount) || 0}
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Label className="text-[10px]">Rule</Label>
+                        <Select value={sec.selectionRule || 'UPTO'} onValueChange={(v) => handleSectionChange(index, 'selectionRule', v)}>
+                          <SelectTrigger className="h-7 w-24 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="UPTO">Up to</SelectItem>
+                            <SelectItem value="EXACT">Exactly</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground w-full">
+                        Students must attempt {sec.selectionRule === 'EXACT' ? 'exactly' : 'up to'} {sec.attemptConstraints.max} of {Number(sec.questionsCount) || 0} questions
+                        {sec.attemptConstraints.min > 0 ? ` (minimum ${sec.attemptConstraints.min})` : ''}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
 
                 {/* Section Marking Scheme Override */}
                 <div className="flex items-center gap-4 bg-background p-2 rounded-lg border text-xs">

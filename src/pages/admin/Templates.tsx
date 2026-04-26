@@ -54,11 +54,12 @@ type AdminTemplate = {
 	description?: string;
 	subject: string;
 	level?: string;
+	difficultyLevel?: number;
 	durationMinutes: number;
 	attemptsAllowed: number;
 	questionsCount: number;
 	isPublished: boolean;
-	sections: Array<{ name: string; questionsCount: number }>;
+	sections: Array<{ name: string; questionsCount: number; attemptConstraints?: { min: number; max: number } | null; selectionRule?: string | null }>;
 	markingScheme?: { correct: number; incorrect: number; unanswered: number };
 	syllabusCount: number;
 	updatedAtTs?: Timestamp | null;
@@ -123,6 +124,7 @@ export default function Templates() {
 							description: data?.description ? String(data.description) : "",
 							subject: String(data?.subject || "General"),
 							level: data?.level ? String(data.level) : undefined,
+							difficultyLevel: typeof data?.difficultyLevel === 'number' ? data.difficultyLevel : undefined,
 							durationMinutes: safeNum(data?.durationMinutes ?? data?.duration, 60),
 							attemptsAllowed: Math.max(1, safeNum(data?.attemptsAllowed, 3)),
 							questionsCount: Math.max(
@@ -450,7 +452,8 @@ export default function Templates() {
 											<div className="flex flex-wrap gap-1">
 												{item.sections.slice(0, 3).map((sec, idx) => (
 													<span key={idx} className="bg-muted/50 px-1.5 py-0.5 rounded text-[10px]">
-														{sec.name} ({safeNum(sec.questionsCount, 0)})
+														{sec.name} ({safeNum(sec.questionsCount, 0)}
+														{sec.attemptConstraints ? `, attempt ${sec.selectionRule === 'EXACT' ? '=' : '≤'}${sec.attemptConstraints.max}` : ''})
 													</span>
 												))}
 												{item.sections.length > 3 && (

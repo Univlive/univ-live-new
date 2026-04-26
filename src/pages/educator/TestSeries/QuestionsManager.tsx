@@ -23,9 +23,7 @@ import {
     closestCenter,
     useSensor,
     useSensors,
-    useDroppable,
     type DragEndEvent,
-    type DragOverEvent,
 } from "@dnd-kit/core";
 import {
     SortableContext,
@@ -169,7 +167,7 @@ type EditorDraftSnapshot = {
 type PendingEditorAction =
     | { type: "close-manager" }
     | { type: "close-editor" }
-    | { type: "open-new"; sectionId?: string }
+    | { type: "open-new" }
     | { type: "open-edit"; question: TestQuestion };
 
 type PreviewCropTarget =
@@ -303,7 +301,6 @@ function SortableQuestionListItem({
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
         id: q.id,
         disabled: dragDisabled,
-        data: { type: "question", sectionId: q.sectionId },
     });
 
     const style = {
@@ -318,7 +315,7 @@ function SortableQuestionListItem({
             ref={setNodeRef}
             style={style}
             onClick={() => onOpenEdit(q)}
-            className={`p-3 rounded-xl border cursor-pointer text-sm hover:bg-gray-300/10 transition-colors bg-card ${isDragging ? "opacity-70" : ""}`}
+            className={`p-3 rounded-xl cursor-pointer text-sm hover:bg-gray-300/10 transition-colors bg-card ${isDragging ? "opacity-70" : ""}`}
         >
             <div className="flex items-start gap-2">
 
@@ -444,6 +441,7 @@ type SortableSectionCardProps = {
     collapsed: boolean;
     readOnly: boolean;
     questionDndEnabled: boolean;
+    sensors: ReturnType<typeof useSensors>;
     onToggleCollapse: (sectionId: string) => void;
     onRename: (sectionId: string, name: string) => void;
     onDelete: (sectionId: string) => void;
@@ -452,6 +450,7 @@ type SortableSectionCardProps = {
     onDuplicate: (q: TestQuestion) => void;
     onDeleteQuestion: (id: string) => void;
     onToggleActive: (q: TestQuestion, next: boolean) => void;
+    onQuestionDragEnd: (sectionId: string, event: DragEndEvent) => void;
 };
 
 function SortableSectionCard({
@@ -461,6 +460,7 @@ function SortableSectionCard({
     collapsed,
     readOnly,
     questionDndEnabled,
+    sensors,
     onToggleCollapse,
     onRename,
     onDelete,
@@ -469,6 +469,7 @@ function SortableSectionCard({
     onDuplicate,
     onDeleteQuestion,
     onToggleActive,
+    onQuestionDragEnd,
 }: SortableSectionCardProps) {
     const [draftName, setDraftName] = useState(section.name);
 
@@ -479,13 +480,6 @@ function SortableSectionCard({
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
         id: section.id,
         disabled: readOnly,
-        data: { type: "section" },
-    });
-
-    // Droppable zone for receiving questions (especially when section is empty)
-    const { setNodeRef: setDropRef } = useDroppable({
-        id: `droppable-${section.id}`,
-        data: { type: "section-drop", sectionId: section.id },
     });
 
     const style = {
@@ -493,6 +487,7 @@ function SortableSectionCard({
         transition,
     };
 
+    // Section Card 
     return (
         <div
             ref={setNodeRef}
@@ -519,14 +514,12 @@ function SortableSectionCard({
                     )}
 
                     <div className="flex-1 min-w-0 space-y-2">
-                        <div className="flex items-center justify-between gap-3 ">
-                            <Badge variant="secondary" className="rounded-full">
-                                Section {index + 1}
-                            </Badge>
+                        <div className="flex items-center justify-between gap-2">
+                            <Badge variant="secondary"> {section.name} </Badge>
                             <div className="flex items-center gap-2">
                                 {!readOnly ? (
                                     <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => onAddQuestion(section.id)}>
-                                        <Plus className="h-3.5 w-3.5 mr-1.5" /> Add Question
+                                        <Plus className="h-3.5 w-3 mr-1.5" /> Add Question
                                     </Button>
                                 ) : null}
                                 <Button type="button" variant="ghost" size="icon" className="rounded-xl" onClick={() => onToggleCollapse(section.id)}>
@@ -563,7 +556,7 @@ function SortableSectionCard({
             </div>
 
             {!collapsed ? (
-                <div ref={setDropRef} className="p-4 space-y-2 min-h-[40px]">
+                <div className="p-4 space-y-2">
                     {questions.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-border bg-muted/10 px-4 py-6 text-center text-sm text-muted-foreground">
                             <p>No questions in this section yet.</p>
@@ -574,26 +567,32 @@ function SortableSectionCard({
                             ) : null}
                         </div>
                     ) : (
-                        <SortableContext
-                            items={questions.map((q) => q.id)}
-                            strategy={verticalListSortingStrategy}
+                        <DndContext
+                            sensors={sensors}
+                            collisionDetection={closestCenter}
+                            onDragEnd={(event) => onQuestionDragEnd(section.id, event)}
                         >
-                            <div className="space-y-2">
-                                {questions.map((question, questionIndex) => (
-                                    <SortableQuestionListItem
-                                        key={question.id}
-                                        q={question}
-                                        displayOrder={questionIndex + 1}
-                                        dragDisabled={!questionDndEnabled}
-                                        readOnly={readOnly}
-                                        onOpenEdit={onOpenEdit}
-                                        onDuplicate={onDuplicate}
-                                        onDelete={onDeleteQuestion}
-                                        onToggleActive={onToggleActive}
-                                    />
-                                ))}
-                            </div>
-                        </SortableContext>
+                            <SortableContext
+                                items={questions.map((q) => q.id)}
+                                strategy={verticalListSortingStrategy}
+                            >
+                                <div className="space-y-2">
+                                    {questions.map((question, questionIndex) => (
+                                        <SortableQuestionListItem
+                                            key={question.id}
+                                            q={question}
+                                            displayOrder={questionIndex + 1}
+                                            dragDisabled={!questionDndEnabled}
+                                            readOnly={readOnly}
+                                            onOpenEdit={onOpenEdit}
+                                            onDuplicate={onDuplicate}
+                                            onDelete={onDeleteQuestion}
+                                            onToggleActive={onToggleActive}
+                                        />
+                                    ))}
+                                </div>
+                            </SortableContext>
+                        </DndContext>
                     )}
                 </div>
             ) : null}
@@ -835,8 +834,6 @@ const QuestionsManager = ({
 
     const dndEnabled = !readOnly && searchQ.trim().length === 0;
 
-    const hasMultipleSections = managedSections.length > 1;
-
     const questionNumberById = useMemo(() => {
         const numberMap = new Map<string, number>();
         questions.forEach((q, index) => {
@@ -953,117 +950,66 @@ const QuestionsManager = ({
         }
     }
 
-    function findSectionOfQuestion(questionId: string): string | null {
-        for (const section of managedSections) {
-            const qs = questionsBySection[section.id] || [];
-            if (qs.some((q) => q.id === questionId)) return section.id;
-        }
-        return null;
-    }
-
-    function handleQuestionDragOver(event: DragOverEvent) {
+    async function handleDragEnd(event: DragEndEvent) {
         if (!dndEnabled || reordering) return;
 
         const { active, over } = event;
-        if (!over) return;
+        if (!over || active.id === over.id) return;
 
-        const activeId = String(active.id);
-        const overId = String(over.id);
+        const oldIndex = questions.findIndex((q) => q.id === String(active.id));
+        const newIndex = questions.findIndex((q) => q.id === String(over.id));
+        if (oldIndex < 0 || newIndex < 0) return;
 
-        // Determine source section of the dragged question
-        const activeSection = findSectionOfQuestion(activeId);
-        if (!activeSection) return;
+        const reordered = arrayMove(questions, oldIndex, newIndex).map((q, index) => ({
+            ...q,
+            questionOrder: index + 1,
+        }));
 
-        // Determine target section: either the section of the "over" question, or a section droppable zone
-        let overSection: string | null = null;
-        const overData = over.data?.current as any;
-        if (overData?.type === "section-drop") {
-            overSection = overData.sectionId;
-        } else {
-            overSection = findSectionOfQuestion(overId);
-        }
-        if (!overSection || activeSection === overSection) return;
-
-        // Move the question to the new section (real-time update during drag)
-        setQuestions((prev) =>
-            prev.map((q) => (q.id === activeId ? { ...q, sectionId: overSection! } : q))
-        );
+        setQuestions(reordered);
+        await persistDraggedOrder(reordered);
     }
 
-    async function handleQuestionDragEnd(event: DragEndEvent) {
+    async function handleQuestionDragEndInSection(sectionId: string, event: DragEndEvent) {
         if (!dndEnabled || reordering) return;
 
         const { active, over } = event;
-        if (!over) return;
+        if (!over || active.id === over.id) return;
 
-        const activeId = String(active.id);
-        const overId = String(over.id);
+        const sectionQuestions = questionsBySection[sectionId] || [];
+        const oldIndex = sectionQuestions.findIndex((q) => q.id === String(active.id));
+        const newIndex = sectionQuestions.findIndex((q) => q.id === String(over.id));
+        if (oldIndex < 0 || newIndex < 0) return;
 
-        // Determine the section the active question now belongs to
-        const activeSection = findSectionOfQuestion(activeId);
-        if (!activeSection) return;
+        // Reorder only within this section
+        const reorderedSection = arrayMove(sectionQuestions, oldIndex, newIndex);
 
-        // Determine target section
-        let overSection: string | null = null;
-        const overData = over.data?.current as any;
-        if (overData?.type === "section-drop") {
-            overSection = overData.sectionId;
-        } else {
-            overSection = findSectionOfQuestion(overId);
-        }
-
-        // Same-section reorder
-        if (overSection && activeSection === overSection && activeId !== overId) {
-            const sectionQuestions = questionsBySection[activeSection] || [];
-            const oldIndex = sectionQuestions.findIndex((q) => q.id === activeId);
-            const newIndex = sectionQuestions.findIndex((q) => q.id === overId);
-            if (oldIndex >= 0 && newIndex >= 0) {
-                const reorderedSection = arrayMove(sectionQuestions, oldIndex, newIndex);
-                const allReordered: TestQuestion[] = [];
-                managedSections.forEach((section) => {
-                    if (section.id === activeSection) {
-                        allReordered.push(...reorderedSection);
-                    } else {
-                        allReordered.push(...(questionsBySection[section.id] || []));
-                    }
-                });
-                const finalOrdered = allReordered.map((q, index) => ({
-                    ...q,
-                    questionOrder: index + 1,
-                }));
-                setQuestions(finalOrdered);
-                await persistDraggedOrder(finalOrdered);
-                return;
+        // Rebuild the full questions list respecting section order
+        const allReordered: TestQuestion[] = [];
+        managedSections.forEach((section) => {
+            if (section.id === sectionId) {
+                allReordered.push(...reorderedSection);
+            } else {
+                allReordered.push(...(questionsBySection[section.id] || []));
             }
-        }
+        });
 
-        // Cross-section move: sectionId was already updated in onDragOver,
-        // now persist the sectionId change and resequence all questions
-        const movedQuestion = questions.find((q) => q.id === activeId);
-        if (movedQuestion) {
-            try {
-                setReordering(true);
-                await updateDoc(doc(qCol, activeId), {
-                    sectionId: movedQuestion.sectionId,
-                    updatedAt: serverTimestamp(),
-                });
-                await resequenceQuestionsForSections(managedSections, questions);
-            } catch (e) {
-                console.error(e);
-                toast.error("Failed to move question");
-            } finally {
-                setReordering(false);
-            }
-        }
+        // Assign sequential questionOrder
+        const finalOrdered = allReordered.map((q, index) => ({
+            ...q,
+            questionOrder: index + 1,
+        }));
+
+        setQuestions(finalOrdered);
+        await persistDraggedOrder(finalOrdered);
     }
 
-    function resetEditor(targetSectionId?: string) {
+    function resetEditor() {
         setEditingId(null);
         setFormQuestion("");
         setFormOptions(["", "", "", ""]);
         setFormCorrect(0);
         setFormDifficulty("medium");
-        setFormSectionId(resolveSectionId(targetSectionId || managedSections[0]?.id, managedSections));
+        setFormSectionId(resolveSectionId(addingToSection || managedSections[0]?.id, managedSections));
         setFormSubject("");
         setFormTopic("");
         setFormMarks("");
@@ -1089,8 +1035,8 @@ const QuestionsManager = ({
         });
     }
 
-    function openNewDirect(sectionId?: string) {
-        resetEditor(sectionId);
+    function openNewDirect() {
+        resetEditor();
         setEditorSnapshot(buildSnapshotFromQuestion());
         setEditorOpen(true);
     }
@@ -1125,9 +1071,7 @@ const QuestionsManager = ({
             return;
         }
         if (action.type === "open-new") {
-            const sid = action.sectionId;
-            if (sid) setAddingToSection(sid);
-            openNewDirect(sid);
+            openNewDirect();
             return;
         }
         if (action.type === "open-edit") {
@@ -1248,7 +1192,7 @@ const QuestionsManager = ({
     function openNewInSection(sectionId: string) {
         if (readOnly) return;
         setAddingToSection(sectionId);
-        requestEditorAction({ type: "open-new", sectionId });
+        requestEditorAction({ type: "open-new" });
     }
 
     function openEdit(q: TestQuestion) {
@@ -1464,9 +1408,9 @@ const QuestionsManager = ({
                     questions.map((question) =>
                         question.id === editingId
                             ? {
-                                  ...question,
-                                  ...payload,
-                              }
+                                ...question,
+                                ...payload,
+                            }
                             : question
                     )
                 );
@@ -1962,27 +1906,9 @@ const QuestionsManager = ({
 
                                     {!readOnly ? (
                                         <div className="flex items-center gap-2">
-                                            {hasMultipleSections ? (
-                                                <Select onValueChange={(sectionId) => openNewInSection(sectionId)}>
-                                                    <SelectTrigger className="rounded-xl w-auto">
-                                                        <div className="flex items-center gap-2">
-                                                            <Plus className="h-4 w-4" />
-                                                            <span>New in Section</span>
-                                                        </div>
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {managedSections.map((section, idx) => (
-                                                            <SelectItem key={section.id} value={section.id}>
-                                                                Section {idx + 1}: {section.name}
-                                                            </SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                            ) : (
-                                                <Button variant="outline" className="rounded-xl" onClick={openNew}>
-                                                    <Plus className="h-4 w-4 mr-2" /> New
-                                                </Button>
-                                            )}
+                                            <Button variant="outline" className="rounded-xl" onClick={openNew}>
+                                                <Plus className="h-4 w-4 mr-2" /> New
+                                            </Button>
                                             {editorOpen ? (
                                                 <Button
                                                     variant="outline"
@@ -2047,11 +1973,10 @@ const QuestionsManager = ({
                                                     return (
                                                         <div
                                                             key={idx}
-                                                            className={`rounded-xl border p-3 flex items-start gap-3 ${
-                                                                isCorrect
+                                                            className={`rounded-xl border p-3 flex items-start gap-3 ${isCorrect
                                                                     ? "border-green-500/40 bg-green-500/5"
                                                                     : "border-border bg-muted/10"
-                                                            }`}
+                                                                }`}
                                                         >
                                                             <span className={`text-xs font-bold mt-0.5 shrink-0 ${isCorrect ? "text-green-600" : "text-muted-foreground"}`}>
                                                                 {String.fromCharCode(65 + idx)}.
@@ -2282,7 +2207,7 @@ const QuestionsManager = ({
                         </div>
                     </div>
 
-                    <div className="order-2 w-full md:w-[450px] min-h-0 border-t md:border-t-0 md:border-l flex flex-col bg-muted/10 shrink-0">
+                    <div className="order-2 w-full md:w-[480px] min-h-0 border-t md:border-t-0 md:border-l flex flex-col bg-muted/10 shrink-0">
 
 
                         <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-4 space-y-3">
@@ -2304,27 +2229,9 @@ const QuestionsManager = ({
                                                 <Plus className="mr-2 h-4 w-4" /> Add Section
                                             </Button>
                                         </div>
-                                        {hasMultipleSections ? (
-                                            <Select onValueChange={(sectionId) => openNewInSection(sectionId)}>
-                                                <SelectTrigger className="w-full rounded-xl">
-                                                    <div className="flex items-center gap-2">
-                                                        <Plus className="h-4 w-4" />
-                                                        <span>Add Question to Section</span>
-                                                    </div>
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {managedSections.map((section, idx) => (
-                                                        <SelectItem key={section.id} value={section.id}>
-                                                            Section {idx + 1}: {section.name}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        ) : (
-                                            <Button className="w-full rounded-xl" onClick={() => openNewInSection(managedSections[0]?.id || "main")}>
-                                                <Plus className="mr-2 h-4 w-4" /> Add Question
-                                            </Button>
-                                        )}
+                                        <Button className="w-full rounded-xl" onClick={() => openNewInSection(managedSections[0]?.id || "main")}>
+                                            <Plus className="mr-2 h-4 w-4" /> Add Question
+                                        </Button>
                                     </div>
                                 ) : null}
 
@@ -2376,7 +2283,7 @@ const QuestionsManager = ({
                                 </div>
                             </div>
                             <div className="flex items-center justify-between text-xs text-muted-foreground pb-1">
-                                <span>{readOnly ? "Read-only" : hasMultipleSections ? "Drag questions between sections · Drag sections to reorder" : "Drag to reorder questions"}</span>
+                                <span>{readOnly ? "Read-only sections" : "Drag sections to reorder"}</span>
                                 {reordering ? (
                                     <span className="inline-flex items-center gap-1">
                                         <Loader2 className="h-3 w-3 animate-spin" /> Saving order...
@@ -2387,43 +2294,12 @@ const QuestionsManager = ({
                                 <div className="flex justify-center py-6">
                                     <Loader2 className="animate-spin text-muted-foreground" />
                                 </div>
-                            ) : !hasMultipleSections ? (
-                                /* ── Single section: flat question list, no section UI ── */
-                                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragOver={handleQuestionDragOver} onDragEnd={handleQuestionDragEnd}>
-                                    <SortableContext items={filteredQuestions.map((q) => q.id)} strategy={verticalListSortingStrategy}>
-                                        {filteredQuestions.length === 0 ? (
-                                            <div className="rounded-xl border border-dashed border-border bg-muted/10 px-4 py-8 text-center text-sm text-muted-foreground">
-                                                <p>No questions yet.</p>
-                                                {!readOnly ? (
-                                                    <Button type="button" className="rounded-xl mt-3" onClick={() => openNewInSection(managedSections[0]?.id || "main")}>
-                                                        <Plus className="h-4 w-4 mr-2" /> Add first question
-                                                    </Button>
-                                                ) : null}
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-2">
-                                                {filteredQuestions.map((question, questionIndex) => (
-                                                    <SortableQuestionListItem
-                                                        key={question.id}
-                                                        q={question}
-                                                        displayOrder={questionIndex + 1}
-                                                        dragDisabled={!dndEnabled}
-                                                        readOnly={readOnly}
-                                                        onOpenEdit={openEdit}
-                                                        onDuplicate={duplicateQuestion}
-                                                        onDelete={deleteQuestion}
-                                                        onToggleActive={toggleActive}
-                                                    />
-                                                ))}
-                                            </div>
-                                        )}
-                                    </SortableContext>
-                                </DndContext>
                             ) : (
-                                /* ── Multiple sections: section DnD + cross-section question DnD ── */
-                                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleSectionDragEnd}>
-                                    <SortableContext items={managedSections.map((section) => section.id)} strategy={verticalListSortingStrategy}>
-                                        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragOver={handleQuestionDragOver} onDragEnd={handleQuestionDragEnd}>
+                                managedSections.length === 0 ? (
+                                    <p className="text-center text-sm text-muted-foreground py-10">No sections yet.</p>
+                                ) : (
+                                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleSectionDragEnd}>
+                                        <SortableContext items={managedSections.map((section) => section.id)} strategy={verticalListSortingStrategy}>
                                             <div className="space-y-4">
                                                 {managedSections.map((section, index) => {
                                                     const sectionQuestions = questionsBySection[section.id] || [];
@@ -2438,6 +2314,7 @@ const QuestionsManager = ({
                                                             collapsed={collapsed}
                                                             readOnly={readOnly}
                                                             questionDndEnabled={dndEnabled}
+                                                            sensors={sensors}
                                                             onToggleCollapse={(sectionId) => {
                                                                 setCollapsedQSections((prev) =>
                                                                     prev.includes(sectionId)
@@ -2452,13 +2329,14 @@ const QuestionsManager = ({
                                                             onDuplicate={duplicateQuestion}
                                                             onDeleteQuestion={deleteQuestion}
                                                             onToggleActive={toggleActive}
+                                                            onQuestionDragEnd={handleQuestionDragEndInSection}
                                                         />
                                                     );
                                                 })}
                                             </div>
-                                        </DndContext>
-                                    </SortableContext>
-                                </DndContext>
+                                        </SortableContext>
+                                    </DndContext>
+                                )
                             )}
                         </div>
                     </div>
