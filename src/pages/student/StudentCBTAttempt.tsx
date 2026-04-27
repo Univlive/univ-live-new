@@ -175,7 +175,7 @@ export default function StudentCBTAttempt() {
   const [responses, setResponses] = useState<Record<string, AttemptResponse>>({});
 
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [currentSectionId, setCurrentSectionId] = useState("main");
+  const [currentSectionId, setCurrentSectionId] = useState("");
 
   const [attemptId, setAttemptId] = useState<string | null>(null);
   const [attemptStartedAtMs, setAttemptStartedAtMs] = useState<number | null>(null);
@@ -234,6 +234,24 @@ export default function StudentCBTAttempt() {
     },
     [attemptRef]
   );
+
+  const sections = useMemo(() => {
+    return testMeta?.sections || [];
+  }, [testMeta]);
+
+  // Derived: questions in current active section
+  const sectionQuestions = useMemo(() => {
+    if (!currentSectionId) return questions;
+    return questions.filter(q => q.sectionId === currentSectionId);
+  }, [questions, currentSectionId]);
+
+  // Derived: current question index WITHIN the active section
+  const currentSectionIndex = useMemo(() => {
+    const q = questions[currentIndex];
+    if (!q) return 0;
+    const idx = sectionQuestions.findIndex(sq => sq.id === q.id);
+    return idx >= 0 ? idx : 0;
+  }, [questions, currentIndex, sectionQuestions]);
 
   const currentQuestion = questions[currentIndex] || null;
 
@@ -455,7 +473,10 @@ export default function StudentCBTAttempt() {
         const init = buildInitResponses(qs);
         setResponses(init);
         setCurrentIndex(0);
-        setCurrentSectionId(qs[0]?.sectionId || "main");
+        
+        // Find section of first question
+        const firstSectionId = qs[0]?.sectionId || meta.sections[0]?.id || "main";
+        setCurrentSectionId(firstSectionId);
 
         // Attempt resume: localStorage -> doc -> query
         const loadAttemptById = async (id: string) => {
@@ -533,7 +554,11 @@ export default function StudentCBTAttempt() {
             return next;
           });
 
-          setCurrentIndex(safeNumber(foundAttempt.currentIndex, 0));
+          const resumeIdx = safeNumber(foundAttempt.currentIndex, 0);
+          setCurrentIndex(resumeIdx);
+          if (qs[resumeIdx]) {
+            setCurrentSectionId(qs[resumeIdx].sectionId || meta.sections[0]?.id || "main");
+          }
 
           const startedMs =
             foundAttempt.startedAtMs ||
@@ -586,7 +611,10 @@ export default function StudentCBTAttempt() {
   useEffect(() => {
     const q = questions[currentIndex];
     if (q) {
-      if (q.sectionId) setCurrentSectionId(q.sectionId);
+      // Sync section ID if it's different
+      if (q.sectionId && q.sectionId !== currentSectionId) {
+        setCurrentSectionId(q.sectionId);
+      }
       setSelectedAnswer(responses[q.id]?.answer || null);
     }
   }, [questions, currentIndex, responses]);
@@ -634,6 +662,22 @@ export default function StudentCBTAttempt() {
     const next = Math.max(0, Math.min(idx, questions.length - 1));
     setCurrentIndex(next);
     if (attemptId) queueAttemptUpdate({ currentIndex: next });
+  };
+
+  const goToSectionIndex = (sectionIdx: number) => {
+    const q = sectionQuestions[sectionIdx];
+    if (!q) return;
+    const globalIdx = questions.findIndex(globalQ => globalQ.id === q.id);
+    if (globalIdx >= 0) goToIndex(globalIdx);
+  };
+
+  const switchSection = (sectionId: string) => {
+    setCurrentSectionId(sectionId);
+    // Find first question of this section
+    const firstQIdx = questions.findIndex(q => (q.sectionId || "main") === sectionId);
+    if (firstQIdx >= 0) {
+      goToIndex(firstQIdx);
+    }
   };
 
   const handleStart = async () => {
@@ -733,7 +777,18 @@ export default function StudentCBTAttempt() {
       currentIndex,
     });
     
-    goToIndex(currentIndex + 1);
+    // Move to next in section, or first of next section if available
+    if (currentSectionIndex < sectionQuestions.length - 1) {
+      goToSectionIndex(currentSectionIndex + 1);
+    } else {
+      // Find next section
+      const currentSectionIdx = sections.findIndex(s => s.id === currentSectionId);
+      if (currentSectionIdx >= 0 && currentSectionIdx < sections.length - 1) {
+        switchSection(sections[currentSectionIdx + 1].id);
+      } else {
+        toast.info("End of test reached.");
+      }
+    }
   };
 
   const handleSaveAndMarkForReview = () => {
@@ -760,7 +815,18 @@ export default function StudentCBTAttempt() {
       currentIndex,
     });
     
-    goToIndex(currentIndex + 1);
+    // Move to next in section, or first of next section if available
+    if (currentSectionIndex < sectionQuestions.length - 1) {
+      goToSectionIndex(currentSectionIndex + 1);
+    } else {
+      // Find next section
+      const currentSectionIdx = sections.findIndex(s => s.id === currentSectionId);
+      if (currentSectionIdx >= 0 && currentSectionIdx < sections.length - 1) {
+        switchSection(sections[currentSectionIdx + 1].id);
+      } else {
+        toast.info("End of test reached.");
+      }
+    }
   };
 
   const handleMarkForReviewAndNext = () => {
@@ -772,7 +838,19 @@ export default function StudentCBTAttempt() {
     }));
 
     queueAttemptUpdate({ [`responses.${currentQuestion.id}.markedForReview`]: true, currentIndex });
-    goToIndex(currentIndex + 1);
+    
+    // Move to next in section, or first of next section if available
+    if (currentSectionIndex < sectionQuestions.length - 1) {
+      goToSectionIndex(currentSectionIndex + 1);
+    } else {
+      // Find next section
+      const currentSectionIdx = sections.findIndex(s => s.id === currentSectionId);
+      if (currentSectionIdx >= 0 && currentSectionIdx < sections.length - 1) {
+        switchSection(sections[currentSectionIdx + 1].id);
+      } else {
+        toast.info("End of test reached.");
+      }
+    }
   };
 
   const handleMarkForReview = () => {
@@ -994,11 +1072,9 @@ export default function StudentCBTAttempt() {
   const markedForReviewCount = submissionCounts.markedForReviewUnansweredCount;
   const answeredAndMarkedCount = submissionCounts.answeredAndMarkedCount;
 
-  const getQuestionBtnStyle = (idx: number): React.CSSProperties => {
-    const q = questions[idx];
-    if (!q) return {};
-    const r = responses[q.id];
-    const isCurrent = idx === currentIndex;
+  const getQuestionBtnStyle = (qId: string): React.CSSProperties => {
+    const r = responses[qId];
+    const isCurrent = currentQuestion?.id === qId;
 
     if (isCurrent) {
       return { background: "#3b82f6", color: "#ffffff", border: "2px solid #1e40af" };
@@ -1050,12 +1126,12 @@ export default function StudentCBTAttempt() {
       </div>
 
       {/* Section tabs if multiple */}
-      {testMeta.sections.length > 1 && (
+      {sections.length > 1 && (
         <div style={{ display: "flex", overflowX: "auto", borderBottom: "1px solid #d1d5db", padding: "0 8px" }}>
-          {testMeta.sections.map((section) => (
+          {sections.map((section) => (
             <button
               key={section.id}
-              onClick={() => setCurrentSectionId(section.id)}
+              onClick={() => switchSection(section.id)}
               style={{
                 padding: "6px 12px",
                 fontSize: 12,
@@ -1074,15 +1150,19 @@ export default function StudentCBTAttempt() {
         </div>
       )}
 
-      {/* Question grid */}
+      {/* Question grid (current section only) */}
       <div style={{ padding: "15px", overflowY: "auto", maxHeight: "calc(100% - 160px)" }}>
         <div className="question-grid">
-          {questions.map((q, idx) => (
+          {sectionQuestions.map((sq, idx) => (
             <button
-              key={q.id}
-              onClick={() => { goToIndex(idx); onClose?.(); }}
+              key={sq.id}
+              onClick={() => {
+                const globalIdx = questions.findIndex(q => q.id === sq.id);
+                if (globalIdx >= 0) goToIndex(globalIdx);
+                onClose?.(); 
+              }}
               style={{
-                ...getQuestionBtnStyle(idx),
+                ...getQuestionBtnStyle(sq.id),
                 width: "100%",
                 aspectRatio: "1",
                 borderRadius: "50%",
@@ -1229,12 +1309,12 @@ export default function StudentCBTAttempt() {
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
           {/* Section tabs */}
-          {testMeta.sections.length > 1 && (
+          {sections.length > 1 && (
             <div style={{ background: "#e5e7eb", borderBottom: "1px solid #d1d5db", display: "flex", overflowX: "auto", flexShrink: 0 }}>
-              {testMeta.sections.map((section) => (
+              {sections.map((section) => (
                 <button
                   key={section.id}
-                  onClick={() => setCurrentSectionId(section.id)}
+                  onClick={() => switchSection(section.id)}
                   style={{
                     padding: "7px 16px",
                     fontSize: 13,
@@ -1257,7 +1337,7 @@ export default function StudentCBTAttempt() {
           <div style={{ flex: 1, overflowY: "auto", padding: "0" }}>
             {/* Question header bar */}
             <div style={{ background: "#dbeafe", borderBottom: "1px solid #bfdbfe", padding: "6px 14px", fontSize: 13, fontWeight: 700, color: "#1e3a8a", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-              <span>Question {currentIndex + 1}:</span>
+              <span>Question {currentSectionIndex + 1}:</span>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 11, fontWeight: 400, color: "#3b82f6" }}>
                   {saving ? "⬆ Saving…" : lastSavedAt ? "✓ Saved" : "Ready"}
@@ -1396,14 +1476,39 @@ export default function StudentCBTAttempt() {
           <div style={{ flexShrink: 0, borderTop: "1px solid #e5e7eb", background: "#fff", padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div style={{ display: "flex", gap: 6 }}>
               <button
-                onClick={() => goToIndex(currentIndex - 1)}
+                onClick={() => {
+                  if (currentSectionIndex > 0) {
+                    goToSectionIndex(currentSectionIndex - 1);
+                  } else {
+                    // Try to go to previous section
+                    const currentSectionIdx = sections.findIndex(s => s.id === currentSectionId);
+                    if (currentSectionIdx > 0) {
+                      const prevSection = sections[currentSectionIdx - 1];
+                      setCurrentSectionId(prevSection.id);
+                      // Go to last question of previous section
+                      const prevSectionQs = questions.filter(q => (q.sectionId || "main") === prevSection.id);
+                      const globalIdx = questions.findIndex(q => q.id === prevSectionQs[prevSectionQs.length - 1]?.id);
+                      if (globalIdx >= 0) goToIndex(globalIdx);
+                    }
+                  }
+                }}
                 disabled={currentIndex === 0}
                 style={{ background: currentIndex === 0 ? "#e5e7eb" : "#fff", color: currentIndex === 0 ? "#9ca3af" : "#374151", border: "1.5px solid #d1d5db", borderRadius: 4, padding: "6px 16px", fontSize: 12, fontWeight: 700, cursor: currentIndex === 0 ? "not-allowed" : "pointer" }}
               >
                 &lt;&lt; BACK
               </button>
               <button
-                onClick={() => goToIndex(currentIndex + 1)}
+                onClick={() => {
+                  if (currentSectionIndex < sectionQuestions.length - 1) {
+                    goToSectionIndex(currentSectionIndex + 1);
+                  } else {
+                    // Try to go to next section
+                    const currentSectionIdx = sections.findIndex(s => s.id === currentSectionId);
+                    if (currentSectionIdx >= 0 && currentSectionIdx < sections.length - 1) {
+                      switchSection(sections[currentSectionIdx + 1].id);
+                    }
+                  }
+                }}
                 disabled={currentIndex === questions.length - 1}
                 style={{ background: currentIndex === questions.length - 1 ? "#e5e7eb" : "#fff", color: currentIndex === questions.length - 1 ? "#9ca3af" : "#374151", border: "1.5px solid #d1d5db", borderRadius: 4, padding: "6px 16px", fontSize: 12, fontWeight: 700, cursor: currentIndex === questions.length - 1 ? "not-allowed" : "pointer" }}
               >
