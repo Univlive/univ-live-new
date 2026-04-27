@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { FileText, Target, Trophy, TrendingUp, Play, ArrowRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,12 +26,13 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   limit,
-  onSnapshot,
   orderBy,
   query,
   where,
 } from "firebase/firestore";
+import { useQuery } from "@tanstack/react-query";
 
 type AttemptStatus = "in-progress" | "completed" | "expired";
 
@@ -94,173 +95,128 @@ function normalizeStatus(raw: any): AttemptStatus {
   return "completed";
 }
 
+function mapAttemptRow(id: string, a: any): AttemptRow {
+  const score = safeNum(a?.score, 0);
+  const maxScore = safeNum(a?.maxScore, 0);
+
+  const accuracy =
+    a?.accuracy != null
+      ? (() => {
+          const n = Number(a.accuracy);
+          const pct =
+            Number.isFinite(n)
+              ? n <= 1.01
+                ? n * 100
+                : n
+              : accuracyFrom(score, maxScore);
+          return Math.max(0, Math.min(100, Math.round(pct)));
+        })()
+      : accuracyFrom(score, maxScore);
+
+  const createdAtMs = toMillis(a?.createdAt);
+  const startedAtMs = toMillis(a?.startedAt || a?.createdAt);
+  const submittedAtMs = a?.submittedAt ? toMillis(a?.submittedAt) : undefined;
+
+  const computedSeconds =
+    submittedAtMs != null ? Math.max(0, Math.round((submittedAtMs - startedAtMs) / 1000)) : 0;
+
+  const timeSpent = safeNum(a?.timeSpent, computedSeconds);
+  const status = normalizeStatus(a?.status);
+
+  return {
+    id,
+    testId: String(a?.testId || a?.testSeriesId || ""),
+    testTitle: String(a?.testTitle || "Test"),
+    subject: String(a?.subject || "General Test"),
+    status,
+    score,
+    maxScore,
+    accuracy,
+    timeSpent,
+    rank: 0,
+    totalParticipants: 0,
+    createdAt: new Date(createdAtMs).toISOString(),
+  };
+}
+
 export default function StudentDashboard() {
   const { firebaseUser, profile, loading: authLoading } = useAuth();
   const { tenant, loading: tenantLoading } = useTenant();
 
   const educatorId = tenant?.educatorId || profile?.educatorId || null;
 
-  const [userDoc, setUserDoc] = useState<UserDoc | null>(null);
-  const [attempts, setAttempts] = useState<AttemptRow[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const [rank, setRank] = useState<number | null>(null);
-  const [totalParticipants, setTotalParticipants] = useState<number>(0);
-
   const canLoad = useMemo(() => {
     return !authLoading && !tenantLoading && !!firebaseUser?.uid && !!educatorId;
   }, [authLoading, tenantLoading, firebaseUser?.uid, educatorId]);
 
-  // 1) Load user profile (users/{uid})
-  useEffect(() => {
-    let mounted = true;
+  // 1) Load user profile via useQuery
+  const { data: userDoc = null } = useQuery({
+    queryKey: ["studentUserDoc", firebaseUser?.uid],
+    queryFn: async () => {
+      const snap = await getDoc(doc(db, "users", firebaseUser!.uid));
+      return snap.exists() ? (snap.data() as UserDoc) : null;
+    },
+    enabled: !!firebaseUser?.uid,
+    staleTime: 2 * 60 * 1000,
+  });
 
-    async function loadUser() {
-      if (!firebaseUser?.uid) return;
-      try {
-        const snap = await getDoc(doc(db, "users", firebaseUser.uid));
-        const data = (snap.exists() ? (snap.data() as UserDoc) : null) as any;
-        if (!mounted) return;
-        setUserDoc(data);
-      } catch (e) {
-        console.error(e);
-      }
-    }
+  // 2) Fetch attempts via useQuery (cached)
+  const { data: attempts = [], isLoading: attemptsLoading } = useQuery({
+    queryKey: ["studentDashboardAttempts", firebaseUser?.uid, educatorId],
+    queryFn: async () => {
+      const qAttempts = query(
+        collection(db, "attempts"),
+        where("studentId", "==", firebaseUser!.uid),
+        where("educatorId", "==", educatorId!),
+        orderBy("createdAt", "desc"),
+        limit(50)
+      );
+      const snap = await getDocs(qAttempts);
+      return snap.docs.map((d) => mapAttemptRow(d.id, d.data()));
+    },
+    enabled: canLoad,
+    staleTime: 60 * 1000,
+  });
 
-    loadUser();
-    return () => {
-      mounted = false;
-    };
-  }, [firebaseUser?.uid]);
+  // 3) Compute rank via useQuery (cached)
+  const { data: rankData = { rank: null as number | null, totalParticipants: 0 } } = useQuery({
+    queryKey: ["studentRank", firebaseUser?.uid, educatorId],
+    queryFn: async () => {
+      const qTop = query(
+        collection(db, "attempts"),
+        where("educatorId", "==", educatorId!),
+        where("status", "in", ["completed", "submitted", "finished", "done"]),
+        orderBy("score", "desc"),
+        limit(300)
+      );
+      const snap = await getDocs(qTop);
+      const best: Record<string, number> = {};
 
-  // 2) Live attempts for this student+educator
-  useEffect(() => {
-    if (!canLoad) {
-      setLoading(authLoading || tenantLoading);
-      return;
-    }
+      snap.docs.forEach((d) => {
+        const a = d.data() as any;
+        const sid = String(a?.studentId || "");
+        if (!sid) return;
+        const sc = safeNum(a?.score, 0);
+        best[sid] = Math.max(best[sid] || 0, sc);
+      });
 
-    setLoading(true);
+      const sorted = Object.entries(best)
+        .sort((a, b) => b[1] - a[1])
+        .map(([studentId]) => studentId);
 
-    const qAttempts = query(
-      collection(db, "attempts"),
-      where("studentId", "==", firebaseUser!.uid),
-      where("educatorId", "==", educatorId!),
-      orderBy("createdAt", "desc"),
-      limit(50)
-    );
+      const idx = sorted.findIndex((id) => id === firebaseUser!.uid);
+      return {
+        rank: idx >= 0 ? idx + 1 : null,
+        totalParticipants: sorted.length,
+      };
+    },
+    enabled: canLoad,
+    staleTime: 2 * 60 * 1000, // rank is fresh for 2 minutes
+  });
 
-    const unsub = onSnapshot(
-      qAttempts,
-      (snap) => {
-        const rows: AttemptRow[] = snap.docs.map((d) => {
-          const a = d.data() as any;
-
-          const score = safeNum(a?.score, 0);
-          const maxScore = safeNum(a?.maxScore, 0);
-
-          const accuracy =
-            a?.accuracy != null
-              ? (() => {
-                  const n = Number(a.accuracy);
-                  const pct =
-                    Number.isFinite(n)
-                      ? n <= 1.01
-                        ? n * 100
-                        : n
-                      : accuracyFrom(score, maxScore);
-                  return Math.max(0, Math.min(100, Math.round(pct)));
-                })()
-              : accuracyFrom(score, maxScore);
-
-          const createdAtMs = toMillis(a?.createdAt);
-          const startedAtMs = toMillis(a?.startedAt || a?.createdAt);
-          const submittedAtMs = a?.submittedAt ? toMillis(a?.submittedAt) : undefined;
-
-          // prefer stored timeSpent; else compute
-          const computedSeconds =
-            submittedAtMs != null ? Math.max(0, Math.round((submittedAtMs - startedAtMs) / 1000)) : 0;
-
-          const timeSpent = safeNum(a?.timeSpent, computedSeconds);
-
-          const status = normalizeStatus(a?.status);
-
-          return {
-            id: d.id,
-            testId: String(a?.testId || a?.testSeriesId || ""),
-            testTitle: String(a?.testTitle || "Test"),
-            subject: String(a?.subject || "General Test"),
-            status,
-
-            score,
-            maxScore,
-            accuracy,
-            timeSpent,
-
-            // we’ll set these later after rank calculation (safe defaults)
-            rank: 0,
-            totalParticipants: 0,
-
-            createdAt: new Date(createdAtMs).toISOString(),
-          };
-        });
-
-        setAttempts(rows);
-        setLoading(false);
-      },
-      (err) => {
-        console.error(err);
-        toast.error("Failed to load dashboard data.");
-        setAttempts([]);
-        setLoading(false);
-      }
-    );
-
-    return () => unsub();
-  }, [canLoad, authLoading, tenantLoading, firebaseUser, educatorId]);
-
-  // 3) Compute rank (best-effort)
-  useEffect(() => {
-    if (!canLoad) return;
-
-    const qTop = query(
-      collection(db, "attempts"),
-      where("educatorId", "==", educatorId!),
-      where("status", "in", ["completed", "submitted", "finished", "done"]), // handle older values
-      orderBy("score", "desc"),
-      limit(300)
-    );
-
-    const unsub = onSnapshot(
-      qTop,
-      (snap) => {
-        const best: Record<string, number> = {};
-
-        snap.docs.forEach((d) => {
-          const a = d.data() as any;
-          const sid = String(a?.studentId || "");
-          if (!sid) return;
-          const sc = safeNum(a?.score, 0);
-          best[sid] = Math.max(best[sid] || 0, sc);
-        });
-
-        const sorted = Object.entries(best)
-          .sort((a, b) => b[1] - a[1])
-          .map(([studentId]) => studentId);
-
-        const idx = sorted.findIndex((id) => id === firebaseUser!.uid);
-        setRank(idx >= 0 ? idx + 1 : null);
-        setTotalParticipants(sorted.length);
-      },
-      (err) => {
-        console.error(err);
-        setRank(null);
-        setTotalParticipants(0);
-      }
-    );
-
-    return () => unsub();
-  }, [canLoad, educatorId, firebaseUser]);
+  const loading = attemptsLoading;
+  const rank = rankData.rank;
+  const totalParticipants = rankData.totalParticipants;
 
   // attach rank/participants to attempts (so AttemptTable can show safely)
   const attemptsWithRank = useMemo(() => {

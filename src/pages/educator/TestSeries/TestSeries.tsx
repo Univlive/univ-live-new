@@ -64,6 +64,7 @@ import { uploadToImageKit } from "@/lib/imagekitUpload";
 import CreateCustomTest from "./CreateCustomTest";
 import CreateEducatorTemplate from "./CreateEducatorTemplate";
 import NewFolderButton from "./NewFolder";
+import ScheduleTest from "./ScheduleTest";
 
 // Firebase
 import { onAuthStateChanged } from "firebase/auth";
@@ -191,6 +192,10 @@ export default function TestSeries() {
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [moveTestOpen, setMoveTestOpen] = useState(false);
   const [testToMove, setTestToMove] = useState<any>(null);
+
+  // Scheduling state
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [testToSchedule, setTestToSchedule] = useState<any>(null);
 
   // Auth + Data
   useEffect(() => {

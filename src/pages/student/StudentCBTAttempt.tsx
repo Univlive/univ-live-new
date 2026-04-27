@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle, Save, LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
@@ -10,6 +11,7 @@ import { HtmlView } from "@/lib/safeHtml";
 import { useAuth } from "@/contexts/AuthProvider";
 import { useTenant } from "@/contexts/TenantProvider";
 import { db } from "@/lib/firebase";
+import { logError } from "@/lib/errorLogger";
 import {
   Sheet,
   SheetContent,
@@ -158,6 +160,7 @@ async function exitFullscreenSafe() {
 export default function StudentCBTAttempt() {
   const { testId } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const { firebaseUser, profile, loading: authLoading } = useAuth();
   const { tenant, tenantSlug, loading: tenantLoading } = useTenant();
@@ -222,6 +225,7 @@ export default function StudentCBTAttempt() {
           setLastSavedAt(Date.now());
         } catch (e) {
           console.error(e);
+          logError(e, "cbt:save-progress");
           toast.error("Failed to save progress");
         } finally {
           setSaving(false);
@@ -359,12 +363,14 @@ export default function StudentCBTAttempt() {
       try {
         let meta: TestMeta | null = null;
         let qs: AttemptQuestion[] = [];
+        let localTestData: any = null;
 
         const educatorTestRef = doc(db, "educators", educatorId, "my_tests", testId);
         const educatorTestSnap = await getDoc(educatorTestRef);
 
         if (educatorTestSnap.exists()) {
-          const localTest = educatorTestSnap.data() as any;
+          localTestData = educatorTestSnap.data();
+          const localTest = localTestData as any;
           const linkedAdminTestId = String(localTest?.linkedAdminTestId || localTest?.originalTestId || "").trim();
           const isAdminLinked =
             localTest?.originSource === "admin" ||
@@ -397,6 +403,7 @@ export default function StudentCBTAttempt() {
                 ? resolvedTest.sections
                 : computedSections,
           };
+          (meta as any).price = safeNumber(resolvedTest?.price || localTest?.price, 0);
 
           const qSnap = await getDocs(questionSource);
           qs = qSnap.docs
@@ -422,6 +429,7 @@ export default function StudentCBTAttempt() {
                   ? globalTest.sections
                   : computedSections,
             };
+            (meta as any).price = safeNumber(globalTest?.price, 0);
 
             const qSnap = await getDocs(collection(db, "test_series", testId, "questions"));
             qs = qSnap.docs
@@ -432,6 +440,28 @@ export default function StudentCBTAttempt() {
         }
 
         if (!meta) throw new Error("Test not found");
+
+        // --- SECURITY CHECK ---
+        const unlockId = `${firebaseUser.uid}__${educatorId}__${testId}`;
+        const unlockSnap = await getDoc(doc(db, "testUnlocks", unlockId));
+        let isUnlocked = unlockSnap.exists();
+        if (unlockSnap.exists()) {
+          const ud = unlockSnap.data() as any;
+          if (ud.windowExpiresAt && ud.windowExpiresAt.toMillis() < Date.now()) {
+            isUnlocked = false;
+          }
+        }
+
+        const startTime = localTestData?.startTime ? (typeof localTestData.startTime.toMillis === "function" ? localTestData.startTime.toMillis() : localTestData.startTime) : null;
+        const endTime = localTestData?.endTime ? (typeof localTestData.endTime.toMillis === "function" ? localTestData.endTime.toMillis() : localTestData.endTime) : null;
+        const isLive = startTime && endTime && Date.now() >= startTime && Date.now() <= endTime;
+        const isFree = (meta as any).price <= 0;
+
+        if (!isUnlocked && !isLive && !isFree) {
+          throw new Error("This test is locked. Please unlock it from the test details page.");
+        }
+        // ----------------------
+
         if (!qs.length) throw new Error("No questions found in this test");
 
         if (!mounted) return;
@@ -550,6 +580,7 @@ export default function StudentCBTAttempt() {
         }
       } catch (e: any) {
         console.error(e);
+        logError(e, "cbt:load-test");
         if (!mounted) return;
         setLoadError(e?.message || "Failed to load test");
       } finally {
@@ -712,6 +743,7 @@ export default function StudentCBTAttempt() {
       setStartDialogOpen(false);
     } catch (e) {
       console.error(e);
+      logError(e, "cbt:start-test");
       toast.error("Failed to start test");
     }
   };
@@ -932,9 +964,15 @@ export default function StudentCBTAttempt() {
       localStorage.removeItem(attemptIdStorageKey);
       await exitFullscreenSafe();
 
+      // Invalidate cached attempt counts & dashboard so they refresh immediately
+      queryClient.invalidateQueries({ queryKey: ["studentAttemptCounts"] });
+      queryClient.invalidateQueries({ queryKey: ["studentDashboardAttempts"] });
+      queryClient.invalidateQueries({ queryKey: ["studentRank"] });
+
       navigate(`/student/results/${attemptId}?fromTest=true${isAutoSubmit ? "&auto=1" : ""}`);
     } catch (e) {
       console.error(e);
+      logError(e, "cbt:submit-test");
       toast.error("Failed to submit test");
     } finally {
       setSaving(false);
@@ -1304,6 +1342,14 @@ export default function StudentCBTAttempt() {
                 <span style={{ fontSize: 11, fontWeight: 400, color: "#3b82f6" }}>
                   {saving ? "⬆ Saving…" : lastSavedAt ? "✓ Saved" : "Ready"}
                 </span>
+                <button
+                  onClick={() => setSubmitDialogOpen(true)}
+                  disabled={!isStarted}
+                  className="mobile-submit-btn"
+                  style={{ display: "none", background: isStarted ? "#22c55e" : "#9ca3af", color: "#fff", border: "none", borderRadius: 4, padding: "4px 12px", fontSize: 12, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed" }}
+                >
+                  SUBMIT
+                </button>
                 {!isStarted && (
                   <button
                     onClick={handleStart}
@@ -1473,6 +1519,7 @@ export default function StudentCBTAttempt() {
             <button
               onClick={() => setSubmitDialogOpen(true)}
               disabled={!isStarted}
+              className="bottom-submit-btn"
               style={{ background: isStarted ? "#22c55e" : "#9ca3af", color: "#fff", border: "none", borderRadius: 4, padding: "7px 22px", fontSize: 13, fontWeight: 700, cursor: isStarted ? "pointer" : "not-allowed" }}
             >
               SUBMIT

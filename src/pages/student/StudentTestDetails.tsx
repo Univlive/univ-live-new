@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthProvider";
 import { useTenant } from "@/contexts/TenantProvider";
 import { db } from "@/lib/firebase";
+import { logError } from "@/lib/errorLogger";
 import {
   Timestamp,
   collection,
@@ -44,6 +45,8 @@ type Test = {
   sections: { id: string; name: string; questionsCount: number }[];
   syllabus: string[];
   markingScheme: { correct: number; incorrect: number; unanswered: number };
+  startTime?: number | null;
+  endTime?: number | null;
 };
 
 type AttemptRow = {
@@ -72,6 +75,7 @@ function toMillis(v: any): number {
   if (typeof v === "number") return v;
   if (typeof v?.toMillis === "function") return v.toMillis();
   if (typeof v?.seconds === "number") return v.seconds * 1000;
+  if (v instanceof Date) return v.getTime();
   return Date.now();
 }
 function accuracyFrom(score: number, maxScore: number) {
@@ -111,6 +115,7 @@ export default function StudentTestDetails() {
   const [unlockWindowExpiresAt, setUnlockWindowExpiresAt] = useState<number | null>(null);
   const [windowTimeLeft, setWindowTimeLeft] = useState<number | null>(null);
   const [attempts, setAttempts] = useState<AttemptRow[]>([]);
+  const [currentTime, setCurrentTime] = useState(Date.now());
 
   // unlock dialog
   const [unlockDialogOpen, setUnlockDialogOpen] = useState(false);
@@ -120,6 +125,12 @@ export default function StudentTestDetails() {
   const canLoad = useMemo(() => {
     return !authLoading && !tenantLoading && !!firebaseUser?.uid && !!educatorId && !!testId;
   }, [authLoading, tenantLoading, firebaseUser?.uid, educatorId, testId]);
+
+  // Tick for live updates
+  useEffect(() => {
+    const id = setInterval(() => setCurrentTime(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // 1) Load test (educator path first, fallback to test_series)
   useEffect(() => {
@@ -135,10 +146,12 @@ export default function StudentTestDetails() {
 
       try {
         let data: TestDoc | null = null;
+        let localTestData: any = null;
 
         const educatorTestSnap = await getDoc(doc(db, "educators", educatorId!, "my_tests", testId!));
         if (educatorTestSnap.exists()) {
-          const localTest = educatorTestSnap.data() as any;
+          localTestData = educatorTestSnap.data();
+          const localTest = localTestData as any;
           const linkedAdminTestId = String(localTest?.linkedAdminTestId || localTest?.originalTestId || "").trim();
           const isAdminLinked =
             localTest?.originSource === "admin" ||
@@ -201,6 +214,10 @@ export default function StudentTestDetails() {
 
         const syllabus = Array.isArray(data?.syllabus) ? data.syllabus.map(String) : [];
 
+        // Schedule comes from the educator's specific test doc, even if linked to admin
+        const startTime = localTestData?.startTime ? toMillis(localTestData.startTime) : null;
+        const endTime = localTestData?.endTime ? toMillis(localTestData.endTime) : null;
+
         if (!mounted) return;
 
         setTest({
@@ -215,11 +232,14 @@ export default function StudentTestDetails() {
           sections,
           syllabus,
           markingScheme,
+          startTime,
+          endTime,
         });
 
         setLoading(false);
       } catch (e: any) {
         console.error(e);
+        logError(e, "test-details:load");
         if (!mounted) return;
         setTest(null);
         setLoading(false);
@@ -267,11 +287,9 @@ export default function StudentTestDetails() {
   // 2b) Live countdown for access window
   useEffect(() => {
     if (!unlockWindowExpiresAt) { setWindowTimeLeft(null); return; }
-    const tick = () => setWindowTimeLeft(Math.max(0, unlockWindowExpiresAt - Date.now()));
+    const tick = () => setWindowTimeLeft(Math.max(0, unlockWindowExpiresAt - currentTime));
     tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [unlockWindowExpiresAt]);
+  }, [unlockWindowExpiresAt, currentTime]);
 
   // 3) Listen attempts for this test
   useEffect(() => {
@@ -318,13 +336,19 @@ export default function StudentTestDetails() {
     return () => unsub();
   }, [canLoad, firebaseUser, educatorId, testId]);
 
+  const isLive = useMemo(() => {
+    if (!test?.startTime || !test?.endTime) return false;
+    return currentTime >= test.startTime && currentTime <= test.endTime;
+  }, [test, currentTime]);
+
   const isLocked = useMemo(() => {
     if (!test) return true;
+    if (isLive) return false; // Scheduled live tests are always unlocked for enrolled students
     if (test.price <= 0) return false;
     if (!unlocked) return true;
-    if (unlockWindowExpiresAt !== null && Date.now() > unlockWindowExpiresAt) return true;
+    if (unlockWindowExpiresAt !== null && currentTime > unlockWindowExpiresAt) return true;
     return false;
-  }, [test, unlocked, unlockWindowExpiresAt]);
+  }, [test, unlocked, unlockWindowExpiresAt, isLive, currentTime]);
 
   const attemptsUsed = attempts.length;
   const attemptsLeft = test ? Math.max(0, test.attemptsAllowed - attemptsUsed) : 0;
@@ -437,6 +461,8 @@ export default function StudentTestDetails() {
     );
   }
 
+  const isUpcoming = test.startTime && currentTime < test.startTime;
+
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
       <Button variant="ghost" asChild>
@@ -446,11 +472,23 @@ export default function StudentTestDetails() {
         </Link>
       </Button>
 
-      <Card className="card-soft border-0 bg-pastel-mint">
+      <Card className={cn("card-soft border-0", isLive ? "bg-red-50 dark:bg-red-900/10 border-2 border-red-500/20" : "bg-pastel-mint")}>
         <CardContent className="p-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <Badge className="mb-2">{test.subject}</Badge>
+              <div className="flex items-center gap-2 mb-2">
+                <Badge>{test.subject}</Badge>
+                {isLive && (
+                  <Badge variant="destructive" className="animate-pulse flex items-center gap-1">
+                    <div className="h-1.5 w-1.5 rounded-full bg-white" /> LIVE NOW
+                  </Badge>
+                )}
+                {isUpcoming && (
+                  <Badge variant="outline" className="text-amber-600 border-amber-600/20 bg-amber-50 dark:bg-amber-900/10">
+                    <Clock className="h-3 w-3 mr-1" /> UPCOMING
+                  </Badge>
+                )}
+              </div>
               <h1 className="text-2xl font-bold">{test.title}</h1>
 
               <div className="flex flex-wrap gap-4 mt-3 text-sm text-muted-foreground">
@@ -468,6 +506,12 @@ export default function StudentTestDetails() {
                 </span>
               </div>
 
+              {test.startTime && (
+                <div className="mt-3 text-xs font-medium text-muted-foreground">
+                  Schedule: {new Date(test.startTime).toLocaleString()} - {new Date(test.endTime!).toLocaleTimeString()}
+                </div>
+              )}
+
               <div className="mt-3 text-xs text-muted-foreground">
                 Attempts: <span className="font-medium">{attemptsUsed}</span>/<span className="font-medium">{test.attemptsAllowed}</span>{" "}
                 {attemptsLeft > 0 ? (
@@ -478,32 +522,47 @@ export default function StudentTestDetails() {
               </div>
             </div>
 
-            {isLocked ? (
-              <Button className="gradient-bg rounded-xl" onClick={openUnlock}>
-                <Lock className="h-4 w-4 mr-2" />
-                Unlock (₹{test.price})
-              </Button>
-            ) : (
-              <div className="flex flex-col items-end gap-2">
-                <Button
-                  className={cn("gradient-bg rounded-xl", attemptsLeft <= 0 && "opacity-60")}
-                  onClick={startTest}
-                  disabled={attemptsLeft <= 0}
-                >
-                  <Play className="h-4 w-4 mr-2" />
-                  Start Test
+            <div className="flex flex-col items-end gap-2">
+              {isUpcoming && !unlocked && test.price > 0 ? (
+                <div className="text-right">
+                  <p className="text-xs text-muted-foreground mb-2">Wait for live time or unlock now</p>
+                  <Button className="gradient-bg rounded-xl" onClick={openUnlock}>
+                    <Lock className="h-4 w-4 mr-2" />
+                    Unlock (₹{test.price})
+                  </Button>
+                </div>
+              ) : isLocked ? (
+                <Button className="gradient-bg rounded-xl" onClick={openUnlock}>
+                  <Lock className="h-4 w-4 mr-2" />
+                  Unlock (₹{test.price})
                 </Button>
-                {windowTimeLeft !== null && (
-                  <span className={cn(
-                    "flex items-center gap-1 text-xs font-medium",
-                    windowTimeLeft < 5 * 60 * 1000 ? "text-red-600" : "text-amber-600"
-                  )}>
-                    <Timer className="h-3 w-3" />
-                    Access expires in {windowTimeLeft <= 0 ? "—" : formatWindowTime(windowTimeLeft)}
-                  </span>
-                )}
-              </div>
-            )}
+              ) : (
+                <div className="flex flex-col items-end gap-2">
+                  <Button
+                    className={cn("gradient-bg rounded-xl", (attemptsLeft <= 0 || isUpcoming) && "opacity-60")}
+                    onClick={startTest}
+                    disabled={attemptsLeft <= 0 || isUpcoming}
+                  >
+                    {isUpcoming ? <Clock className="h-4 w-4 mr-2" /> : <Play className="h-4 w-4 mr-2" />}
+                    {isUpcoming ? "Starts Soon" : "Start Test"}
+                  </Button>
+                  {windowTimeLeft !== null && (
+                    <span className={cn(
+                      "flex items-center gap-1 text-xs font-medium",
+                      windowTimeLeft < 5 * 60 * 1000 ? "text-red-600" : "text-amber-600"
+                    )}>
+                      <Timer className="h-3 w-3" />
+                      Access expires in {windowTimeLeft <= 0 ? "—" : formatWindowTime(windowTimeLeft)}
+                    </span>
+                  )}
+                  {isLive && (
+                    <span className="text-[10px] text-red-500 font-bold uppercase tracking-tighter">
+                      Unlocked via Schedule
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>

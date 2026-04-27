@@ -6,6 +6,7 @@ import {
 } from "@google/generative-ai";
 import { initializeStreaming, sendStreamEvent, endStreaming, streamError, getUserFriendlyErrorMessage } from "../_lib/aiStreamingUtils.js";
 import { getGeminiModelNameFromEnv } from "../_lib/geminiModel.js";
+import { notifyDiscord } from "../_lib/discordLogger.js";
 
 // ---------------------------------------------------------------------------
 // Request type (from frontend WebsiteSettings.tsx)
@@ -319,6 +320,7 @@ export default async function handler(
     endStreaming(res);
   } catch (error) {
     console.error("[generate-website-content] Unhandled error:", error);
+    await notifyDiscord(error, req, "generate-website-content");
     try {
       streamError(res, error);
     } catch (streamErr) {

@@ -11,6 +11,7 @@ import { db } from "@/lib/firebase";
 import {
   collection,
   doc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
@@ -21,6 +22,7 @@ import {
 import { TestCard } from "@/components/student/TestCard";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { useQuery } from "@tanstack/react-query";
 
 export default function StudentTests() {
   const nav = useNavigate();
@@ -31,9 +33,7 @@ export default function StudentTests() {
     const [seatActive, setSeatActive] = useState(false);
   const [billingLoading, setBillingLoading] = useState(true);
 
-  const [tests, setTests] = useState<any[]>([]);
   const [unlockedIds, setUnlockedIds] = useState<Map<string, number | null>>(new Map());
-  const [attemptCounts, setAttemptCounts] = useState<Record<string, number>>({});
   const [search, setSearch] = useState("");
 
   useEffect(() => {
@@ -62,7 +62,7 @@ export default function StudentTests() {
     })();
   }, [firebaseUser, tenantSlug, isTenantDomain]);
 
-  // Subscribe to billing access (subscription + seat)
+  // Subscribe to billing access (subscription + seat) — kept as onSnapshot for real-time gating
   useEffect(() => {
     if (!firebaseUser?.uid || !educatorId) {
       setBillingLoading(false);
@@ -85,22 +85,19 @@ export default function StudentTests() {
   const enrolledHere = tenantSlug ? enrolledTenants.includes(tenantSlug) : false;
   const allowed = enrolledHere && seatActive;
 
-  // Load tests (only if allowed)
-  useEffect(() => {
-    if (!allowed || !educatorId) {
-      setTests([]);
-      return;
-    }
+  // Load tests via useQuery (cached, no real-time listener needed)
+  const { data: tests = [] } = useQuery({
+    queryKey: ["studentTests", educatorId],
+    queryFn: async () => {
+      const qTests = query(collection(db, "educators", educatorId, "my_tests"), orderBy("createdAt", "desc"));
+      const snap = await getDocs(qTests);
+      return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+    },
+    enabled: allowed && !!educatorId,
+    staleTime: 2 * 60 * 1000, // tests list is fresh for 2 minutes
+  });
 
-    const qTests = query(collection(db, "educators", educatorId, "my_tests"), orderBy("createdAt", "desc"));
-    const unsub = onSnapshot(qTests, (snap) => {
-      setTests(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
-    });
-
-    return () => unsub();
-  }, [allowed, educatorId]);
-
-  // Load unlocked tests (optional feature you already had)
+  // Load unlocked tests — kept as onSnapshot because window expiry needs real-time checks
   useEffect(() => {
     if (!firebaseUser?.uid || !educatorId) return;
 
@@ -136,18 +133,17 @@ export default function StudentTests() {
     return () => unsub();
   }, [firebaseUser?.uid, educatorId]);
 
-  // Fetch student attempt counts for this educator
-  useEffect(() => {
-    if (!firebaseUser?.uid || !educatorId) return;
-
-    const qAttempts = query(
-      collection(db, "attempts"),
-      where("studentId", "==", firebaseUser.uid),
-      where("educatorId", "==", educatorId),
-      where("status", "==", "submitted")
-    );
-
-    const unsub = onSnapshot(qAttempts, (snap) => {
+  // Fetch student attempt counts via useQuery (cached, no real-time listener needed)
+  const { data: attemptCounts = {} } = useQuery({
+    queryKey: ["studentAttemptCounts", firebaseUser?.uid, educatorId],
+    queryFn: async () => {
+      const qAttempts = query(
+        collection(db, "attempts"),
+        where("studentId", "==", firebaseUser!.uid),
+        where("educatorId", "==", educatorId),
+        where("status", "==", "submitted")
+      );
+      const snap = await getDocs(qAttempts);
       const counts: Record<string, number> = {};
       snap.docs.forEach((d) => {
         const a = d.data();
@@ -156,11 +152,11 @@ export default function StudentTests() {
           counts[tid] = (counts[tid] || 0) + 1;
         }
       });
-      setAttemptCounts(counts);
-    });
-
-    return () => unsub();
-  }, [firebaseUser?.uid, educatorId]);
+      return counts;
+    },
+    enabled: !!firebaseUser?.uid && !!educatorId,
+    staleTime: 60 * 1000,
+  });
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -400,11 +396,17 @@ export default function StudentTests() {
                     const unlockEntry = unlockedIds.get(t.id);
                     const windowValid = unlockEntry !== undefined &&
                       (unlockEntry === null || unlockEntry > now);
-                    const locked = !(t.isPublic === true || windowValid);
+
+                    // Check if test is currently live via schedule
+                    const startTime = t.startTime ? (typeof t.startTime.toMillis === "function" ? t.startTime.toMillis() : t.startTime) : null;
+                    const endTime = t.endTime ? (typeof t.endTime.toMillis === "function" ? t.endTime.toMillis() : t.endTime) : null;
+                    const isLive = startTime && endTime && now >= startTime && now <= endTime;
+
+                    const locked = !(t.isPublic === true || windowValid || isLive);
                     return (
                       <TestCard
                         key={t.id}
-                        test={{ ...t, isLocked: locked, windowExpiresAt: unlockEntry ?? null }}
+                        test={{ ...t, isLocked: locked, windowExpiresAt: unlockEntry ?? null, isLive }}
                         attemptsUsed={attemptCounts[t.id] || 0}
                         onView={() => nav(`/student/tests/${t.id}`)}
                         onStart={() => nav(`/student/tests/${t.id}`)}

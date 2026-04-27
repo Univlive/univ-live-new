@@ -150,6 +150,7 @@ export default function AppRoutes() {
           <Route path="templates" element={<AdminTemplates />} />
           <Route path="question-bank" element={<AdminQuestionBank />} />
           <Route path="seat-management" element={<AdminSeatManagement />} />
+          <Route path="educators" element={<AdminEducators />} />
         </Route>
 
           {/* Main Platform Educator Dashboard */}
