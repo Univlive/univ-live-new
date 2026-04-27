@@ -643,6 +643,7 @@ export default function TestSeries() {
       description: String(values.description || ""),
       subject: String(values.subject || ""),
       level: String(values.level || "General"),
+      difficultyLevel: values.difficultyLevel ?? 0.5,
       durationMinutes: Number(values.durationMinutes || 0),
       attemptsAllowed: values.attemptsAllowed || globalAttemptsAllowed,
       source: "custom",
@@ -690,7 +691,7 @@ export default function TestSeries() {
 
     setCreating(true);
     try {
-      await addDoc(collection(db, "educators", currentUser.uid, "my_tests"), payload);
+      await addDoc(collection(db, "educators", currentUser.uid, "my_tests"), pruneUndefined(payload));
 
       toast.success("Test created");
       setCreateOpen(false);

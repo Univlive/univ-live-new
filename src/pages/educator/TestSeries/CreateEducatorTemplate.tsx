@@ -30,12 +30,7 @@ type Section = {
   id: string;
   name: string;
   questionsCount: number;
-  questionsToAttempt?: number | null;
-  attemptConstraints?: {
-    min: number;
-    max: number;
-  } | null;
-  selectionRule?: "UPTO" | "EXACT" | null;
+  attemptlimit?: number | null;
   durationMinutes?: number | null;
   markingScheme?: {
     correct: number;
@@ -50,7 +45,7 @@ type CreateEducatorTemplateProps = {
 };
 
 export default function CreateEducatorTemplate({ open: controlledOpen, onOpenChange: controlledOnOpenChange }: CreateEducatorTemplateProps = {}) {
-  const { currentUser } = useAuth();
+  const { firebaseUser: currentUser } = useAuth();
   const [internalOpen, setInternalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -59,7 +54,6 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
   const setOpen = controlledOnOpenChange || setInternalOpen;
 
   const [label, setLabel] = useState("");
-  const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [subject, setSubject] = useState("");
   const [difficultyLevel, setDifficultyLevel] = useState<number>(0.5);
@@ -73,11 +67,11 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
   });
 
   const [sections, setSections] = useState<Section[]>([
-    { id: "sec_1", name: "Section 1", questionsCount: 0 }
+    { id: "sec_1", name: "Section 1", questionsCount: 0, attemptlimit: null }
   ]);
 
   const handleAddSection = () => {
-    setSections([...sections, { id: `sec_${Date.now()}`, name: `Section ${sections.length + 1}`, questionsCount: 0, questionsToAttempt: null, attemptConstraints: null, selectionRule: null }]);
+    setSections([...sections, { id: `sec_${Date.now()}`, name: `Section ${sections.length + 1}`, questionsCount: 0, attemptlimit: null }]);
   };
 
   const handleRemoveSection = (index: number) => {
@@ -98,11 +92,6 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
       return;
     }
 
-    if (!title.trim()) {
-      toast.error("Test Title is required");
-      return;
-    }
-
     if (sections.length === 0) {
       toast.error("At least one section is required");
       return;
@@ -113,7 +102,6 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
     try {
       const payload = {
         label: label.trim(),
-        title: title.trim(),
         description: description.trim(),
         subject: subject.trim(),
         level: getDifficultyLabel(difficultyLevel),
@@ -127,19 +115,15 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
         },
         sections: sections.map(s => {
           const totalQ = Number(s.questionsCount) || 0;
-          const ac = s.attemptConstraints;
-          let validatedConstraints = ac;
-          if (ac) {
-            const min = Math.max(0, Math.min(ac.min, totalQ));
-            const max = Math.max(min, Math.min(ac.max, totalQ));
-            validatedConstraints = { min, max };
-          }
+          const attemptLimit =
+            s.attemptlimit == null
+              ? totalQ
+              : Math.min(Number(s.attemptlimit), totalQ);
+
           return {
             name: s.name.trim(),
             questionsCount: totalQ,
-            questionsToAttempt: s.questionsToAttempt ? Number(s.questionsToAttempt) : null,
-            attemptConstraints: validatedConstraints || null,
-            selectionRule: s.selectionRule || null,
+            attemptlimit: attemptLimit,
             durationMinutes: s.durationMinutes ? Number(s.durationMinutes) : null,
             markingScheme: s.markingScheme ? {
               correct: Number(s.markingScheme.correct),
@@ -156,13 +140,12 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
 
       // Reset form
       setLabel("");
-      setTitle("");
       setDescription("");
       setSubject("");
       setDifficultyLevel(0.5);
       setDurationMinutes("60");
       setSyllabusTags([]);
-      setSections([{ id: "sec_1", name: "Section 1", questionsCount: 0, attemptConstraints: null, selectionRule: null }]);
+      setSections([{ id: "sec_1", name: "Section 1", questionsCount: 0, attemptlimit: null }]);
 
       setOpen(false);
     } catch (error) {
@@ -197,11 +180,7 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
             <p className="text-xs text-muted-foreground">This is how the template will appear in the dropdown menu.</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Default Test Title *</Label>
-              <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Mock Test" />
-            </div>
+          <div className="grid grid-cols-1 gap-4">
             <div className="space-y-2">
               <Label>Subject (Optional)</Label>
               <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. Physics" />
@@ -277,12 +256,23 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
                     <Input type="number" value={sec.questionsCount} onChange={(e) => handleSectionChange(index, 'questionsCount', Number(e.target.value))} min={0} />
                   </div>
                   <div className="w-24 space-y-2">
-                    <Label>To Attempt</Label>
-                    <Input type="number" value={sec.questionsToAttempt ?? ""} onChange={(e) => handleSectionChange(index, 'questionsToAttempt', e.target.value ? Number(e.target.value) : null)} min={0} placeholder="All" />
+                    <Label>Attempt Limit</Label>
+                    <Input type="number" value={sec.attemptlimit ?? ""} onChange={(e) => handleSectionChange(index, 'attemptlimit', e.target.value ? Number(e.target.value) : null)} min={0} placeholder="All" />
                   </div>
                   <div className="w-24 space-y-2">
                     <Label>Time (opt)</Label>
                     <Input type="number" value={sec.durationMinutes || ""} onChange={(e) => handleSectionChange(index, 'durationMinutes', e.target.value ? Number(e.target.value) : null)} placeholder="min" />
+                  </div>
+                  <div className="w-24 space-y-2 flex flex-col">
+                    <Label>Custom Marks</Label>
+                    <div className="w-full h-full flex items-center justify-center pt-3 pb-2 ">
+                      <Switch
+                        checked={!!sec.markingScheme}
+                        onCheckedChange={(checked) => {
+                          handleSectionChange(index, 'markingScheme', checked ? { ...markingScheme } : null)
+                        }}
+                      />
+                    </div>
                   </div>
                   {sections.length > 1 && (
                     <Button variant="ghost" size="icon" className="text-destructive mb-0.5" onClick={() => handleRemoveSection(index)}>
@@ -291,87 +281,9 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
                   )}
                 </div>
 
-                {/* Attempt Constraints */}
-                <div className="flex flex-col gap-2 p-2 bg-background rounded-lg border text-xs">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={!!sec.attemptConstraints}
-                      onCheckedChange={(checked) => {
-                        handleSectionChange(index, 'attemptConstraints', checked ? { min: 0, max: Number(sec.questionsCount) || 0 } : null);
-                        if (checked && !sec.selectionRule) {
-                          handleSectionChange(index, 'selectionRule', 'UPTO');
-                        }
-                        if (!checked) {
-                          handleSectionChange(index, 'selectionRule', null);
-                        }
-                      }}
-                    />
-                    <Label className="text-xs">Attempt Constraints</Label>
-                  </div>
-                  {sec.attemptConstraints && (
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <div className="flex items-center gap-1.5">
-                        <Label className="text-[10px]">Min</Label>
-                        <Input
-                          type="number"
-                          className="h-7 w-16 text-xs"
-                          value={sec.attemptConstraints.min}
-                          onChange={(e) => handleSectionChange(index, 'attemptConstraints', {
-                            ...sec.attemptConstraints!,
-                            min: Math.max(0, Number(e.target.value) || 0),
-                          })}
-                          min={0}
-                          max={sec.attemptConstraints.max}
-                        />
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <Label className="text-[10px]">Max</Label>
-                        <Input
-                          type="number"
-                          className="h-7 w-16 text-xs"
-                          value={sec.attemptConstraints.max}
-                          onChange={(e) => handleSectionChange(index, 'attemptConstraints', {
-                            ...sec.attemptConstraints!,
-                            max: Math.min(Number(sec.questionsCount) || 0, Math.max(sec.attemptConstraints!.min, Number(e.target.value) || 0)),
-                          })}
-                          min={sec.attemptConstraints.min}
-                          max={Number(sec.questionsCount) || 0}
-                        />
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <Label className="text-[10px]">Rule</Label>
-                        <Select value={sec.selectionRule || 'UPTO'} onValueChange={(v) => handleSectionChange(index, 'selectionRule', v)}>
-                          <SelectTrigger className="h-7 w-24 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="UPTO">Up to</SelectItem>
-                            <SelectItem value="EXACT">Exactly</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <p className="text-[10px] text-muted-foreground w-full">
-                        Students must attempt {sec.selectionRule === 'EXACT' ? 'exactly' : 'up to'} {sec.attemptConstraints.max} of {Number(sec.questionsCount) || 0} questions
-                        {sec.attemptConstraints.min > 0 ? ` (minimum ${sec.attemptConstraints.min})` : ''}
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-
                 {/* Section Marking Scheme Override */}
-                <div className="flex items-center gap-4 bg-background p-2 rounded-lg border text-xs">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={!!sec.markingScheme}
-                      onCheckedChange={(checked) => {
-                        handleSectionChange(index, 'markingScheme', checked ? { ...markingScheme } : null)
-                      }}
-                    />
-                    <Label className="text-xs">Custom Section Marks</Label>
-                  </div>
-
-                  {sec.markingScheme && (
+                {sec.markingScheme && (
+                  <div className="flex items-center gap-4 bg-background p-2 rounded-lg border text-xs">
                     <div className="flex items-center gap-3">
                       <div className="flex items-center gap-1.5">
                         <Label className="text-xs text-green-600">Correct (+)</Label>
@@ -392,8 +304,8 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
                         />
                       </div>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

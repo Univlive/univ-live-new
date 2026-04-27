@@ -15,7 +15,7 @@ type TestMeta = {
   subject?: string;
   source?: string;
   originSource?: string;
-  sections?: { id: string; name: string }[];
+  sections?: { id: string; name: string; questionsCount?: number | null }[];
   linkedAdminTestId?: string;
   originalTestId?: string;
   isQuestionSourceShared?: boolean;
@@ -56,6 +56,9 @@ export default function ManageQuestionsPage() {
                   .map((section: any, index: number) => ({
                     id: String(section?.id || `sec_${index + 1}`),
                     name: String(section?.name || `Section ${index + 1}`),
+                    questionsCount: Number.isFinite(Number(section?.questionsCount))
+                      ? Number(section.questionsCount)
+                      : null,
                   }))
                   .filter((section) => section.id)
               : [],

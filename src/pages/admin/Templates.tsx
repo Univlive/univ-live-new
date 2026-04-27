@@ -299,10 +299,12 @@ export default function Templates() {
 					<h1 className="text-2xl font-display font-bold">Templates</h1>
 					<p className="text-muted-foreground text-sm">Create and publish test templates available for educators</p>
 				</div>
+
+				{/* Create Template Button Top Right one */}
 				<Button className="gradient-bg text-white" onClick={() => {
 					setTemplateToEdit(null);
 					setModalOpen(true);
-				}}> 
+				}}>
 					<Plus className="h-4 w-4 mr-2" /> Create Template
 				</Button>
 			</div>
@@ -370,7 +372,10 @@ export default function Templates() {
 					title="No templates found"
 					description="Create your first template or adjust filters."
 					actionLabel="Create Template"
-					onAction={() => navigate("/admin/tests/new")}
+					onAction={() => {
+						setTemplateToEdit(null);
+						setModalOpen(true);
+					}}
 				/>
 			) : (
 				<div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -486,10 +491,10 @@ export default function Templates() {
 				</div>
 			)}
 
-			<CreateTemplateModal 
-				open={modalOpen} 
-				onOpenChange={setModalOpen} 
-				templateToEdit={templateToEdit} 
+			<CreateTemplateModal
+				open={modalOpen}
+				onOpenChange={setModalOpen}
+				templateToEdit={templateToEdit}
 			/>
 		</div>
 	);

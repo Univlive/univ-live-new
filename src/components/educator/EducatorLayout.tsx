@@ -14,6 +14,7 @@ import {
   Menu,
   X,
   ChevronRight,
+  Library,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -90,6 +91,7 @@ export default function EducatorLayout() {
       { icon: LayoutDashboard, label: "Dashboard", href: "/educator/dashboard" },
       { icon: Users, label: "Learners", href: "/educator/learners" },
       { icon: FileText, label: "Test Series", href: "/educator/test-series" },
+      { icon: Library, label: "Question Bank", href: "/educator/question-bank" },
       { icon: Key, label: "Access Codes", href: "/educator/access-codes" },
       { icon: Globe, label: "Edit Theme/Website", href: "/educator/website-settings" },
       { icon: CreditCard, label: "Billing & Plan", href: "/educator/billing" },

@@ -45,6 +45,7 @@ import Messages from "@/pages/educator/Messages";
 import WebsiteSettings from "@/pages/educator/WebsiteSettings";
 import Billing from "@/pages/educator/Billing";
 import Settings from "@/pages/educator/Settings";
+import EducatorQuestionBank from "@/pages/educator/QuestionBank";
 
 // Student Dashboard
 import StudentLayout from "@/pages/student/StudentLayout";
@@ -107,6 +108,7 @@ export default function AppRoutes() {
             <Route path="learners/:learnerId" element={<LearnerDetails />} />
             <Route path="test-series" element={<TestSeries />} />
             <Route path="test-series/:testId/questions" element={<ManageQuestionsPage />} />
+            <Route path="question-bank" element={<EducatorQuestionBank />} />
             <Route path="access-codes" element={<AccessCodes />} />
             <Route path="messages" element={<Messages />} />
             <Route path="website-settings" element={<WebsiteSettings />} />
@@ -165,6 +167,7 @@ export default function AppRoutes() {
             <Route path="learners/:learnerId" element={<LearnerDetails />} />
             <Route path="test-series" element={<TestSeries />} />
             <Route path="test-series/:testId/questions" element={<ManageQuestionsPage />} />
+            <Route path="question-bank" element={<EducatorQuestionBank />} />
             <Route path="access-codes" element={<AccessCodes />} />
             <Route path="messages" element={<Messages />} />
             <Route path="website-settings" element={<WebsiteSettings />} />
