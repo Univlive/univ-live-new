@@ -28,7 +28,6 @@ type TenantContextValue = {
 const TenantContext = createContext<TenantContextValue | null>(null);
 
 async function fetchTenantProfile(tenantSlug: string | null): Promise<TenantProfile | null> {
-  console.log("🔥 THE APP IS ACTUALLY CALLING THE FIREBASE SERVER FOR TENANT DATA!");
   if (!tenantSlug) return null;
 
   // tenants/{slug} -> educatorId
