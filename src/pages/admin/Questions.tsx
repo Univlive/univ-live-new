@@ -17,7 +17,26 @@ import {
   Download,
   Upload,
   X,
+  GripVertical,
 } from "lucide-react";
+
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import { cn } from "@/lib/utils";
 import { auth, db } from "@/lib/firebase";
@@ -102,6 +121,7 @@ type QuestionDoc = {
 
   createdAtTs?: Timestamp | null;
   updatedAtTs?: Timestamp | null;
+  questionOrder?: number;
 };
 
 type QBQuestion = {
@@ -165,6 +185,40 @@ function normalizeDifficulty(v: any): Difficulty {
 
 const DIFFICULTY_OPTIONS: Difficulty[] = ["easy", "medium", "hard"];
 
+function sortQuestionsForDisplay(rows: QuestionDoc[]): QuestionDoc[] {
+  return [...rows].sort((a, b) => {
+    const aOrder = Number.isFinite(Number(a.questionOrder)) ? Number(a.questionOrder) : null;
+    const bOrder = Number.isFinite(Number(b.questionOrder)) ? Number(b.questionOrder) : null;
+    if (aOrder != null && bOrder != null && aOrder !== bOrder) return aOrder - bOrder;
+    if (aOrder != null && bOrder == null) return -1;
+    if (aOrder == null && bOrder != null) return 1;
+    const aTime = a.createdAtTs?.toMillis?.() ?? 0;
+    const bTime = b.createdAtTs?.toMillis?.() ?? 0;
+    return aTime - bTime;
+  });
+}
+
+function SortableCardShell({
+  id,
+  dndEnabled,
+  children,
+}: {
+  id: string;
+  dndEnabled: boolean;
+  children: (dragProps: React.HTMLAttributes<HTMLElement>, isDragging: boolean) => React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+    disabled: !dndEnabled,
+  });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  return (
+    <div ref={setNodeRef} style={style}>
+      {children({ ...attributes, ...listeners }, isDragging)}
+    </div>
+  );
+}
+
 export default function Questions() {
   const navigate = useNavigate();
   const { testId } = useParams<{ testId: string }>();
@@ -188,6 +242,13 @@ export default function Questions() {
   const [search, setSearch] = useState("");
   const [difficultyFilter, setDifficultyFilter] = useState<"all" | Difficulty>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+
+  const [reordering, setReordering] = useState(false);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
   // editor dialog
   const [editorOpen, setEditorOpen] = useState(false);
@@ -327,10 +388,11 @@ export default function Questions() {
             contentFormat: (safeStr(data?.contentFormat, "") as any) || undefined,
             createdAtTs: (data?.createdAt as Timestamp) || null,
             updatedAtTs: (data?.updatedAt as Timestamp) || null,
+            questionOrder: data?.questionOrder != null ? Number(data.questionOrder) : undefined,
           };
         });
 
-        setQuestions(rows);
+        setQuestions(sortQuestionsForDisplay(rows));
         setQuestionsLoading(false);
       },
       () => {
@@ -546,6 +608,8 @@ export default function Questions() {
     });
   }, [questions, search, difficultyFilter, statusFilter]);
 
+  const dndEnabled = search.trim().length === 0 && difficultyFilter === "all" && statusFilter === "all";
+
   // analytics
   const total = questions.length;
   const activeCount = useMemo(() => questions.filter((q) => q.isActive !== false).length, [questions]);
@@ -567,6 +631,57 @@ export default function Questions() {
     setFormMarks(selectedTest?.positiveMarks != null ? String(selectedTest.positiveMarks) : "");
     setFormNegMarks(selectedTest?.negativeMarks != null ? String(selectedTest.negativeMarks) : "");
     setFormActive(true);
+  }
+
+  function getNextQuestionOrder() {
+    return questions.reduce((max, q) => {
+      const n = Number(q.questionOrder);
+      return Number.isFinite(n) ? Math.max(max, n) : max;
+    }, 0) + 1;
+  }
+
+  async function persistDraggedOrder(reordered: QuestionDoc[]) {
+    if (!selectedTestId) return;
+    try {
+      setReordering(true);
+      const updates = reordered
+        .map((q, index) => ({
+          id: q.id,
+          nextOrder: index + 1,
+          currentOrder: Number.isFinite(Number(q.questionOrder)) ? Number(q.questionOrder) : null,
+        }))
+        .filter((item) => item.currentOrder !== item.nextOrder);
+      if (!updates.length) return;
+      const CHUNK_SIZE = 450;
+      for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
+        const batch = writeBatch(db);
+        updates.slice(i, i + CHUNK_SIZE).forEach((item) => {
+          batch.update(doc(db, "test_series", selectedTestId, "questions", item.id), {
+            questionOrder: item.nextOrder,
+            updatedAt: serverTimestamp(),
+          });
+        });
+        await batch.commit();
+      }
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Failed to save order", variant: "destructive" });
+    } finally {
+      setReordering(false);
+    }
+  }
+
+  async function handleDragEnd(event: DragEndEvent) {
+    if (!dndEnabled || reordering) return;
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = questions.findIndex((q) => q.id === String(active.id));
+    const newIndex = questions.findIndex((q) => q.id === String(over.id));
+    if (oldIndex < 0 || newIndex < 0) return;
+    const reorderedBase = arrayMove(questions, oldIndex, newIndex);
+    const reordered = reorderedBase.map((q, i) => ({ ...q, questionOrder: i + 1 }));
+    setQuestions(reordered);
+    await persistDraggedOrder(reorderedBase);
   }
 
   function openCreate() {
@@ -646,6 +761,7 @@ export default function Questions() {
 
       if (!editingId) {
         basePayload.createdAt = serverTimestamp();
+        basePayload.questionOrder = getNextQuestionOrder();
 
         await addDoc(collection(db, "test_series", selectedTestId, "questions"), basePayload);
 
@@ -1403,159 +1519,186 @@ export default function Questions() {
                 </Card>
               )}
 
-              {filtered.map((q, idx) => {
-                const isHtml = q.contentFormat === "html" || q.source === "question_bank" || /<\w+[\s\S]*>/i.test(q.question || "");
-                const correctText = q.options?.[q.correctOption] || "";
-                const correctTextPlain = stripHtml(correctText);
-                const isEditing = editingId === q.id && editorOpen;
+              {!dndEnabled && (search.trim() || difficultyFilter !== "all" || statusFilter !== "all") && (
+                <p className="text-xs text-muted-foreground text-center pb-1">
+                  Clear filters to reorder questions
+                </p>
+              )}
 
-                return (
-                  <motion.div
-                    key={q.id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: Math.min(0.2, idx * 0.02) }}
-                  >
-                    <Card className={cn(
-                      "border-border/50 hover:shadow-sm transition-all duration-300",
-                      isEditing && "border-primary/40 shadow-md ring-1 ring-primary/20"
-                    )}>
-                      <CardContent className="p-4">
-                        {isEditing ? (
-                          renderInlineEditor()
-                        ) : (
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center gap-2 mb-2">
-                                <Badge variant="secondary" className={cn("rounded-full", difficultyBadge(q.difficulty))}>
-                                  {q.difficulty}
-                                </Badge>
-                                {q.subject ? (
-                                  <Badge variant="secondary" className="rounded-full">
-                                    {q.subject}
-                                  </Badge>
-                                ) : null}
-                                {q.topic ? (
-                                  <Badge variant="secondary" className="rounded-full">
-                                    {q.topic}
-                                  </Badge>
-                                ) : null}
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                <SortableContext items={filtered.map((q) => q.id)} strategy={verticalListSortingStrategy}>
+                  {filtered.map((q, idx) => {
+                    const isHtml = q.contentFormat === "html" || q.source === "question_bank" || /<\w+[\s\S]*>/i.test(q.question || "");
+                    const correctText = q.options?.[q.correctOption] || "";
+                    const correctTextPlain = stripHtml(correctText);
+                    const isEditing = editingId === q.id && editorOpen;
 
-                                {q.isActive !== false ? (
-                                  <Badge variant="secondary" className="rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                                    <CheckCircle2 className="h-3 w-3 mr-1" />
-                                    published
-                                  </Badge>
+                    return (
+                      <SortableCardShell key={q.id} id={q.id} dndEnabled={dndEnabled && !isEditing}>
+                        {(dragProps, isDragging) => (
+                          <motion.div
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: isDragging ? 0 : Math.min(0.2, idx * 0.02) }}
+                          >
+                            <Card className={cn(
+                              "border-border/50 hover:shadow-sm transition-all duration-300",
+                              isEditing && "border-primary/40 shadow-md ring-1 ring-primary/20",
+                              isDragging && "shadow-lg opacity-80"
+                            )}>
+                              <CardContent className="p-4">
+                                {isEditing ? (
+                                  renderInlineEditor()
                                 ) : (
-                                  <Badge variant="secondary" className="rounded-full bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-300">
-                                    <XCircle className="h-3 w-3 mr-1" />
-                                    draft
-                                  </Badge>
-                                )}
-                              </div>
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex flex-wrap items-center gap-2 mb-2">
+                                        <Badge variant="secondary" className={cn("rounded-full", difficultyBadge(q.difficulty))}>
+                                          {q.difficulty}
+                                        </Badge>
+                                        {q.subject ? (
+                                          <Badge variant="secondary" className="rounded-full">
+                                            {q.subject}
+                                          </Badge>
+                                        ) : null}
+                                        {q.topic ? (
+                                          <Badge variant="secondary" className="rounded-full">
+                                            {q.topic}
+                                          </Badge>
+                                        ) : null}
 
-                              {isHtml ? (
-                                <div
-                                  className="prose prose-sm dark:prose-invert max-w-none leading-snug line-clamp-3"
-                                  dangerouslySetInnerHTML={{ __html: q.question }}
-                                />
-                              ) : (
-                                <p className="font-medium text-foreground leading-snug line-clamp-3">
-                                  {q.question}
-                                </p>
-                              )}
+                                        {q.isActive !== false ? (
+                                          <Badge variant="secondary" className="rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                                            <CheckCircle2 className="h-3 w-3 mr-1" />
+                                            published
+                                          </Badge>
+                                        ) : (
+                                          <Badge variant="secondary" className="rounded-full bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-300">
+                                            <XCircle className="h-3 w-3 mr-1" />
+                                            draft
+                                          </Badge>
+                                        )}
+                                      </div>
 
-                              {q.options?.length ? (
-                                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                  {q.options.slice(0, 4).map((opt, i) => (
-                                    <div
-                                      key={i}
-                                      className={cn(
-                                        "text-sm p-2 rounded-xl border",
-                                        i === q.correctOption
-                                          ? "border-primary/40 bg-primary/5"
-                                          : "border-border bg-muted/20"
-                                      )}
-                                    >
-                                      <span className="text-xs text-muted-foreground mr-2">
-                                        {String.fromCharCode(65 + i)}.
-                                      </span>
                                       {isHtml ? (
-                                        <span
-                                          className={cn(i === q.correctOption && "font-medium")}
-                                          dangerouslySetInnerHTML={{ __html: opt }}
+                                        <div
+                                          className="prose prose-sm dark:prose-invert max-w-none leading-snug line-clamp-3"
+                                          dangerouslySetInnerHTML={{ __html: q.question }}
                                         />
                                       ) : (
-                                        <span className={cn(i === q.correctOption && "font-medium")}>
-                                          {opt}
-                                        </span>
+                                        <p className="font-medium text-foreground leading-snug line-clamp-3">
+                                          {q.question}
+                                        </p>
                                       )}
+
+                                      {q.options?.length ? (
+                                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                          {q.options.slice(0, 4).map((opt, i) => (
+                                            <div
+                                              key={i}
+                                              className={cn(
+                                                "text-sm p-2 rounded-xl border",
+                                                i === q.correctOption
+                                                  ? "border-primary/40 bg-primary/5"
+                                                  : "border-border bg-muted/20"
+                                              )}
+                                            >
+                                              <span className="text-xs text-muted-foreground mr-2">
+                                                {String.fromCharCode(65 + i)}.
+                                              </span>
+                                              {isHtml ? (
+                                                <span
+                                                  className={cn(i === q.correctOption && "font-medium")}
+                                                  dangerouslySetInnerHTML={{ __html: opt }}
+                                                />
+                                              ) : (
+                                                <span className={cn(i === q.correctOption && "font-medium")}>
+                                                  {opt}
+                                                </span>
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : null}
+
+                                      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                                        <span>Correct: <span className="font-medium text-foreground">{correctTextPlain || "—"}</span></span>
+                                        <span>Marks: <span className="font-medium text-foreground">{q.marks ?? selectedTest?.positiveMarks ?? "—"}</span></span>
+                                        <span>Neg: <span className="font-medium text-foreground">{q.negativeMarks ?? selectedTest?.negativeMarks ?? "—"}</span></span>
+                                        <span>Used: <span className="font-medium text-foreground">{q.usageCount ?? 0}</span></span>
+                                        <span>Updated: <span className="font-medium text-foreground">{fmtDate(q.updatedAtTs || q.createdAtTs || null)}</span></span>
+                                      </div>
                                     </div>
-                                  ))}
-                                </div>
-                              ) : null}
 
-                              <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                                <span>Correct: <span className="font-medium text-foreground">{correctTextPlain || "—"}</span></span>
-                                <span>Marks: <span className="font-medium text-foreground">{q.marks ?? selectedTest?.positiveMarks ?? "—"}</span></span>
-                                <span>Neg: <span className="font-medium text-foreground">{q.negativeMarks ?? selectedTest?.negativeMarks ?? "—"}</span></span>
-                                <span>Used: <span className="font-medium text-foreground">{q.usageCount ?? 0}</span></span>
-                                <span>Updated: <span className="font-medium text-foreground">{fmtDate(q.updatedAtTs || q.createdAtTs || null)}</span></span>
-                              </div>
-                            </div>
+                                    <div className="flex flex-col items-end gap-2">
+                                      <div className="flex items-center gap-2">
+                                        {dndEnabled && (
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon"
+                                            className="rounded-xl text-muted-foreground cursor-grab active:cursor-grabbing"
+                                            onClick={(e) => e.stopPropagation()}
+                                            aria-label="Drag to reorder"
+                                            {...dragProps}
+                                          >
+                                            <GripVertical className="h-4 w-4" />
+                                          </Button>
+                                        )}
+                                        <Switch
+                                          checked={q.isActive !== false}
+                                          onCheckedChange={(checked) => toggleActive(q, checked)}
+                                        />
+                                      </div>
 
-                            <div className="flex flex-col items-end gap-2">
-                              <div className="flex items-center gap-2">
-                                <Switch
-                                  checked={q.isActive !== false}
-                                  onCheckedChange={(checked) => toggleActive(q, checked)}
-                                />
-                              </div>
+                                      <div className="flex items-center gap-2">
+                                        <Button
+                                          variant="outline"
+                                          size="icon"
+                                          className="rounded-xl"
+                                          onClick={() => openEdit(q)}
+                                        >
+                                          <Edit className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="icon"
+                                          className="rounded-xl"
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(q.question);
+                                            toast({ title: "Copied", description: "Question text copied." });
+                                          }}
+                                        >
+                                          <Copy className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="icon"
+                                          className="rounded-xl text-destructive"
+                                          onClick={() => deleteQuestion(q)}
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
 
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  className="rounded-xl"
-                                  onClick={() => openEdit(q)}
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  className="rounded-xl"
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(q.question);
-                                    toast({ title: "Copied", description: "Question text copied." });
-                                  }}
-                                >
-                                  <Copy className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  className="rounded-xl text-destructive"
-                                  onClick={() => deleteQuestion(q)}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          </div>
+                                {!isEditing && q.explanation ? (
+                                  <div className="mt-4 p-3 rounded-xl bg-muted/30 border border-border">
+                                    <p className="text-xs text-muted-foreground mb-1">Explanation</p>
+                                    <p className="text-sm text-foreground whitespace-pre-wrap">{q.explanation}</p>
+                                  </div>
+                                ) : null}
+                              </CardContent>
+                            </Card>
+                          </motion.div>
                         )}
-
-                        {!isEditing && q.explanation ? (
-                          <div className="mt-4 p-3 rounded-xl bg-muted/30 border border-border">
-                            <p className="text-xs text-muted-foreground mb-1">Explanation</p>
-                            <p className="text-sm text-foreground whitespace-pre-wrap">{q.explanation}</p>
-                          </div>
-                        ) : null}
-                      </CardContent>
-                    </Card>
-                  </motion.div>
-                );
-              })}
+                      </SortableCardShell>
+                    );
+                  })}
+                </SortableContext>
+              </DndContext>
             </div>
           )}
         </TabsContent>
