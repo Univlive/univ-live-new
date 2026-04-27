@@ -853,7 +853,6 @@ const QuestionsManager = ({
     const [pendingSectionQuestionsLimit, setPendingSectionQuestionsLimit] = useState("");
     const [pendingSectionAttemptsLimit, setPendingSectionAttemptsLimit] = useState("");
     const [pendingSectionTimeLimit, setPendingSectionTimeLimit] = useState("");
-    const [pendingSectionCustomMarks, setPendingSectionCustomMarks] = useState("");
     const [ischecked, setIsChecked] = useState(false);
     const [markingScheme, setMarkingScheme] = useState({
         correct: 4,
@@ -1677,7 +1676,12 @@ const QuestionsManager = ({
         setPendingSectionQuestionsLimit("");
         setPendingSectionAttemptsLimit("");
         setPendingSectionTimeLimit("");
-        setPendingSectionCustomMarks("");
+        setIsChecked(false);
+        setMarkingScheme({
+            correct: 4,
+            incorrect: -1,
+            unattempted: 0,
+        });
         setAddSectionDialogOpen(true);
     }
 
@@ -1714,7 +1718,12 @@ const QuestionsManager = ({
         setPendingSectionQuestionsLimit("");
         setPendingSectionAttemptsLimit("");
         setPendingSectionTimeLimit("");
-        setPendingSectionCustomMarks("");
+        setIsChecked(false);
+        setMarkingScheme({
+            correct: 4,
+            incorrect: -1,
+            unattempted: 0,
+        });
 
         try {
             await updateTestSections(nextSections);
@@ -3838,7 +3847,12 @@ const QuestionsManager = ({
                                     setPendingSectionQuestionsLimit("");
                                     setPendingSectionAttemptsLimit("");
                                     setPendingSectionTimeLimit("");
-                                    setPendingSectionCustomMarks("");
+                                    setIsChecked(false);
+                                    setMarkingScheme({
+                                        correct: 4,
+                                        incorrect: -1,
+                                        unattempted: 0,
+                                    });
                                 }}
                                 className="rounded-xl"
                             >
