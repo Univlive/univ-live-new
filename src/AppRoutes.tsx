@@ -32,6 +32,7 @@ import AdminLayout from "./pages/admin/AdminLayout";
 import AdminQuestionBank from "@/pages/admin/QuestionBank";
 import AdminSeatManagement from "@/pages/admin/SeatManagement";
 import AdminTemplates from "@/pages/admin/Templates";
+import AdminEducators from "@/pages/admin/Educators"; // <--- IMPORT THIS
 
 // Educator Dashboard
 import EducatorLayout from "@/components/educator/EducatorLayout";
