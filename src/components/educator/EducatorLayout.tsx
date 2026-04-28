@@ -3,9 +3,7 @@ import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
-  Users,
   FileText,
-  Key,
   MessageSquare,
   Globe,
   CreditCard,
@@ -14,6 +12,7 @@ import {
   Menu,
   X,
   ChevronRight,
+  GitBranch,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -88,20 +87,11 @@ export default function EducatorLayout() {
   const sidebarItems = useMemo<SidebarItem[]>(
     () => [
       { icon: LayoutDashboard, label: "Dashboard", href: "/educator/dashboard" },
-      { icon: Users, label: "Learners", href: "/educator/learners" },
+      { icon: GitBranch, label: "Student Management", href: "/educator/divisions" },
       { icon: FileText, label: "Test Series", href: "/educator/test-series" },
-      { icon: Key, label: "Access Codes", href: "/educator/access-codes" },
-      { icon: Globe, label: "Edit Theme/Website", href: "/educator/website-settings" },
       { icon: CreditCard, label: "Billing & Plan", href: "/educator/billing" },
-      { icon: Settings, label: "Settings", href: "/educator/settings" },
-      {
-        icon: MessageSquare,
-        label: "Help",
-        href: "/educator/messages",
-        badge: unreadMessages > 0 ? unreadMessages : undefined,
-      },
     ],
-    [unreadMessages]
+    []
   );
 
   const isActive = (href: string) => {
@@ -225,7 +215,10 @@ export default function EducatorLayout() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-4">
+          <div className="flex items-center gap-1 sm:gap-2">
+            <Button variant="ghost" size="icon" onClick={() => navigate("/educator/settings")} title="Settings">
+              <Settings className="h-5 w-5 text-muted-foreground" />
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="flex items-center gap-2 px-2">
@@ -246,9 +239,12 @@ export default function EducatorLayout() {
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => navigate("/educator/settings")}> 
-                  <Settings className="h-4 w-4 mr-2" />
-                  Settings
+                <DropdownMenuItem onClick={() => navigate("/educator/messages")}>
+                  <MessageSquare className="h-4 w-4 mr-2" />
+                  Help &amp; Support
+                  {unreadMessages > 0 && (
+                    <Badge variant="secondary" className="ml-auto text-xs">{unreadMessages}</Badge>
+                  )}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleViewWebsite}>
                   <Globe className="h-4 w-4 mr-2" />

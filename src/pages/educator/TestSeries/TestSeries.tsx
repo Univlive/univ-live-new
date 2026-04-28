@@ -24,6 +24,7 @@ import {
   MoreVertical,
   Move,
   Award,
+  Key,
 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
@@ -67,11 +68,13 @@ import NewFolderButton from "./NewFolder";
 // Firebase
 import { onAuthStateChanged } from "firebase/auth";
 import {
+  Timestamp,
   addDoc,
   collection,
   deleteDoc,
   doc,
   getDocs,
+  getDoc,
   onSnapshot,
   query,
   setDoc,
@@ -127,6 +130,12 @@ function pruneUndefined<T extends Record<string, any>>(obj: T): T {
     }
   });
   return obj;
+}
+
+function toEndOfDayTs(yyyyMmDd: string) {
+  const [y, m, d] = yyyyMmDd.split("-").map((v) => parseInt(v, 10));
+  if (!y || !m || !d) return null;
+  return Timestamp.fromDate(new Date(y, m - 1, d, 23, 59, 59, 999));
 }
 
 async function pickImageFile(): Promise<File | null> {
@@ -187,6 +196,28 @@ export default function TestSeries() {
   const [moveTestOpen, setMoveTestOpen] = useState(false);
   const [testToMove, setTestToMove] = useState<any>(null);
 
+  // Batch assignment dialog
+  const [batchAssignOpen, setBatchAssignOpen] = useState(false);
+  const [batchAssignTest, setBatchAssignTest] = useState<any>(null);
+  const [allBatches, setAllBatches] = useState<{ id: string; label: string }[]>([]);
+  const [selectedBatchIds, setSelectedBatchIds] = useState<string[]>([]);
+  const [savingBatches, setSavingBatches] = useState(false);
+
+  // Access code dialog
+  const [acOpen, setAcOpen] = useState(false);
+  const [acTestId, setAcTestId] = useState("");
+  const [acTestTitle, setAcTestTitle] = useState("");
+  const [acCode, setAcCode] = useState("");
+  const [acMaxUses, setAcMaxUses] = useState("100");
+  const [acExpiry, setAcExpiry] = useState("");
+  const [acWindowMinutes, setAcWindowMinutes] = useState("0");
+  const [acEditingId, setAcEditingId] = useState<string | null>(null);
+  const [acSaving, setAcSaving] = useState(false);
+  const [acCopied, setAcCopied] = useState(false);
+
+  // Batch filter (library tab)
+  const [batchFilter, setBatchFilter] = useState<string>("all");
+
   // Auth + Data
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, (user) => {
@@ -197,6 +228,24 @@ export default function TestSeries() {
       }
 
       setCurrentUser(user);
+
+      // Load all batches for batch-assignment dialog
+      getDocs(collection(db, "educators", user.uid, "branches")).then(async (branchSnap) => {
+        const batchList: { id: string; label: string }[] = [];
+        for (const branchDoc of branchSnap.docs) {
+          const courseSnap = await getDocs(collection(db, "educators", user.uid, "branches", branchDoc.id, "courses"));
+          for (const courseDoc of courseSnap.docs) {
+            const batchSnap = await getDocs(collection(db, "educators", user.uid, "branches", branchDoc.id, "courses", courseDoc.id, "batches"));
+            batchSnap.docs.forEach((b) =>
+              batchList.push({
+                id: b.id,
+                label: `${branchDoc.data().name} / ${courseDoc.data().name} / ${b.data().name}`,
+              })
+            );
+          }
+        }
+        setAllBatches(batchList);
+      });
 
       // Load educator preferences
       const unsubEdu = onSnapshot(doc(db, "educators", user.uid), (snap) => {
@@ -371,9 +420,15 @@ export default function TestSeries() {
   const groupedTests = useMemo(() => {
     const q = search.trim().toLowerCase();
     const filtered = myTests.filter((t) => {
-      if (!q) return true;
-      const hay = `${t.title || ""} ${t.description || ""} ${t.subject || ""} ${t.level || ""}`.toLowerCase();
-      return hay.includes(q);
+      if (q) {
+        const hay = `${t.title || ""} ${t.description || ""} ${t.subject || ""} ${t.level || ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (batchFilter !== "all") {
+        const batches: string[] = t.targetBatches || [];
+        if (!batches.includes(batchFilter)) return false;
+      }
+      return true;
     });
 
     const groups: Record<string, { name: string; type: "custom" | "subject" | "uncategorized", tests: any[] }> = {};
@@ -515,6 +570,79 @@ export default function TestSeries() {
     } catch (e) {
       console.error(e);
       toast.error("Failed to update test attempts");
+    }
+  };
+
+  const openAccessCode = async (test: any) => {
+    if (!currentUser) return;
+    setAcTestId(test.id);
+    setAcTestTitle(test.title || "");
+    setAcCode("");
+    setAcMaxUses("100");
+    setAcExpiry("");
+    setAcWindowMinutes("0");
+    setAcEditingId(null);
+
+    const snap = await getDocs(
+      query(collection(db, "educators", currentUser.uid, "accessCodes"), where("testSeriesId", "==", test.id))
+    );
+    if (!snap.empty) {
+      const d = snap.docs[0];
+      const data = d.data() as any;
+      setAcEditingId(d.id);
+      setAcCode(data.code || d.id);
+      setAcMaxUses(String(data.maxUses || 100));
+      setAcExpiry(data.expiresAt ? (data.expiresAt as Timestamp).toDate().toISOString().slice(0, 10) : "");
+      setAcWindowMinutes(String(data.windowMinutes ?? 0));
+    } else {
+      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+      let code = "";
+      for (let i = 0; i < 8; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
+      setAcCode(code);
+    }
+    setAcOpen(true);
+  };
+
+  const handleSaveAc = async () => {
+    if (!currentUser) return;
+    const codeUpper = acCode.trim().toUpperCase();
+    const max = Number(acMaxUses);
+    if (!codeUpper) { toast.error("Enter or generate an access code"); return; }
+    if (!Number.isFinite(max) || max <= 0) { toast.error("Max uses must be a positive number"); return; }
+    const expiresAt = acExpiry ? toEndOfDayTs(acExpiry) : null;
+    setAcSaving(true);
+    try {
+      if (!acEditingId) {
+        const ref = doc(db, "educators", currentUser.uid, "accessCodes", codeUpper);
+        const existing = await getDoc(ref);
+        if (existing.exists()) { toast.error("Code already exists, generate a different one"); return; }
+        await setDoc(ref, {
+          code: codeUpper,
+          testSeriesId: acTestId,
+          testSeriesTitle: acTestTitle,
+          maxUses: max,
+          usesUsed: 0,
+          expiresAt: expiresAt ?? null,
+          windowMinutes: Number(acWindowMinutes) || 0,
+          createdAt: serverTimestamp(),
+        });
+        toast.success("Access code created!");
+      } else {
+        await updateDoc(doc(db, "educators", currentUser.uid, "accessCodes", acEditingId), {
+          testSeriesId: acTestId,
+          testSeriesTitle: acTestTitle,
+          maxUses: max,
+          expiresAt: expiresAt ?? null,
+          windowMinutes: Number(acWindowMinutes) || 0,
+          updatedAt: serverTimestamp(),
+        });
+        toast.success("Access code updated!");
+      }
+      setAcOpen(false);
+    } catch {
+      toast.error("Failed to save access code");
+    } finally {
+      setAcSaving(false);
     }
   };
 
@@ -710,6 +838,27 @@ export default function TestSeries() {
 
         {/* Library */}
         <TabsContent value="library" className="mt-6">
+          {allBatches.length > 0 && (
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              <span className="text-sm text-muted-foreground shrink-0">Filter by Batch:</span>
+              <Select value={batchFilter} onValueChange={setBatchFilter}>
+                <SelectTrigger className="w-[220px] rounded-xl h-8 text-sm">
+                  <SelectValue placeholder="All Batches" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Batches</SelectItem>
+                  {allBatches.map((b) => (
+                    <SelectItem key={b.id} value={b.id}>{b.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {batchFilter !== "all" && (
+                <button onClick={() => setBatchFilter("all")} className="text-xs text-muted-foreground hover:text-foreground underline">
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
           {Object.keys(groupedTests).length === 0 ? (
             <EmptyState icon={FileText} title="No tests found" description="Create a custom test or import from the admin bank." />
           ) : (
@@ -780,6 +929,16 @@ export default function TestSeries() {
                                             setMoveTestOpen(true);
                                           }}>
                                             <Move className="mr-2 h-4 w-4" /> Move to Folder
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem onClick={() => {
+                                            setBatchAssignTest(test);
+                                            setSelectedBatchIds(test.targetBatches || []);
+                                            setBatchAssignOpen(true);
+                                          }}>
+                                            <Award className="mr-2 h-4 w-4" /> Assign to Batches
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem onClick={() => openAccessCode(test)}>
+                                            <Key className="mr-2 h-4 w-4" /> Access Code
                                           </DropdownMenuItem>
                                           <DropdownMenuItem
                                             className="text-destructive"
@@ -953,6 +1112,164 @@ export default function TestSeries() {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Access Code Dialog */}
+      {acOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-card rounded-xl border shadow-lg w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">{acEditingId ? "Edit Access Code" : "Create Access Code"}</h2>
+              <button onClick={() => setAcOpen(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <p className="text-sm text-muted-foreground">Test: <span className="font-medium text-foreground">{acTestTitle}</span></p>
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Access Code</label>
+                <div className="flex gap-2">
+                  <input
+                    className="flex-1 border rounded-lg px-3 py-2 text-sm font-mono uppercase bg-background"
+                    value={acCode}
+                    onChange={(e) => setAcCode(e.target.value.toUpperCase())}
+                    disabled={!!acEditingId}
+                    placeholder="Enter or generate"
+                  />
+                  <button
+                    className="px-3 py-2 text-sm rounded-lg border hover:bg-muted disabled:opacity-50"
+                    onClick={() => {
+                      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+                      let code = "";
+                      for (let i = 0; i < 8; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
+                      setAcCode(code);
+                    }}
+                    disabled={!!acEditingId}
+                  >
+                    Generate
+                  </button>
+                  {acCode && (
+                    <button
+                      className="px-3 py-2 text-sm rounded-lg border hover:bg-muted"
+                      onClick={() => {
+                        navigator.clipboard.writeText(acCode);
+                        setAcCopied(true);
+                        setTimeout(() => setAcCopied(false), 2000);
+                      }}
+                    >
+                      {acCopied ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Max Uses</label>
+                  <input
+                    type="number"
+                    className="w-full border rounded-lg px-3 py-2 text-sm bg-background"
+                    value={acMaxUses}
+                    onChange={(e) => setAcMaxUses(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Expiry Date</label>
+                  <input
+                    type="date"
+                    className="w-full border rounded-lg px-3 py-2 text-sm bg-background"
+                    value={acExpiry}
+                    onChange={(e) => setAcExpiry(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Access Window (minutes, 0 = unlimited)</label>
+                <input
+                  type="number"
+                  min={0}
+                  className="w-full border rounded-lg px-3 py-2 text-sm bg-background"
+                  value={acWindowMinutes}
+                  onChange={(e) => setAcWindowMinutes(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">Students can unlock only within this many minutes of code creation.</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button className="px-4 py-2 text-sm rounded-lg border hover:bg-muted" onClick={() => setAcOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                disabled={acSaving}
+                onClick={handleSaveAc}
+              >
+                {acSaving ? "Saving..." : acEditingId ? "Update" : "Create"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Assignment Dialog */}
+      {batchAssignOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-card rounded-xl border shadow-lg w-full max-w-md p-6 space-y-4">
+            <h2 className="text-lg font-semibold">Assign to Batches</h2>
+            <p className="text-sm text-muted-foreground">
+              Only students in the selected batches will see this test.
+            </p>
+            {allBatches.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No batches found. Create batches in Divisions first.</p>
+            ) : (
+              <div className="space-y-2 max-h-56 overflow-y-auto border rounded-lg p-2">
+                {allBatches.map((b) => (
+                  <label key={b.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted px-2 py-1 rounded">
+                    <input
+                      type="checkbox"
+                      checked={selectedBatchIds.includes(b.id)}
+                      onChange={(e) =>
+                        setSelectedBatchIds((prev) =>
+                          e.target.checked ? [...prev, b.id] : prev.filter((x) => x !== b.id)
+                        )
+                      }
+                    />
+                    <span className="text-sm">{b.label}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                className="px-4 py-2 text-sm rounded border hover:bg-muted"
+                onClick={() => setBatchAssignOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 text-sm rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                disabled={savingBatches || !currentUser}
+                onClick={async () => {
+                  if (!currentUser || !batchAssignTest) return;
+                  setSavingBatches(true);
+                  try {
+                    await updateDoc(
+                      doc(db, "educators", currentUser.uid, "my_tests", batchAssignTest.id),
+                      { targetBatches: selectedBatchIds, updatedAt: serverTimestamp() }
+                    );
+                    toast.success("Batch assignment saved");
+                    setBatchAssignOpen(false);
+                  } catch {
+                    toast.error("Failed to save");
+                  } finally {
+                    setSavingBatches(false);
+                  }
+                }}
+              >
+                {savingBatches ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

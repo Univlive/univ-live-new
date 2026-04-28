@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDoc, onSnapshot, orderBy, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, updateDoc, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthProvider";
 import { toast } from "sonner";
@@ -56,6 +56,12 @@ export default function SeatManagement() {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // Division controls
+  const [allSubjects, setAllSubjects] = useState<{ id: string; name: string }[]>([]);
+  const [maxBranchesInput, setMaxBranchesInput] = useState<number>(5);
+  const [allowedSubjectIds, setAllowedSubjectIds] = useState<string[]>([]);
+  const [savingDivision, setSavingDivision] = useState(false);
+
   const seatLimit = Math.max(0, Number(educator?.seatLimit || 0));
   const available = Math.max(0, seatLimit - usedSeats);
 
@@ -99,6 +105,20 @@ export default function SeatManagement() {
       setLoadingTarget(false);
     }
   };
+
+  // Load global subjects once
+  useEffect(() => {
+    getDocs(collection(db, "subjects")).then((snap) =>
+      setAllSubjects(snap.docs.map((d) => ({ id: d.id, name: d.data().name })))
+    );
+  }, []);
+
+  // Sync division controls from educator doc
+  useEffect(() => {
+    if (!educator) return;
+    setMaxBranchesInput(educator.maxBranches ?? 5);
+    setAllowedSubjectIds(educator.allowedSubjectIds ?? []);
+  }, [educator]);
 
   // subscribe to educator + seat usage + transactions
   useEffect(() => {
@@ -153,6 +173,22 @@ export default function SeatManagement() {
       toast.error(e?.message || "Failed to update seats");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const saveDivisionControls = async () => {
+    if (!targetId) return;
+    setSavingDivision(true);
+    try {
+      await updateDoc(doc(db, "educators", targetId), {
+        maxBranches: maxBranchesInput,
+        allowedSubjectIds,
+      });
+      toast.success("Division controls saved");
+    } catch {
+      toast.error("Save failed");
+    } finally {
+      setSavingDivision(false);
     }
   };
 
@@ -271,6 +307,57 @@ export default function SeatManagement() {
           </CardContent>
         </Card>
       </div>
+
+      {targetId && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Division Controls</CardTitle>
+            <p className="text-sm text-muted-foreground">Set branch limit and allowed subjects for this educator</p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <label className="text-sm text-muted-foreground">Max Branches</label>
+              <Input
+                type="number"
+                min={1}
+                value={maxBranchesInput}
+                onChange={(e) => setMaxBranchesInput(Number(e.target.value))}
+                className="max-w-xs"
+              />
+            </div>
+            <div>
+              <label className="text-sm text-muted-foreground block mb-2">
+                Allowed Subjects (empty = all subjects allowed)
+              </label>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {allSubjects.map((s) => (
+                  <label key={s.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted px-2 py-1 rounded text-sm">
+                    <input
+                      type="checkbox"
+                      checked={allowedSubjectIds.includes(s.id)}
+                      onChange={(e) =>
+                        setAllowedSubjectIds((prev) =>
+                          e.target.checked ? [...prev, s.id] : prev.filter((x) => x !== s.id)
+                        )
+                      }
+                    />
+                    {s.name}
+                  </label>
+                ))}
+                {allSubjects.length === 0 && (
+                  <p className="text-sm text-muted-foreground col-span-3">
+                    No subjects defined yet. Add subjects in the Subjects page first.
+                  </p>
+                )}
+              </div>
+            </div>
+            <Button onClick={saveDivisionControls} disabled={savingDivision}>
+              {savingDivision && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Save Division Controls
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-lg">

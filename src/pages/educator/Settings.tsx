@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import WebsiteSettings from "./WebsiteSettings";
 import {
   User,
   Mail,
@@ -427,13 +429,24 @@ export default function Settings() {
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
-      {/* Header */}
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-display font-bold">Settings</h1>
-        <p className="text-muted-foreground text-sm">Manage your account preferences</p>
+        <p className="text-muted-foreground text-sm">Manage your account and coaching website</p>
       </div>
 
+      <Tabs defaultValue="account">
+        <TabsList>
+          <TabsTrigger value="account">Account</TabsTrigger>
+          <TabsTrigger value="theme">Theme &amp; Website</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="theme" className="mt-4">
+          <WebsiteSettings />
+        </TabsContent>
+
+        <TabsContent value="account" className="mt-4">
+      <div className="space-y-6 max-w-3xl">
       {/* Profile Section */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
         <Card>
@@ -889,6 +902,9 @@ export default function Settings() {
           </CardContent>
         </Card>
       </motion.div>
+      </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

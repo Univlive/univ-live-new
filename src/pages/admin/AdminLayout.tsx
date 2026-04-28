@@ -15,6 +15,10 @@ import {
   Shield,
   CreditCard,
   ChevronLeft,
+  Tag,
+  Layers,
+  BookMarked,
+  Receipt,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -31,6 +35,10 @@ const sidebarItems = [
   { icon: BarChart3, label: "Attempts", path: "/admin/attempts" },
   { icon: MessageSquare, label: "Support", path: "/admin/support" },
   { icon: Library, label: "Question Bank", path: "/admin/question-bank" },
+  { icon: Layers, label: "Plans", path: "/admin/plans" },
+  { icon: BookMarked, label: "Subjects", path: "/admin/subjects" },
+  { icon: Tag, label: "Coupons", path: "/admin/coupons" },
+  { icon: Receipt, label: "Payment Logs", path: "/admin/payment-logs" },
 ];
 
 // Mock admin check - in production use AuthContext

@@ -24,6 +24,7 @@ import {
 import {
   collection,
   doc,
+  getDocs,
   onSnapshot,
   query,
   where,
@@ -237,6 +238,7 @@ export default function EducatorDashboard() {
   const [threads, setThreads] = useState<SupportThreadDoc[]>([]);
 
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [batches, setBatches] = useState<{ id: string; branchName: string; courseName: string; name: string; seatLimit: number; usedSeats: number }[]>([]);
   const [studentsLoaded, setStudentsLoaded] = useState(false);
   const [testsLoaded, setTestsLoaded] = useState(false);
   const [attemptsLoaded, setAttemptsLoaded] = useState(false);
@@ -284,6 +286,31 @@ export default function EducatorDashboard() {
         setProfileLoaded(true);
       }
     );
+
+    // Load batch seat utilization for dashboard summary
+    const loadBatches = async () => {
+      const batchList: typeof batches = [];
+      const branchSnap = await getDocs(collection(db, "educators", educatorId, "branches"));
+      for (const branchDoc of branchSnap.docs) {
+        const courseSnap = await getDocs(collection(db, "educators", educatorId, "branches", branchDoc.id, "courses"));
+        for (const courseDoc of courseSnap.docs) {
+          const batchSnap = await getDocs(collection(db, "educators", educatorId, "branches", branchDoc.id, "courses", courseDoc.id, "batches"));
+          batchSnap.docs.forEach((b) => {
+            const d = b.data();
+            batchList.push({
+              id: b.id,
+              branchName: branchDoc.data().name,
+              courseName: courseDoc.data().name,
+              name: d.name,
+              seatLimit: d.seatLimit ?? 0,
+              usedSeats: d.usedSeats ?? 0,
+            });
+          });
+        }
+      }
+      setBatches(batchList);
+    };
+    loadBatches();
 
     const unsubStudents = onSnapshot(
       collection(db, "educators", educatorId, "students"),
@@ -803,6 +830,36 @@ export default function EducatorDashboard() {
 
   return (
     <div className="space-y-6">
+
+      {batches.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Batch Seat Utilisation</h3>
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+            {batches.map((b) => {
+              const pct = b.seatLimit > 0 ? Math.round((b.usedSeats / b.seatLimit) * 100) : 0;
+              const full = b.seatLimit > 0 && b.usedSeats >= b.seatLimit;
+              return (
+                <div key={b.id} className="border rounded-xl p-3 bg-card space-y-1">
+                  <p className="text-xs text-muted-foreground truncate">{b.branchName} / {b.courseName}</p>
+                  <p className="font-medium text-sm truncate">{b.name}</p>
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-bold ${full ? "text-destructive" : "text-primary"}`}>
+                      {b.usedSeats}/{b.seatLimit} seats
+                    </span>
+                    <span className="text-xs text-muted-foreground">{pct}%</span>
+                  </div>
+                  <div className="w-full bg-muted rounded-full h-1.5">
+                    <div
+                      className={`h-1.5 rounded-full ${full ? "bg-destructive" : "bg-primary"}`}
+                      style={{ width: `${Math.min(100, pct)}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="gradient-bg rounded-2xl p-4 md:p-6 space-y-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between text-white">
