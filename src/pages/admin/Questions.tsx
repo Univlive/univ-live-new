@@ -1,5 +1,5 @@
 // pages/admin/Questions.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -279,6 +279,7 @@ export default function Questions() {
   const [collapsedQSections, setCollapsedQSections] = useState<string[]>([]);
 
   const [reordering, setReordering] = useState(false);
+  const autoInitDoneRef = useRef(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -480,6 +481,34 @@ export default function Questions() {
     return () => unsub();
   }, [uid, selectedTestId]);
 
+  // Reset auto-init flag when switching tests
+  useEffect(() => {
+    autoInitDoneRef.current = false;
+  }, [selectedTestId]);
+
+  // Silently assign questionOrder to any pre-existing questions that lack it.
+  // Runs once per test after the first non-empty snapshot.
+  useEffect(() => {
+    if (questionsLoading || autoInitDoneRef.current || !selectedTestId || !uid) return;
+    const unordered = questions.filter((q) => !Number.isFinite(Number(q.questionOrder)));
+    if (!unordered.length) return;
+    autoInitDoneRef.current = true;
+
+    const maxOrder = questions.reduce((max, q) => {
+      const n = Number(q.questionOrder);
+      return Number.isFinite(n) ? Math.max(max, n) : max;
+    }, 0);
+
+    const batch = writeBatch(db);
+    unordered.forEach((q, i) => {
+      batch.update(doc(db, "test_series", selectedTestId, "questions", q.id), {
+        questionOrder: maxOrder + i + 1,
+        updatedAt: serverTimestamp(),
+      });
+    });
+    batch.commit().catch(console.error);
+  }, [questions, questionsLoading, selectedTestId, uid]);
+
   const existingBankIds = useMemo(() => {
     const s = new Set<string>();
     questions.forEach((q) => {
@@ -594,6 +623,7 @@ export default function Questions() {
       let batch = writeBatch(db);
       let ops = 0;
       let added = 0;
+      const baseOrder = getNextQuestionOrder();
 
       for (const q of items) {
         const docRef = doc(collection(db, "test_series", selectedTestId, "questions"));
@@ -614,6 +644,8 @@ export default function Questions() {
           source: "question_bank",
           bankQuestionId: q.id,
           contentFormat: "html",
+
+          questionOrder: baseOrder + added,
 
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -1036,6 +1068,7 @@ export default function Questions() {
     setBulkSaving(true);
     try {
       // simple sequential add (safe and minimal setup)
+      const baseOrder = getNextQuestionOrder();
       let added = 0;
       for (const item of arr) {
         const qText = String(item?.question || "").trim();
@@ -1059,6 +1092,7 @@ export default function Questions() {
           usageCount: 0,
           source: "manual",
           contentFormat: "html",
+          questionOrder: baseOrder + added,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
