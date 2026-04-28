@@ -1497,18 +1497,6 @@ export default function Questions() {
                 </div>
               </CardContent>
             </Card>
-          ) : filtered.length === 0 ? (
-            <Card className="border-border/50">
-              <CardContent className="p-10 text-center text-muted-foreground">
-                No questions found.
-                <div className="mt-4">
-                  <Button className="rounded-xl gradient-bg text-white" onClick={openCreate}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add your first question
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
           ) : (
             <div className="space-y-3">
               {editorOpen && !editingId && (
@@ -1523,6 +1511,20 @@ export default function Questions() {
                 <p className="text-xs text-muted-foreground text-center pb-1">
                   Clear filters to reorder questions
                 </p>
+              )}
+
+              {filtered.length === 0 && !editorOpen && (
+                <Card className="border-border/50">
+                  <CardContent className="p-10 text-center text-muted-foreground">
+                    No questions found.
+                    <div className="mt-4">
+                      <Button className="rounded-xl gradient-bg text-white" onClick={openCreate}>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add your first question
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
               )}
 
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
