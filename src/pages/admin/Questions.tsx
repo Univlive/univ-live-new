@@ -796,21 +796,26 @@ export default function Questions() {
     if (!qs.length) return;
 
     const aSnap = await getDocs(
-      query(collection(db, "attempts"), where("testId", "==", testId), where("status", "==", "submitted"))
+      query(collection(db, "attempts"), where("testId", "==", testId))
     );
-    if (aSnap.empty) return;
+    // Filter to submitted/completed in JS to avoid needing a composite Firestore index
+    const submittedDocs = aSnap.docs.filter((d) => {
+      const s = String(d.data().status || "").toLowerCase();
+      return ["submitted", "completed", "finished", "done"].includes(s);
+    });
+    if (!submittedDocs.length) return;
 
-    const chunks: typeof aSnap.docs[] = [];
-    for (let i = 0; i < aSnap.docs.length; i += 490) chunks.push(aSnap.docs.slice(i, i + 490));
+    const chunks: (typeof aSnap.docs)[] = [];
+    for (let i = 0; i < submittedDocs.length; i += 490) chunks.push(submittedDocs.slice(i, i + 490));
 
     for (const chunk of chunks) {
-      const batch = writeBatch(db);
+      const b = writeBatch(db);
       for (const aDoc of chunk) {
         const responses = (aDoc.data().responses as Record<string, { answer?: string | null }>) || {};
         const { score, maxScore, accuracy, correctCount, incorrectCount } = scoreResponses(qs, responses);
-        batch.update(aDoc.ref, { score, maxScore, accuracy, correctCount, incorrectCount, marksRecalculatedAt: serverTimestamp() });
+        b.update(aDoc.ref, { score, maxScore, accuracy, correctCount, incorrectCount, marksRecalculatedAt: serverTimestamp() });
       }
-      await batch.commit();
+      await b.commit();
     }
   }
 
@@ -1029,7 +1034,10 @@ export default function Questions() {
           safeNum(formNegMarks, -1) !== safeNum(String(editingOriginalScoring?.negativeMarks ?? ""), -1);
 
         if (scoringChanged) {
-          recalculateAttemptsForTest(selectedTestId).catch(console.error);
+          recalculateAttemptsForTest(selectedTestId).catch((err) => {
+            console.error("Recalculation failed:", err);
+            toast({ title: "Score recalculation failed", description: String(err?.message || err), variant: "destructive" });
+          });
         }
       }
 
