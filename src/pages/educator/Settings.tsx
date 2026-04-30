@@ -25,19 +25,12 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "@/hooks/use-toast";
 import { stringToColor } from "@/lib/utils";
 
-import {
-  onAuthStateChanged,
-  signOut,
-  updateProfile,
-  EmailAuthProvider,
-  reauthenticateWithCredential,
-  updatePassword,
-} from "firebase/auth";
+import { onAuthStateChanged, signOut, updateProfile, EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { auth, db, storage } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthProvider";
 import { buildTenantUrl } from "@/lib/tenant";
+import { uploadToImageKit } from "@/lib/imagekitUpload";
 
 type EducatorPrefs = {
   notifications?: {
@@ -160,20 +153,22 @@ export default function Settings() {
 
     setUploadingPhoto(true);
     try {
-      const path = `educators/${firebaseUser.uid}/profile/avatar_${Date.now()}`;
-      const storageRef = ref(storage, path);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
+      const folder = `/educators/${firebaseUser.uid}/profile`;
+      const { url } = await uploadToImageKit(file, `avatar_${Date.now()}`, folder, "website");
 
-      // Update auth profile + firestore
+      // Update auth profile
       if (auth.currentUser) {
         await updateProfile(auth.currentUser, { photoURL: url });
       }
-      await setDoc(
-        doc(db, "educators", firebaseUser.uid),
-        { photoURL: url, updatedAt: serverTimestamp() },
-        { merge: true }
-      );
+
+      // Update BOTH 'educators' and 'users' collections for consistency
+      const educatorRef = doc(db, "educators", firebaseUser.uid);
+      const userRef = doc(db, "users", firebaseUser.uid);
+
+      await Promise.all([
+        setDoc(educatorRef, { photoURL: url, updatedAt: serverTimestamp() }, { merge: true }),
+        setDoc(userRef, { photoURL: url, updatedAt: serverTimestamp() }, { merge: true })
+      ]);
 
       await refreshProfile();
 
@@ -181,10 +176,11 @@ export default function Settings() {
         title: "Photo updated",
         description: "Your profile photo has been changed.",
       });
-    } catch {
+    } catch (err: any) {
+      console.error("[handleUploadPhoto] Photo update failed:", err);
       toast({
         title: "Upload failed",
-        description: "Could not upload photo. Please try again.",
+        description: err?.message || "Could not upload photo. Please try again.",
         variant: "destructive",
       });
     } finally {

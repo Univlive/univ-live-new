@@ -11,7 +11,8 @@ export default defineConfig(({ mode }) => ({
     strictPort: true,
     proxy: {
       "/api": {
-        target: "http://localhost:3000",
+        // Changed from 3000 to 3001 to avoid conflict with local Docker containers
+        target: "http://localhost:3001",
         changeOrigin: true,
       },
     },
