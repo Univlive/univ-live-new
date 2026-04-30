@@ -47,6 +47,8 @@ type Stats = {
   totalTests: number;
   totalAttempts: number;
   attemptsToday: number;
+  activeStudentsToday: number;
+  activeEducatorsToday: number;
 };
 
 type ActivityItem = {
@@ -54,6 +56,16 @@ type ActivityItem = {
   message: string;
   timeMs: number;
   badge?: "attempt" | "test" | "user" | "support";
+};
+
+type AttemptDoc = {
+  testTitle?: string;
+  status?: string;
+  score?: number | null;
+  maxScore?: number | null;
+  createdAt?: Timestamp | null;
+  studentId?: string;
+  educatorId?: string;
 };
 
 function startOfTodayTs() {
@@ -69,12 +81,9 @@ function daysAgoTs(days: number) {
   return Timestamp.fromDate(d);
 }
 
-function safeMillis(v: any) {
+function safeMillis(v: Timestamp | null | undefined) {
   if (!v) return Date.now();
-  if (typeof v?.toMillis === "function") return v.toMillis();
-  if (typeof v?.seconds === "number") return v.seconds * 1000;
-  if (typeof v === "number") return v;
-  return Date.now();
+  return v.seconds * 1000;
 }
 
 function timeAgo(ms: number) {
@@ -98,6 +107,8 @@ export default function AdminDashboard() {
     totalTests: 0,
     totalAttempts: 0,
     attemptsToday: 0,
+    activeStudentsToday: 0,
+    activeEducatorsToday: 0,
   });
 
   const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
@@ -121,22 +132,33 @@ export default function AdminDashboard() {
 
       // Attempts
       const attemptsQ = query(collection(db, "attempts"));
-      const attemptsTodayQ = query(collection(db, "attempts"), where("createdAt", ">=", startOfTodayTs()));
+      const today = startOfTodayTs();
+      const attemptsTodayQ = query(collection(db, "attempts"), where("createdAt", ">=", today));
 
-      const [educatorsCnt, studentsCnt, testsCnt, attemptsCnt, attemptsTodayCnt] = await Promise.all([
+      const [educatorsCnt, studentsCnt, testsCnt, attemptsCnt, attemptsTodaySnap] = await Promise.all([
         getCountFromServer(educatorsQ),
         getCountFromServer(studentsQ),
         getCountFromServer(testsQ),
         getCountFromServer(attemptsQ),
-        getCountFromServer(attemptsTodayQ),
+        getDocs(attemptsTodayQ),
       ]);
+
+      const studentIds = new Set<string>();
+      const educatorIds = new Set<string>();
+      attemptsTodaySnap.docs.forEach(d => {
+        const a = d.data() as AttemptDoc;
+        if (a.studentId) studentIds.add(a.studentId);
+        if (a.educatorId) educatorIds.add(a.educatorId);
+      });
 
       setStats({
         totalEducators: educatorsCnt.data().count,
         totalStudents: studentsCnt.data().count,
         totalTests: testsCnt.data().count,
         totalAttempts: attemptsCnt.data().count,
-        attemptsToday: attemptsTodayCnt.data().count,
+        attemptsToday: attemptsTodaySnap.size,
+        activeStudentsToday: studentIds.size,
+        activeEducatorsToday: educatorIds.size,
       });
     } catch (e) {
       console.error(e);
@@ -153,7 +175,7 @@ export default function AdminDashboard() {
       const snap = await getDocs(qAttempts);
 
       const rows: ActivityItem[] = snap.docs.map((d) => {
-        const a = d.data() as any;
+        const a = d.data() as AttemptDoc;
         const testTitle = String(a?.testTitle || "Test");
         const status = String(a?.status || "submitted");
         const score = a?.score != null ? Number(a.score) : null;
@@ -197,7 +219,7 @@ export default function AdminDashboard() {
       }
 
       snap.docs.forEach((docSnap) => {
-        const a = docSnap.data() as any;
+        const a = docSnap.data() as AttemptDoc;
         const ms = safeMillis(a?.createdAt);
         const key = new Date(ms).toISOString().slice(0, 10);
         if (map[key] != null) map[key] += 1;
@@ -288,6 +310,22 @@ export default function AdminDashboard() {
       color: "text-orange-500",
       bgColor: "bg-orange-500/10",
       hint: "attempts (all)",
+    },
+    {
+      title: "Active Students Today",
+      value: stats.activeStudentsToday,
+      icon: GraduationCap,
+      color: "text-rose-500",
+      bgColor: "bg-rose-500/10",
+      hint: "unique students in today's attempts",
+    },
+    {
+      title: "Educator Engagement",
+      value: stats.activeEducatorsToday,
+      icon: Users,
+      color: "text-cyan-500",
+      bgColor: "bg-cyan-500/10",
+      hint: "unique educators in today's attempts",
     },
   ];
 
