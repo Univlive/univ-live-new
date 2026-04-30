@@ -100,6 +100,13 @@ type ZipQuestion = {
   };
 };
 
+type QuestionBankScope = "admin" | "educator";
+
+type QuestionBankProps = {
+  scope?: QuestionBankScope;
+  educatorUid?: string;
+};
+
 // ---------- helpers ----------
 function stripHtml(html: string) {
   if (!html) return "";
@@ -341,7 +348,7 @@ function RichHtmlEditor({
   );
 }
 
-export default function QuestionBank() {
+export default function QuestionBank({ scope = "admin", educatorUid }: QuestionBankProps = {}) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
@@ -373,8 +380,36 @@ export default function QuestionBank() {
   const [importProgress, setImportProgress] = useState(0);
   const [importInfo, setImportInfo] = useState<{ total: number; done: number } | null>(null);
 
+  const isEducatorScope = scope === "educator";
+  const questionBankLabel = isEducatorScope ? "Educator Question Bank" : "Question Bank";
+  const questionBankDescription = isEducatorScope
+    ? "Your educator-scoped question bank. Bulk import, attach images, and reuse across your tests."
+    : "Global admin question bank. Bulk import, attach images, and reuse across tests.";
+
+  const questionBankCollection = useMemo(() => {
+    if (isEducatorScope) {
+      if (!educatorUid) return null;
+      return collection(db, "educators", educatorUid, "question_bank");
+    }
+    return collection(db, "question_bank");
+  }, [isEducatorScope, educatorUid]);
+
+  const questionBankDoc = (id: string) => {
+    if (isEducatorScope) {
+      if (!educatorUid) return null;
+      return doc(db, "educators", educatorUid, "question_bank", id);
+    }
+    return doc(db, "question_bank", id);
+  };
+
   useEffect(() => {
-    const qRef = query(collection(db, "question_bank"), orderBy("updatedAt", "desc"), limit(500));
+    if (!questionBankCollection) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+
+    const qRef = query(questionBankCollection, orderBy("updatedAt", "desc"), limit(500));
     const unsub = onSnapshot(
       qRef,
       (snap) => {
@@ -392,7 +427,7 @@ export default function QuestionBank() {
       }
     );
     return () => unsub();
-  }, []);
+  }, [questionBankCollection]);
 
   const subjects = useMemo(() => {
     const s = new Set<string>();
@@ -504,11 +539,14 @@ export default function QuestionBank() {
       };
 
       if (editingId) {
-        await updateDoc(doc(db, "question_bank", editingId), payload as any);
+        const ref = questionBankDoc(editingId);
+        if (!ref) throw new Error("Missing educator identity");
+        await updateDoc(ref, payload as any);
         toast({ title: "Saved", description: "Question updated." });
       } else {
         payload.createdAt = serverTimestamp() as any;
-        const ref = await addDoc(collection(db, "question_bank"), payload as any);
+        if (!questionBankCollection) throw new Error("Missing educator identity");
+        const ref = await addDoc(questionBankCollection, payload as any);
         toast({ title: "Added", description: `Question added (${ref.id}).` });
       }
 
@@ -531,7 +569,9 @@ export default function QuestionBank() {
 
     setBusy(true);
     try {
-      await deleteDoc(doc(db, "question_bank", id));
+      const ref = questionBankDoc(id);
+      if (!ref) throw new Error("Missing educator identity");
+      await deleteDoc(ref);
       toast({ title: "Deleted", description: "Question removed from the bank." });
     } catch {
       toast({ title: "Delete failed", description: "Please try again.", variant: "destructive" });
@@ -682,7 +722,8 @@ export default function QuestionBank() {
           createdAt: serverTimestamp() as any,
         };
 
-        const ref = doc(db, "question_bank", id);
+        const ref = questionBankDoc(id);
+        if (!ref) throw new Error("Missing educator identity");
         batch.set(ref, payload as any, { merge: true });
         ops++;
 
@@ -719,7 +760,8 @@ export default function QuestionBank() {
 
   const handleExport = async () => {
     try {
-      const qRef = query(collection(db, "question_bank"), orderBy("updatedAt", "desc"), limit(2000));
+      if (!questionBankCollection) throw new Error("Missing educator identity");
+      const qRef = query(questionBankCollection, orderBy("updatedAt", "desc"), limit(2000));
       const snap = await getDocs(qRef);
       const data = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -743,14 +785,25 @@ export default function QuestionBank() {
     );
   }
 
+  if (!questionBankCollection) {
+    return (
+      <div className="space-y-6 max-w-6xl mx-auto p-1">
+        <Card>
+          <CardHeader>
+            <CardTitle>Question Bank unavailable</CardTitle>
+            <CardDescription>Unable to resolve educator identity for question bank path.</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto p-1">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-display font-bold">Question Bank</h1>
-          <p className="text-sm text-muted-foreground">
-            Global admin question bank. Bulk import, attach images, and reuse across tests.
-          </p>
+          <h1 className="text-2xl font-display font-bold">{questionBankLabel}</h1>
+          <p className="text-sm text-muted-foreground">{questionBankDescription}</p>
         </div>
 
         <div className="flex flex-wrap gap-2">

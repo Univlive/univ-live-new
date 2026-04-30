@@ -1,10 +1,12 @@
 // pages/admin/Questions.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
   BookOpen,
+  ChevronDown,
+  ChevronRight,
   Plus,
   Search,
   Trash2,
@@ -53,6 +55,7 @@ import {
   orderBy,
   query,
   runTransaction,
+  where,
   serverTimestamp,
   updateDoc,
   writeBatch,
@@ -87,6 +90,11 @@ import ImageTextarea from "@/components/educator/ImageTextarea";
 
 type Difficulty = "easy" | "medium" | "hard";
 
+type TestSection = {
+  id: string;
+  name: string;
+};
+
 type TestSeries = {
   id: string;
   title: string;
@@ -96,6 +104,7 @@ type TestSeries = {
   positiveMarks?: number;
   negativeMarks?: number;
   questionsCount?: number;
+  sections?: TestSection[];
 };
 
 type QuestionDoc = {
@@ -118,6 +127,7 @@ type QuestionDoc = {
   source?: "manual" | "question_bank" | string;
   bankQuestionId?: string;
   contentFormat?: "text" | "html";
+  sectionId?: string;
 
   createdAtTs?: Timestamp | null;
   updatedAtTs?: Timestamp | null;
@@ -183,6 +193,28 @@ function normalizeDifficulty(v: any): Difficulty {
   return "medium";
 }
 
+function normalizeSections(rawSections: any, subjectFallback?: string): TestSection[] {
+  const parsed = Array.isArray(rawSections)
+    ? rawSections
+        .map((section: any, index: number) => ({
+          id: String(section?.id || `sec_${index + 1}`).trim(),
+          name: String(section?.name || `Section ${index + 1}`).trim(),
+        }))
+        .filter((section) => section.id)
+    : [];
+
+  if (parsed.length > 0) return parsed;
+
+  return [{ id: "main", name: String(subjectFallback || "General").trim() || "General" }];
+}
+
+function resolveSectionId(sectionId: string | undefined, sections: TestSection[]): string {
+  const fallback = sections[0]?.id || "main";
+  const normalized = String(sectionId || "").trim();
+  if (!normalized) return fallback;
+  return sections.some((section) => section.id === normalized) ? normalized : fallback;
+}
+
 const DIFFICULTY_OPTIONS: Difficulty[] = ["easy", "medium", "hard"];
 
 function sortQuestionsForDisplay(rows: QuestionDoc[]): QuestionDoc[] {
@@ -242,6 +274,18 @@ export default function Questions() {
   const [search, setSearch] = useState("");
   const [difficultyFilter, setDifficultyFilter] = useState<"all" | Difficulty>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [sectionFilter, setSectionFilter] = useState<string>("all");
+
+  // collapsed section IDs in the section-grouped view
+  const [collapsedQSections, setCollapsedQSections] = useState<string[]>([]);
+
+  const [reordering, setReordering] = useState(false);
+  const autoInitDoneRef = useRef(false);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
   const [reordering, setReordering] = useState(false);
 
@@ -253,6 +297,7 @@ export default function Questions() {
   // editor dialog
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [addingToSection, setAddingToSection] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [formQuestion, setFormQuestion] = useState("");
@@ -260,16 +305,21 @@ export default function Questions() {
   const [formCorrect, setFormCorrect] = useState<number>(0);
   const [formExplanation, setFormExplanation] = useState("");
   const [formDifficulty, setFormDifficulty] = useState<Difficulty>("medium");
+  const [formSectionId, setFormSectionId] = useState<string>("main");
   const [formSubject, setFormSubject] = useState("");
   const [formTopic, setFormTopic] = useState("");
   const [formMarks, setFormMarks] = useState<string>("");
   const [formNegMarks, setFormNegMarks] = useState<string>("");
   const [formActive, setFormActive] = useState(true);
+  const [editingOriginalScoring, setEditingOriginalScoring] = useState<{
+    correctOption?: number; marks?: number; negativeMarks?: number;
+  } | null>(null);
 
   // bulk import dialog
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkText, setBulkText] = useState("");
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkSectionId, setBulkSectionId] = useState<string>("main");
 
   // import from GLOBAL question bank
   const [qbOpen, setQbOpen] = useState(false);
@@ -280,6 +330,20 @@ export default function Questions() {
   const [qbTopic, setQbTopic] = useState<string>("all");
   const [qbDifficulty, setQbDifficulty] = useState<"all" | Difficulty>("all");
   const [qbSelected, setQbSelected] = useState<Record<string, boolean>>({});
+  const [qbSectionId, setQbSectionId] = useState<string>("main");
+
+  const selectedTestSections = useMemo(
+    () => normalizeSections(selectedTest?.sections, selectedTest?.subject),
+    [selectedTest]
+  );
+  const sectionNameById = useMemo(
+    () =>
+      selectedTestSections.reduce<Record<string, string>>((acc, section) => {
+        acc[section.id] = section.name;
+        return acc;
+      }, {}),
+    [selectedTestSections]
+  );
 
   // Auth
   useEffect(() => {
@@ -315,6 +379,7 @@ export default function Questions() {
             positiveMarks: safeNum(data?.positiveMarks, undefined as any),
             negativeMarks: safeNum(data?.negativeMarks, undefined as any),
             questionsCount: safeNum(data?.questionsCount, 0),
+            sections: normalizeSections(data?.sections, safeStr(data?.subject, "General")),
           };
         });
         setTests(rows);
@@ -349,6 +414,23 @@ export default function Questions() {
     if (testId && testId !== selectedTestId) setSelectedTestId(testId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testId]);
+
+  useEffect(() => {
+    const fallbackSectionId = selectedTestSections[0]?.id || "main";
+
+    if (!selectedTestSections.some((section) => section.id === formSectionId)) {
+      setFormSectionId(fallbackSectionId);
+    }
+    if (!selectedTestSections.some((section) => section.id === bulkSectionId)) {
+      setBulkSectionId(fallbackSectionId);
+    }
+    if (!selectedTestSections.some((section) => section.id === qbSectionId)) {
+      setQbSectionId(fallbackSectionId);
+    }
+    if (sectionFilter !== "all" && !selectedTestSections.some((section) => section.id === sectionFilter)) {
+      setSectionFilter("all");
+    }
+  }, [selectedTestSections, formSectionId, bulkSectionId, qbSectionId, sectionFilter]);
 
   // Load questions
   useEffect(() => {
@@ -386,6 +468,7 @@ export default function Questions() {
             source: safeStr(data?.source, undefined as any) as any,
             bankQuestionId: safeStr(data?.bankQuestionId, "") || undefined,
             contentFormat: (safeStr(data?.contentFormat, "") as any) || undefined,
+            sectionId: safeStr(data?.sectionId, "") || undefined,
             createdAtTs: (data?.createdAt as Timestamp) || null,
             updatedAtTs: (data?.updatedAt as Timestamp) || null,
             questionOrder: data?.questionOrder != null ? Number(data.questionOrder) : undefined,
@@ -408,6 +491,34 @@ export default function Questions() {
 
     return () => unsub();
   }, [uid, selectedTestId]);
+
+  // Reset auto-init flag when switching tests
+  useEffect(() => {
+    autoInitDoneRef.current = false;
+  }, [selectedTestId]);
+
+  // Silently assign questionOrder to any pre-existing questions that lack it.
+  // Runs once per test after the first non-empty snapshot.
+  useEffect(() => {
+    if (questionsLoading || autoInitDoneRef.current || !selectedTestId || !uid) return;
+    const unordered = questions.filter((q) => !Number.isFinite(Number(q.questionOrder)));
+    if (!unordered.length) return;
+    autoInitDoneRef.current = true;
+
+    const maxOrder = questions.reduce((max, q) => {
+      const n = Number(q.questionOrder);
+      return Number.isFinite(n) ? Math.max(max, n) : max;
+    }, 0);
+
+    const batch = writeBatch(db);
+    unordered.forEach((q, i) => {
+      batch.update(doc(db, "test_series", selectedTestId, "questions", q.id), {
+        questionOrder: maxOrder + i + 1,
+        updatedAt: serverTimestamp(),
+      });
+    });
+    batch.commit().catch(console.error);
+  }, [questions, questionsLoading, selectedTestId, uid]);
 
   const existingBankIds = useMemo(() => {
     const s = new Set<string>();
@@ -452,6 +563,7 @@ export default function Questions() {
         setQbSubject("all");
         setQbTopic("all");
         setQbDifficulty("all");
+        setQbSectionId(selectedTestSections[0]?.id || "main");
       } catch (e) {
         console.error(e);
         toast({
@@ -467,7 +579,7 @@ export default function Questions() {
     return () => {
       alive = false;
     };
-  }, [uid, qbOpen]);
+  }, [uid, qbOpen, selectedTestSections]);
 
   const qbSubjects = useMemo(() => {
     const s = new Set<string>();
@@ -522,6 +634,7 @@ export default function Questions() {
       let batch = writeBatch(db);
       let ops = 0;
       let added = 0;
+      const baseOrder = getNextQuestionOrder();
 
       for (const q of items) {
         const docRef = doc(collection(db, "test_series", selectedTestId, "questions"));
@@ -532,6 +645,7 @@ export default function Questions() {
           correctOption: safeNum(q.correctOption, 0),
           explanation: q.explanation || "",
           difficulty: normalizeDifficulty(q.difficulty),
+          sectionId: resolveSectionId(qbSectionId, selectedTestSections),
           subject: q.subject || selectedTest?.subject || "",
           topic: q.topic || "",
           isActive: true,
@@ -541,6 +655,8 @@ export default function Questions() {
           source: "question_bank",
           bankQuestionId: q.id,
           contentFormat: "html",
+
+          questionOrder: baseOrder + added,
 
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -592,6 +708,10 @@ export default function Questions() {
       const active = x.isActive !== false;
       if (statusFilter === "active" && !active) return false;
       if (statusFilter === "inactive" && active) return false;
+      if (sectionFilter !== "all") {
+        const currentSectionId = resolveSectionId(x.sectionId, selectedTestSections);
+        if (currentSectionId !== sectionFilter) return false;
+      }
 
       if (!q) return true;
 
@@ -606,7 +726,25 @@ export default function Questions() {
 
       return hay.includes(q);
     });
-  }, [questions, search, difficultyFilter, statusFilter]);
+  }, [questions, search, difficultyFilter, statusFilter, sectionFilter, selectedTestSections]);
+
+  // Group filtered questions by section
+  const questionsBySection = useMemo(() => {
+    const map: Record<string, QuestionDoc[]> = {};
+    // Initialize all sections with empty arrays
+    selectedTestSections.forEach((section) => {
+      map[section.id] = [];
+    });
+    // Distribute filtered questions into sections
+    filtered.forEach((q) => {
+      const sid = resolveSectionId(q.sectionId, selectedTestSections);
+      if (!map[sid]) map[sid] = [];
+      map[sid].push(q);
+    });
+    return map;
+  }, [filtered, selectedTestSections]);
+
+  const dndEnabled = search.trim().length === 0 && difficultyFilter === "all" && statusFilter === "all";
 
   const dndEnabled = search.trim().length === 0 && difficultyFilter === "all" && statusFilter === "all";
 
@@ -621,11 +759,14 @@ export default function Questions() {
 
   function resetEditor() {
     setEditingId(null);
+    setAddingToSection(null);
+    setEditingOriginalScoring(null);
     setFormQuestion("");
     setFormOptions(["", "", "", ""]);
     setFormCorrect(0);
     setFormExplanation("");
     setFormDifficulty("medium");
+    setFormSectionId(selectedTestSections[0]?.id || "main");
     setFormSubject(selectedTest?.subject || "");
     setFormTopic("");
     setFormMarks(selectedTest?.positiveMarks != null ? String(selectedTest.positiveMarks) : "");
@@ -633,6 +774,63 @@ export default function Questions() {
     setFormActive(true);
   }
 
+<<<<<<< HEAD
+=======
+  function scoreResponses(
+    qs: { correctOption?: number; correctAnswer?: any; marks?: number; positiveMarks?: number; negativeMarks?: number; type?: string; options?: string[] }[],
+    responses: Record<string, { answer?: string | null }>
+  ) {
+    let score = 0, maxScore = 0, correctCount = 0, incorrectCount = 0;
+    for (const q of qs) {
+      const pos = safeNum(q.marks ?? q.positiveMarks, 5);
+      const neg = Math.abs(safeNum(q.negativeMarks, 1));
+      maxScore += pos;
+      const userAnswer = (responses[(q as any).id] as any)?.answer ?? null;
+      if (userAnswer === null || userAnswer === undefined || String(userAnswer).trim() === "") continue;
+      let isCorrect = false;
+      if (q.type === "integer") {
+        isCorrect = String(userAnswer).trim() === String(q.correctAnswer ?? "").trim();
+      } else {
+        isCorrect = String(userAnswer) === String(q.correctOption ?? 0);
+      }
+      if (isCorrect) { score += pos; correctCount += 1; }
+      else { score -= neg; incorrectCount += 1; }
+    }
+    const attempted = correctCount + incorrectCount;
+    const accuracy = attempted > 0 ? correctCount / attempted : 0;
+    return { score, maxScore, accuracy, correctCount, incorrectCount };
+  }
+
+  async function recalculateAttemptsForTest(testId: string) {
+    const qSnap = await getDocs(collection(db, "test_series", testId, "questions"));
+    const qs = qSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+    if (!qs.length) return;
+
+    const aSnap = await getDocs(
+      query(collection(db, "attempts"), where("testId", "==", testId))
+    );
+    // Filter to submitted/completed in JS to avoid needing a composite Firestore index
+    const submittedDocs = aSnap.docs.filter((d) => {
+      const s = String(d.data().status || "").toLowerCase();
+      return ["submitted", "completed", "finished", "done"].includes(s);
+    });
+    if (!submittedDocs.length) return;
+
+    const chunks: (typeof aSnap.docs)[] = [];
+    for (let i = 0; i < submittedDocs.length; i += 490) chunks.push(submittedDocs.slice(i, i + 490));
+
+    for (const chunk of chunks) {
+      const b = writeBatch(db);
+      for (const aDoc of chunk) {
+        const responses = (aDoc.data().responses as Record<string, { answer?: string | null }>) || {};
+        const { score, maxScore, accuracy, correctCount, incorrectCount } = scoreResponses(qs, responses);
+        b.update(aDoc.ref, { score, maxScore, accuracy, correctCount, incorrectCount, marksRecalculatedAt: serverTimestamp() });
+      }
+      await b.commit();
+    }
+  }
+
+>>>>>>> ad328152beaee326d87e5321cccc6bc2d831d0fb
   function getNextQuestionOrder() {
     return questions.reduce((max, q) => {
       const n = Number(q.questionOrder);
@@ -671,6 +869,7 @@ export default function Questions() {
     }
   }
 
+<<<<<<< HEAD
   async function handleDragEnd(event: DragEndEvent) {
     if (!dndEnabled || reordering) return;
     const { active, over } = event;
@@ -681,6 +880,55 @@ export default function Questions() {
     const reorderedBase = arrayMove(questions, oldIndex, newIndex);
     const reordered = reorderedBase.map((q, i) => ({ ...q, questionOrder: i + 1 }));
     setQuestions(reordered);
+=======
+  async function handleSectionsDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = selectedTestSections.findIndex((s) => s.id === String(active.id));
+    const newIndex = selectedTestSections.findIndex((s) => s.id === String(over.id));
+    if (oldIndex < 0 || newIndex < 0) return;
+    const reordered = arrayMove(selectedTestSections, oldIndex, newIndex);
+    // Optimistic update
+    setTests((prev) =>
+      prev.map((t) =>
+        t.id === selectedTestId ? { ...t, sections: reordered } : t
+      )
+    );
+    try {
+      await updateDoc(doc(db, "test_series", selectedTestId), {
+        sections: reordered.map((s) => ({ id: s.id, name: s.name })),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Failed to save section order", variant: "destructive" });
+      setTests((prev) =>
+        prev.map((t) =>
+          t.id === selectedTestId ? { ...t, sections: selectedTestSections } : t
+        )
+      );
+    }
+  }
+
+  async function handleSectionDragEnd(sectionId: string, event: DragEndEvent) {
+    if (!dndEnabled || reordering) return;
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const sectionQs = questions.filter(
+      (q) => resolveSectionId(q.sectionId, selectedTestSections) === sectionId
+    );
+    const oldIndex = sectionQs.findIndex((q) => q.id === String(active.id));
+    const newIndex = sectionQs.findIndex((q) => q.id === String(over.id));
+    if (oldIndex < 0 || newIndex < 0) return;
+
+    const reorderedBase = arrayMove(sectionQs, oldIndex, newIndex);
+    const reorderedSection = reorderedBase.map((q, i) => ({ ...q, questionOrder: i + 1 }));
+    const otherQs = questions.filter(
+      (q) => resolveSectionId(q.sectionId, selectedTestSections) !== sectionId
+    );
+    setQuestions(sortQuestionsForDisplay([...otherQs, ...reorderedSection]));
+>>>>>>> ad328152beaee326d87e5321cccc6bc2d831d0fb
     await persistDraggedOrder(reorderedBase);
   }
 
@@ -690,7 +938,27 @@ export default function Questions() {
       return;
     }
     resetEditor();
+    setAddingToSection(null);
     setEditorOpen(true);
+  }
+
+  function openCreateForSection(sectionId: string) {
+    if (!selectedTestId) {
+      toast({ title: "Select a test first", description: "Choose a test to add questions." });
+      return;
+    }
+    resetEditor();
+    setFormSectionId(sectionId);
+    setAddingToSection(sectionId);
+    setEditorOpen(true);
+    // Make sure this section is expanded
+    setCollapsedQSections((prev) => prev.filter((id) => id !== sectionId));
+  }
+
+  function toggleQSectionCollapse(sectionId: string) {
+    setCollapsedQSections((prev) =>
+      prev.includes(sectionId) ? prev.filter((id) => id !== sectionId) : [...prev, sectionId]
+    );
   }
 
   function openEdit(q: QuestionDoc) {
@@ -704,11 +972,13 @@ export default function Questions() {
     setFormCorrect(Number.isFinite(q.correctOption) ? q.correctOption : 0);
     setFormExplanation(q.explanation || "");
     setFormDifficulty(q.difficulty || "medium");
+    setFormSectionId(resolveSectionId(q.sectionId, selectedTestSections));
     setFormSubject(q.subject || selectedTest?.subject || "");
     setFormTopic(q.topic || "");
     setFormMarks(q.marks != null ? String(q.marks) : (selectedTest?.positiveMarks != null ? String(selectedTest.positiveMarks) : ""));
     setFormNegMarks(q.negativeMarks != null ? String(q.negativeMarks) : (selectedTest?.negativeMarks != null ? String(selectedTest.negativeMarks) : ""));
     setFormActive(q.isActive !== false);
+    setEditingOriginalScoring({ correctOption: q.correctOption, marks: q.marks, negativeMarks: q.negativeMarks });
     setEditorOpen(true);
   }
 
@@ -738,6 +1008,7 @@ export default function Questions() {
 
     const marks = formMarks.trim() === "" ? undefined : safeNum(formMarks, undefined as any);
     const negativeMarks = formNegMarks.trim() === "" ? undefined : safeNum(formNegMarks, undefined as any);
+    const normalizedSectionId = resolveSectionId(formSectionId, selectedTestSections);
 
     setSaving(true);
     try {
@@ -747,6 +1018,7 @@ export default function Questions() {
         correctOption: formCorrect,
         explanation: formExplanation.trim() || "",
         difficulty: formDifficulty,
+        sectionId: normalizedSectionId,
         subject: formSubject.trim() || selectedTest?.subject || "",
         topic: formTopic.trim() || "",
         isActive: !!formActive,
@@ -780,6 +1052,18 @@ export default function Questions() {
         });
 
         toast({ title: "Question updated", description: "Changes saved successfully." });
+
+        const scoringChanged =
+          formCorrect !== editingOriginalScoring?.correctOption ||
+          safeNum(formMarks, -1) !== safeNum(String(editingOriginalScoring?.marks ?? ""), -1) ||
+          safeNum(formNegMarks, -1) !== safeNum(String(editingOriginalScoring?.negativeMarks ?? ""), -1);
+
+        if (scoringChanged) {
+          recalculateAttemptsForTest(selectedTestId).catch((err) => {
+            console.error("Recalculation failed:", err);
+            toast({ title: "Score recalculation failed", description: String(err?.message || err), variant: "destructive" });
+          });
+        }
       }
 
       setEditorOpen(false);
@@ -840,6 +1124,7 @@ export default function Questions() {
         correctOption: q.correctOption,
         explanation: q.explanation || "",
         difficulty: q.difficulty,
+        sectionId: resolveSectionId(q.sectionId, selectedTestSections),
         subject: q.subject || "",
         topic: q.topic || "",
         marks: q.marks ?? null,
@@ -880,6 +1165,7 @@ export default function Questions() {
     setBulkSaving(true);
     try {
       // simple sequential add (safe and minimal setup)
+      const baseOrder = getNextQuestionOrder();
       let added = 0;
       for (const item of arr) {
         const qText = String(item?.question || "").trim();
@@ -893,12 +1179,17 @@ export default function Questions() {
           correctOption: correct,
           explanation: String(item?.explanation || ""),
           difficulty: normalizeDifficulty(item?.difficulty),
+          sectionId: resolveSectionId(
+            String(item?.sectionId || item?.section || "").trim() || bulkSectionId,
+            selectedTestSections
+          ),
           subject: String(item?.subject || selectedTest?.subject || ""),
           topic: String(item?.topic || ""),
           isActive: item?.isActive !== false,
           usageCount: 0,
           source: "manual",
           contentFormat: "html",
+          questionOrder: baseOrder + added,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
@@ -1041,6 +1332,22 @@ export default function Questions() {
                   {DIFFICULTY_OPTIONS.map((d) => (
                     <SelectItem key={d} value={d}>
                       {d.charAt(0).toUpperCase() + d.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Section</Label>
+              <Select value={formSectionId} onValueChange={setFormSectionId}>
+                <SelectTrigger className="rounded-xl h-11">
+                  <SelectValue placeholder="Select section" />
+                </SelectTrigger>
+                <SelectContent>
+                  {selectedTestSections.map((section) => (
+                    <SelectItem key={section.id} value={section.id}>
+                      {section.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1199,6 +1506,25 @@ export default function Questions() {
                 className="min-h-[220px] rounded-xl"
               />
 
+              <div className="space-y-2">
+                <Label>Default Section</Label>
+                <Select value={bulkSectionId} onValueChange={setBulkSectionId}>
+                  <SelectTrigger className="rounded-xl">
+                    <SelectValue placeholder="Select section" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectedTestSections.map((section) => (
+                      <SelectItem key={section.id} value={section.id}>
+                        {section.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Used when a JSON item does not provide sectionId.
+                </p>
+              </div>
+
               <div className="flex gap-2 justify-end">
                 <Button variant="outline" className="rounded-xl" onClick={() => setBulkOpen(false)} disabled={bulkSaving}>
                   Cancel
@@ -1283,6 +1609,22 @@ export default function Questions() {
                       <SelectItem value="easy">Easy</SelectItem>
                       <SelectItem value="medium">Medium</SelectItem>
                       <SelectItem value="hard">Hard</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="lg:col-span-12">
+                  <Label className="text-xs">Add To Section</Label>
+                  <Select value={qbSectionId} onValueChange={setQbSectionId}>
+                    <SelectTrigger className="rounded-xl mt-1">
+                      <SelectValue placeholder="Select section" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {selectedTestSections.map((section) => (
+                        <SelectItem key={section.id} value={section.id}>
+                          {section.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1429,6 +1771,20 @@ export default function Questions() {
           </div>
 
           <div className="flex gap-2 flex-wrap">
+            <Select value={sectionFilter} onValueChange={setSectionFilter}>
+              <SelectTrigger className="w-[180px] rounded-xl">
+                <SelectValue placeholder="Section" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Sections</SelectItem>
+                {selectedTestSections.map((section) => (
+                  <SelectItem key={section.id} value={section.id}>
+                    {section.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
             <Select value={difficultyFilter} onValueChange={(v: any) => setDifficultyFilter(v)}>
               <SelectTrigger className="w-[160px] rounded-xl">
                 <SelectValue placeholder="Difficulty" />
@@ -1459,6 +1815,7 @@ export default function Questions() {
                 setSearch("");
                 setDifficultyFilter("all");
                 setStatusFilter("all");
+                setSectionFilter("all");
               }}
             >
               Reset
@@ -1498,8 +1855,9 @@ export default function Questions() {
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-3">
-              {editorOpen && !editingId && (
+            <div className="space-y-4">
+              {/* Inline editor for new questions (shows at top when no specific section is targeted) */}
+              {editorOpen && !editingId && addingToSection === null && (
                 <Card className="border-primary/40 shadow-md ring-1 ring-primary/20">
                   <CardContent className="p-6">
                     {renderInlineEditor()}
@@ -1512,6 +1870,7 @@ export default function Questions() {
                   Clear filters to reorder questions
                 </p>
               )}
+<<<<<<< HEAD
 
               {filtered.length === 0 && !editorOpen && (
                 <Card className="border-border/50">
@@ -1699,6 +2058,292 @@ export default function Questions() {
                       </SortableCardShell>
                     );
                   })}
+=======
+
+              {/* Section-grouped question display */}
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleSectionsDragEnd}>
+                <SortableContext items={selectedTestSections.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+              {selectedTestSections.map((section) => {
+                const sectionQuestions = questionsBySection[section.id] || [];
+                const isCollapsed = collapsedQSections.includes(section.id);
+                const isAddingHere = addingToSection === section.id;
+                const canReorderSections = selectedTestSections.length > 1;
+
+                return (
+                  <SortableCardShell key={section.id} id={section.id} dndEnabled={canReorderSections}>
+                    {(sectionDragProps, isSectionDragging) => (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.25 }}
+                  >
+                    <Card className={cn("border-border/50 overflow-hidden", isSectionDragging && "shadow-lg opacity-80")}>
+                      {/* Section Header */}
+                      <div
+                        className="flex items-center justify-between p-4 cursor-pointer hover:bg-muted/30 transition-colors border-b border-border/50"
+                        onClick={() => toggleQSectionCollapse(section.id)}
+                      >
+                        <div className="flex items-center gap-3">
+                          {canReorderSections && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 rounded-lg text-muted-foreground cursor-grab active:cursor-grabbing shrink-0"
+                              onClick={(e) => e.stopPropagation()}
+                              aria-label="Drag to reorder section"
+                              {...sectionDragProps}
+                            >
+                              <GripVertical className="h-4 w-4" />
+                            </Button>
+                          )}
+                          <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-primary/10 text-primary">
+                            {isCollapsed ? (
+                              <ChevronRight className="h-4 w-4" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="font-semibold text-foreground">{section.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {sectionQuestions.length} question{sectionQuestions.length !== 1 ? "s" : ""}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary" className="rounded-full">
+                            {sectionQuestions.length}
+                          </Badge>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-xl"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openCreateForSection(section.id);
+                            }}
+                          >
+                            <Plus className="h-3.5 w-3.5 mr-1.5" />
+                            Add Question
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Section Content (collapsible) */}
+                      {!isCollapsed && (
+                        <div className="divide-y divide-border/30">
+                          {/* Inline editor for this section */}
+                          {isAddingHere && (
+                            <div className="p-6 border-b border-border/30 bg-primary/5">
+                              {renderInlineEditor()}
+                            </div>
+                          )}
+
+                          {sectionQuestions.length === 0 && !isAddingHere ? (
+                            <div className="p-8 text-center text-muted-foreground">
+                              <p className="text-sm">No questions in this section yet.</p>
+                              <Button
+                                className="rounded-xl gradient-bg text-white mt-3"
+                                size="sm"
+                                onClick={() => openCreateForSection(section.id)}
+                              >
+                                <Plus className="h-3.5 w-3.5 mr-1.5" />
+                                Add first question
+                              </Button>
+                            </div>
+                          ) : (
+                            <DndContext
+                              sensors={sensors}
+                              collisionDetection={closestCenter}
+                              onDragEnd={(event) => handleSectionDragEnd(section.id, event)}
+                            >
+                              <SortableContext
+                                items={sectionQuestions.map((q) => q.id)}
+                                strategy={verticalListSortingStrategy}
+                              >
+                                {sectionQuestions.map((q, idx) => {
+                                  const isHtml = q.contentFormat === "html" || q.source === "question_bank" || /<\w+[\s\S]*>/i.test(q.question || "");
+                                  const correctText = q.options?.[q.correctOption] || "";
+                                  const correctTextPlain = stripHtml(correctText);
+                                  const isEditing = editingId === q.id && editorOpen;
+
+                                  return (
+                                    <SortableCardShell key={q.id} id={q.id} dndEnabled={dndEnabled && !isEditing}>
+                                      {(dragProps, isDragging) => (
+                                        <motion.div
+                                          initial={{ opacity: 0, y: 4 }}
+                                          animate={{ opacity: 1, y: 0 }}
+                                          transition={{ delay: isDragging ? 0 : Math.min(0.15, idx * 0.02) }}
+                                        >
+                                          <div className={cn(
+                                            "p-4 hover:bg-muted/10 transition-all duration-200",
+                                            isEditing && "bg-primary/5 ring-1 ring-primary/20",
+                                            isDragging && "opacity-70 bg-muted/20"
+                                          )}>
+                                            {isEditing ? (
+                                              renderInlineEditor()
+                                            ) : (
+                                              <div className="flex items-start justify-between gap-3">
+                                                <div className="min-w-0 flex-1">
+                                                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                                                    <span className="text-xs font-mono text-muted-foreground">Q{idx + 1}</span>
+                                                    <Badge variant="secondary" className={cn("rounded-full", difficultyBadge(q.difficulty))}>
+                                                      {q.difficulty}
+                                                    </Badge>
+                                                    {q.subject ? (
+                                                      <Badge variant="secondary" className="rounded-full">
+                                                        {q.subject}
+                                                      </Badge>
+                                                    ) : null}
+                                                    {q.topic ? (
+                                                      <Badge variant="secondary" className="rounded-full">
+                                                        {q.topic}
+                                                      </Badge>
+                                                    ) : null}
+
+                                                    {q.isActive !== false ? (
+                                                      <Badge variant="secondary" className="rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                                                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                                                        published
+                                                      </Badge>
+                                                    ) : (
+                                                      <Badge variant="secondary" className="rounded-full bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-300">
+                                                        <XCircle className="h-3 w-3 mr-1" />
+                                                        draft
+                                                      </Badge>
+                                                    )}
+                                                  </div>
+
+                                                  {isHtml ? (
+                                                    <div
+                                                      className="prose prose-sm dark:prose-invert max-w-none leading-snug line-clamp-3"
+                                                      dangerouslySetInnerHTML={{ __html: q.question }}
+                                                    />
+                                                  ) : (
+                                                    <p className="font-medium text-foreground leading-snug line-clamp-3">
+                                                      {q.question}
+                                                    </p>
+                                                  )}
+
+                                                  {q.options?.length ? (
+                                                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                      {q.options.slice(0, 4).map((opt, i) => (
+                                                        <div
+                                                          key={i}
+                                                          className={cn(
+                                                            "text-sm p-2 rounded-xl border",
+                                                            i === q.correctOption
+                                                              ? "border-primary/40 bg-primary/5"
+                                                              : "border-border bg-muted/20"
+                                                          )}
+                                                        >
+                                                          <span className="text-xs text-muted-foreground mr-2">
+                                                            {String.fromCharCode(65 + i)}.
+                                                          </span>
+                                                          {isHtml ? (
+                                                            <span
+                                                              className={cn(i === q.correctOption && "font-medium")}
+                                                              dangerouslySetInnerHTML={{ __html: opt }}
+                                                            />
+                                                          ) : (
+                                                            <span className={cn(i === q.correctOption && "font-medium")}>
+                                                              {opt}
+                                                            </span>
+                                                          )}
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  ) : null}
+
+                                                  <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                                                    <span>Correct: <span className="font-medium text-foreground">{correctTextPlain || "—"}</span></span>
+                                                    <span>Marks: <span className="font-medium text-foreground">{q.marks ?? selectedTest?.positiveMarks ?? "—"}</span></span>
+                                                    <span>Neg: <span className="font-medium text-foreground">{q.negativeMarks ?? selectedTest?.negativeMarks ?? "—"}</span></span>
+                                                    <span>Used: <span className="font-medium text-foreground">{q.usageCount ?? 0}</span></span>
+                                                    <span>Updated: <span className="font-medium text-foreground">{fmtDate(q.updatedAtTs || q.createdAtTs || null)}</span></span>
+                                                  </div>
+                                                </div>
+
+                                                <div className="flex flex-col items-end gap-2">
+                                                  <div className="flex items-center gap-2">
+                                                    {dndEnabled && (
+                                                      <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="rounded-xl text-muted-foreground cursor-grab active:cursor-grabbing"
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        aria-label="Drag to reorder"
+                                                        {...dragProps}
+                                                      >
+                                                        <GripVertical className="h-4 w-4" />
+                                                      </Button>
+                                                    )}
+                                                    <Switch
+                                                      checked={q.isActive !== false}
+                                                      onCheckedChange={(checked) => toggleActive(q, checked)}
+                                                    />
+                                                  </div>
+
+                                                  <div className="flex items-center gap-2">
+                                                    <Button
+                                                      variant="outline"
+                                                      size="icon"
+                                                      className="rounded-xl"
+                                                      onClick={() => openEdit(q)}
+                                                    >
+                                                      <Edit className="h-4 w-4" />
+                                                    </Button>
+                                                    <Button
+                                                      variant="outline"
+                                                      size="icon"
+                                                      className="rounded-xl"
+                                                      onClick={() => {
+                                                        navigator.clipboard.writeText(q.question);
+                                                        toast({ title: "Copied", description: "Question text copied." });
+                                                      }}
+                                                    >
+                                                      <Copy className="h-4 w-4" />
+                                                    </Button>
+                                                    <Button
+                                                      variant="outline"
+                                                      size="icon"
+                                                      className="rounded-xl text-destructive"
+                                                      onClick={() => deleteQuestion(q)}
+                                                    >
+                                                      <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            )}
+
+                                            {!isEditing && q.explanation ? (
+                                              <div className="mt-4 p-3 rounded-xl bg-muted/30 border border-border">
+                                                <p className="text-xs text-muted-foreground mb-1">Explanation</p>
+                                                <p className="text-sm text-foreground whitespace-pre-wrap">{q.explanation}</p>
+                                              </div>
+                                            ) : null}
+                                          </div>
+                                        </motion.div>
+                                      )}
+                                    </SortableCardShell>
+                                  );
+                                })}
+                              </SortableContext>
+                            </DndContext>
+                          )}
+                        </div>
+                      )}
+                    </Card>
+                  </motion.div>
+                    )}
+                  </SortableCardShell>
+                );
+              })}
+>>>>>>> ad328152beaee326d87e5321cccc6bc2d831d0fb
                 </SortableContext>
               </DndContext>
             </div>

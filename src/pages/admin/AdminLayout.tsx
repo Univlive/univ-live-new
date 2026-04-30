@@ -15,6 +15,7 @@ import {
   Shield,
   CreditCard,
   ChevronLeft,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -25,11 +26,9 @@ import { Library } from "lucide-react";
 const sidebarItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/admin" },
   { icon: BookOpen, label: "Test Bank", path: "/admin/tests" },
+  { icon: FileText, label: "Templates", path: "/admin/templates" },
   { icon: Users, label: "Educators", path: "/admin/educators" },
   { icon: CreditCard, label: "Seat Management", path: "/admin/seat-management" },
-  { icon: GraduationCap, label: "Students", path: "/admin/students" },
-  { icon: BarChart3, label: "Attempts", path: "/admin/attempts" },
-  { icon: MessageSquare, label: "Support", path: "/admin/support" },
   { icon: Library, label: "Question Bank", path: "/admin/question-bank" },
 ];
 

@@ -15,6 +15,7 @@ type TestMeta = {
   subject?: string;
   source?: string;
   originSource?: string;
+  sections?: { id: string; name: string; questionsCount?: number | null }[];
   linkedAdminTestId?: string;
   originalTestId?: string;
   isQuestionSourceShared?: boolean;
@@ -50,6 +51,17 @@ export default function ManageQuestionsPage() {
             subject: String(data?.subject || ""),
             source: String(data?.source || ""),
             originSource: String(data?.originSource || ""),
+            sections: Array.isArray(data?.sections)
+              ? data.sections
+                  .map((section: any, index: number) => ({
+                    id: String(section?.id || `sec_${index + 1}`),
+                    name: String(section?.name || `Section ${index + 1}`),
+                    questionsCount: Number.isFinite(Number(section?.questionsCount))
+                      ? Number(section.questionsCount)
+                      : null,
+                  }))
+                  .filter((section) => section.id)
+              : [],
             linkedAdminTestId: String(data?.linkedAdminTestId || ""),
             originalTestId: String(data?.originalTestId || ""),
             isQuestionSourceShared: data?.isQuestionSourceShared === true,
@@ -112,6 +124,7 @@ export default function ManageQuestionsPage() {
       testId={testId}
       testTitle={testMeta.title}
       testSubject={testMeta.subject}
+      testSections={testMeta.sections}
       educatorUid={firebaseUser.uid}
       readOnly={isAdminLinked}
       questionSource={isAdminLinked ? "admin" : "educator"}
