@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   User,
@@ -10,7 +10,6 @@ import {
   LogOut,
   Eye,
   EyeOff,
-  Upload,
   Loader2,
   Globe,
   ExternalLink,
@@ -26,7 +25,6 @@ import { toast } from "@/hooks/use-toast";
 import { stringToColor } from "@/lib/utils";
 
 import {
-  onAuthStateChanged,
   signOut,
   updateProfile,
   EmailAuthProvider,
@@ -34,8 +32,7 @@ import {
   updatePassword,
 } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { auth, db, storage } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthProvider";
 import { buildTenantUrl } from "@/lib/tenant";
 
@@ -57,7 +54,6 @@ type EducatorProfileDoc = {
 };
 
 export default function Settings() {
-  const fileRef = useRef<HTMLInputElement | null>(null);
   const { firebaseUser, profile, loading: authLoading, refreshProfile } = useAuth();
 
   // Profile fields. Initialize from profile.
@@ -68,7 +64,6 @@ export default function Settings() {
   const [photoURL, setPhotoURL] = useState<string>(profile?.photoURL || "");
 
   const [savingProfile, setSavingProfile] = useState(false);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   // Subdomain / slug
   const [tenantSlug, setTenantSlug] = useState(profile?.tenantSlug || "");
@@ -141,56 +136,6 @@ export default function Settings() {
     .slice(0, 2)
     .map((x) => x[0]?.toUpperCase())
     .join("");
-
-  async function handlePickPhoto() {
-    fileRef.current?.click();
-  }
-
-  async function handleUploadPhoto(file: File) {
-    if (!firebaseUser?.uid) return;
-
-    if (file.size > 2 * 1024 * 1024) {
-      toast({
-        title: "File too large",
-        description: "Max 2MB. Please upload a smaller image.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setUploadingPhoto(true);
-    try {
-      const path = `educators/${firebaseUser.uid}/profile/avatar_${Date.now()}`;
-      const storageRef = ref(storage, path);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
-
-      // Update auth profile + firestore
-      if (auth.currentUser) {
-        await updateProfile(auth.currentUser, { photoURL: url });
-      }
-      await setDoc(
-        doc(db, "educators", firebaseUser.uid),
-        { photoURL: url, updatedAt: serverTimestamp() },
-        { merge: true }
-      );
-
-      await refreshProfile();
-
-      toast({
-        title: "Photo updated",
-        description: "Your profile photo has been changed.",
-      });
-    } catch {
-      toast({
-        title: "Upload failed",
-        description: "Could not upload photo. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setUploadingPhoto(false);
-    }
-  }
 
   async function saveProfile() {
     if (!firebaseUser?.uid || !auth.currentUser) return;
@@ -451,35 +396,6 @@ export default function Settings() {
                   {initials}
                 </AvatarFallback>
               </Avatar>
-
-              <div>
-                <Button variant="outline" size="sm" onClick={handlePickPhoto} disabled={uploadingPhoto}>
-                  {uploadingPhoto ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      Uploading...
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="h-4 w-4 mr-2" />
-                      Change Photo
-                    </>
-                  )}
-                </Button>
-                <p className="text-xs text-muted-foreground mt-2">JPG, PNG or GIF. Max 2MB.</p>
-
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) handleUploadPhoto(f);
-                    if (e.target) e.target.value = "";
-                  }}
-                />
-              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -758,63 +674,6 @@ export default function Settings() {
           </CardContent>
         </Card>
       </motion.div>
-
-      {/* Security Section
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
-      >
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Shield className="h-5 w-5" />
-              Security
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between p-4 rounded-lg border border-border">
-              <div>
-                <p className="text-sm font-medium">Two-Factor Authentication</p>
-                <p className="text-xs text-muted-foreground">
-                  Add an extra layer of security to your account
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  toast({
-                    title: "Coming soon",
-                    description: "2FA will be enabled in a later phase.",
-                  })
-                }
-              >
-                Enable
-              </Button>
-            </div>
-
-            <div className="flex items-center justify-between p-4 rounded-lg border border-border">
-              <div>
-                <p className="text-sm font-medium">Active Sessions</p>
-                <p className="text-xs text-muted-foreground">Manage your active login sessions</p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  toast({
-                    title: "Info",
-                    description: "Session management will be added later.",
-                  })
-                }
-              >
-                View All
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div> */}
 
       {/* Danger Zone */}
       <motion.div
