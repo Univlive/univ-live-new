@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from "firebase/auth";
+import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { toast } from "sonner";
 import { Loader2, GraduationCap } from "lucide-react";
@@ -45,6 +45,33 @@ export default function Join() {
       .finally(() => setLoadingInfo(false));
   }, [token]);
 
+  // If user is already logged in, accept invite immediately without showing auth form
+  useEffect(() => {
+    if (!token) return;
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      unsub();
+      if (!user) return;
+      setSubmitting(true);
+      try {
+        const idToken = await user.getIdToken();
+        const res = await fetch(`${API}/api/invites/${token}/accept`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+          body: JSON.stringify({ name: user.displayName || user.email || "", email: user.email || "" }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || "Enrollment failed");
+        }
+        toast.success("You've been enrolled successfully.");
+        nav("/student/dashboard");
+      } catch (e: any) {
+        toast.error(e?.message || "Enrollment failed");
+        setSubmitting(false);
+      }
+    });
+  }, [token]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!token || !info) return;
@@ -54,17 +81,14 @@ export default function Join() {
     }
     setSubmitting(true);
     try {
-      let uid: string;
       let idToken: string;
 
       if (mode === "signup") {
         const cred = await createUserWithEmailAndPassword(auth, email, password);
         await updateProfile(cred.user, { displayName: name });
-        uid = cred.user.uid;
         idToken = await cred.user.getIdToken();
       } else {
         const cred = await signInWithEmailAndPassword(auth, email, password);
-        uid = cred.user.uid;
         idToken = await cred.user.getIdToken();
       }
 
@@ -83,7 +107,7 @@ export default function Join() {
       nav("/student/dashboard");
     } catch (e: any) {
       const msg = e?.message || "Something went wrong";
-      if (msg.includes("email-already-in-use")) {
+      if (msg.includes("email-already-in-use") || msg.includes("EMAIL_EXISTS")) {
         toast.error("Email already registered — sign in instead.");
         setMode("signin");
       } else {

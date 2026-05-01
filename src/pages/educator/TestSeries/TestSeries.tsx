@@ -63,7 +63,9 @@ import { uploadToImageKit } from "@/lib/imagekitUpload";
 
 // Component
 import CreateCustomTest from "./CreateCustomTest";
+import CreateEducatorTemplate from "./CreateEducatorTemplate";
 import NewFolderButton from "./NewFolder";
+import ScheduleTest from "./ScheduleTest";
 
 // Firebase
 import { onAuthStateChanged } from "firebase/auth";
@@ -218,6 +220,15 @@ export default function TestSeries() {
   // Batch filter (library tab)
   const [batchFilter, setBatchFilter] = useState<string>("all");
 
+  // Template state
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("none");
+  const [educatorTemplates, setEducatorTemplates] = useState<any[]>([]);
+  const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
+
+  // Schedule state
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [testToSchedule, setTestToSchedule] = useState<any>(null);
+
   // Auth + Data
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, (user) => {
@@ -263,8 +274,17 @@ export default function TestSeries() {
           const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           setFolders(rows);
         },
+      );
+
+      const templatesQ = query(collection(db, "educators", user.uid, "templates"));
+      const unsubTemplates = onSnapshot(
+        templatesQ,
+        (snap) => {
+          const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          setEducatorTemplates(rows);
+        },
         () => {
-          toast.error("Failed to load folders.");
+          toast.error("Failed to load your templates.");
         }
       );
 
@@ -281,9 +301,8 @@ export default function TestSeries() {
         }
       );
 
-      // BANK tests: root test_series where source == "admin"
-      // NOTE: admin tests created via admin TestForm.tsx use { source: "admin" }
-      const bankQ = query(collection(db, "test_series"), where("source", "==", "admin"));
+      // BANK tests: root templates collection
+      const bankQ = query(collection(db, "templates"));
       const unsubBank = onSnapshot(
         bankQ,
         (snap) => {
@@ -303,6 +322,7 @@ export default function TestSeries() {
 
       return () => {
         unsubFolders();
+        unsubTemplates();
         unsubMy();
         unsubBank();
       };
@@ -310,6 +330,29 @@ export default function TestSeries() {
 
     return () => unsubAuth();
   }, []);
+
+  const handleSaveTemplate = async (templatePayload: any) => {
+    if (!currentUser) {
+      toast.error("Please login again and retry.");
+      return;
+    }
+
+    setSavingTemplate(true);
+    try {
+      await addDoc(collection(db, "educators", currentUser.uid, "templates"), {
+        templateName: String(templatePayload.templateName || templatePayload.title || "Custom template"),
+        ...templatePayload,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      toast.success("Template saved");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to save template");
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
 
   const handleCreateFolder = async () => {
     if (!currentUser) {
@@ -494,6 +537,22 @@ export default function TestSeries() {
     return groups;
   }, [bankTests, search]);
 
+  const templateOptions = useMemo(
+    () => [
+      ...bankTests.map((test: any) => ({
+        id: `admin:${test.id}`,
+        label: String(test?.title || "Untitled template"),
+        group: "admin" as const,
+      })),
+      ...educatorTemplates.map((template: any) => ({
+        id: `edu:${template.id}`,
+        label: String(template?.templateName || template?.title || "Custom template"),
+        group: "educator" as const,
+      })),
+    ],
+    [bankTests, educatorTemplates]
+  );
+
   const importedAdminTestIds = useMemo(() => {
     const ids = new Set<string>();
 
@@ -536,14 +595,14 @@ export default function TestSeries() {
       if (!testsSnap.empty) {
         const CHUNK_SIZE = 450;
         const docs = testsSnap.docs;
-        
+
         for (let i = 0; i < docs.length; i += CHUNK_SIZE) {
           const batch = writeBatch(db);
           const chunk = docs.slice(i, i + CHUNK_SIZE);
           chunk.forEach((d) => {
-            batch.update(d.ref, { 
-              attemptsAllowed: val, 
-              updatedAt: serverTimestamp() 
+            batch.update(d.ref, {
+              attemptsAllowed: val,
+              updatedAt: serverTimestamp()
             });
           });
           await batch.commit();
@@ -704,37 +763,73 @@ export default function TestSeries() {
   };
 
   // Create educator custom test (NO question bank import allowed, manual questions only)
-  const handleCreateCustom = async (e: any) => {
-    e.preventDefault();
+  const handleCreateCustom = async (values: any) => {
     if (!currentUser) return;
 
-    const fd = new FormData(e.target);
+    const [templateType, templateId] = String(selectedTemplateId || "none").split(":");
+    const adminTemplate = templateType === "admin" ? bankTests.find((test) => test.id === templateId) : null;
+    const educatorTemplate = templateType === "edu" ? educatorTemplates.find((template) => template.id === templateId) : null;
 
+    // Start with the values exactly as submitted by the CreateCustomTest dialog.
+    // The dialog has already pre-filled them from the template and allowed the user to edit.
     const payload: any = {
-      title: String(fd.get("title") || ""),
-      description: String(fd.get("description") || ""),
-      subject: String(fd.get("subject") || ""),
-      level: String(fd.get("level") || "General"),
-      durationMinutes: Number(fd.get("duration") || 0),
-      attemptsAllowed: globalAttemptsAllowed,
-
-      // educator ownership
+      title: String(values.title || ""),
+      description: String(values.description || ""),
+      subject: String(values.subject || ""),
+      level: String(values.level || "General"),
+      difficultyLevel: values.difficultyLevel ?? 0.5,
+      durationMinutes: Number(values.durationMinutes || 0),
+      attemptsAllowed: values.attemptsAllowed || globalAttemptsAllowed,
       source: "custom",
       originSource: "educator",
       createdBy: currentUser.uid,
-
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       questionsCount: 0,
     };
 
+    if (values.sections) {
+      payload.sections = values.sections;
+      payload.questionsCount = values.sections.reduce((acc: number, s: any) => acc + (Number(s.questionsCount) || 0), 0);
+    }
+    if (values.markingScheme) {
+      payload.markingScheme = values.markingScheme;
+    }
+    if (values.syllabus) {
+      payload.syllabus = values.syllabus;
+    }
+    if (values.requiresUnlock !== undefined) {
+      payload.requiresUnlock = values.requiresUnlock;
+    }
+    if (values.price !== undefined) {
+      payload.price = values.price;
+    }
+
+
+    // Add origin metadata (template reference only, NOT admin-linked)
+    // Tests created from templates are fully editable custom tests.
+    if (adminTemplate) {
+      payload.templateRef = { source: "admin", id: adminTemplate.id };
+      if (payload.isPublished === undefined) payload.isPublished = adminTemplate.isPublished ?? false;
+      if (payload.requiresUnlock === undefined) payload.requiresUnlock = adminTemplate.requiresUnlock ?? true;
+      if (payload.price === undefined) payload.price = adminTemplate.price ?? 0;
+    }
+
+    if (educatorTemplate) {
+      payload.originSource = "educator_template";
+      payload.templateId = educatorTemplate.id;
+      if (payload.isPublished === undefined) payload.isPublished = educatorTemplate.isPublished ?? false;
+      if (payload.requiresUnlock === undefined) payload.requiresUnlock = educatorTemplate.requiresUnlock ?? true;
+      if (payload.price === undefined) payload.price = educatorTemplate.price ?? 0;
+    }
+
     setCreating(true);
     try {
-      await addDoc(collection(db, "educators", currentUser.uid, "my_tests"), payload);
+      await addDoc(collection(db, "educators", currentUser.uid, "my_tests"), pruneUndefined(payload));
 
-      toast.success("Custom test created");
+      toast.success("Test created");
       setCreateOpen(false);
-      e.target.reset?.();
+      setSelectedTemplateId("none");
       setActiveTab("library");
     } catch (err) {
       console.error(err);
@@ -748,7 +843,16 @@ export default function TestSeries() {
     createOpen,
     setCreateOpen,
     handleCreateCustom,
-    creating
+    creating,
+    selectedTemplateId,
+    setSelectedTemplateId,
+    templates: templateOptions,
+    bankTests,
+    educatorTemplates,
+    onCreateTemplate: () => {
+      setCreateOpen(false);
+      setCreateTemplateOpen(true);
+    },
   }
 
   const moveTestState = {
@@ -804,7 +908,7 @@ export default function TestSeries() {
           </Select>
         </div>
 
-        
+
         <div className="flex gap-2">
           <div className="relative w-full sm:w-[320px]">
             <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
@@ -816,8 +920,22 @@ export default function TestSeries() {
             />
           </div>
 
-          {/* Create Custom Test */}
-          <CreateCustomTest {...creatCustomTestState} />
+          <div className="flex items-center gap-2">
+            {/* CreateEducatorTemplate is opened programmatically from the template dropdown */}
+            <CreateEducatorTemplate open={createTemplateOpen} onOpenChange={(open) => {
+              setCreateTemplateOpen(open);
+              // Re-open create test dialog after template creation completes
+              if (!open) setCreateOpen(true);
+            }} />
+            <Button className="gradient-bg text-white shadow-lg" onClick={() => setCreateOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" /> Create Custom Test
+            </Button>
+          </div>
+
+          {/* Create Custom Test Dialog (controlled) */}
+          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+            <CreateCustomTest {...creatCustomTestState} />
+          </Dialog>
 
         </div>
       </div>
@@ -993,7 +1111,6 @@ export default function TestSeries() {
                                       <span className="text-[9px] font-bold text-muted-foreground uppercase">Attempts:</span>
                                       <Select
                                         value={String(test.attemptsAllowed || 3)}
-                                        // disabled={isAdminLinked}
                                         onValueChange={(v) => handleUpdateTestAttempts(test.id, Number(v))}
                                       >
                                         <SelectTrigger className="h-6 w-[45px] text-[10px] font-bold rounded-md bg-background border-none shadow-none focus:ring-0">
@@ -1008,19 +1125,19 @@ export default function TestSeries() {
                                     </div>
                                   </div>
 
-                                  <div className="grid grid-cols-1 gap-2 mt-4 pt-4 border-t">
-                                    <Button
-                                      className="gradient-bg text-white rounded-xl shadow-sm"
-                                      size="sm"
-                                      onClick={() => {
-                                        navigate(`/educator/test-series/${test.id}/questions`);
-                                      }}
-                                    >
-                                      <Edit className="mr-2 h-3 w-3" /> {isAdminLinked ? "View Questions" : "Manage Questions"}
-                                    </Button>
-                                  </div>
-                                </CardContent>
-                              </Card>
+                                      <div className="grid grid-cols-1 gap-2 mt-4 pt-4 border-t">
+                                        <Button
+                                          className="gradient-bg text-white rounded-xl shadow-sm"
+                                          size="sm"
+                                          onClick={() => {
+                                            navigate(`/educator/test-series/${test.id}/questions`);
+                                          }}
+                                        >
+                                          <Edit className="mr-2 h-3 w-3" /> {isAdminLinked ? "View Questions" : "Manage Questions"}
+                                        </Button>
+                                      </div>
+                                    </CardContent>
+                                  </Card>
                                 );
                               })()}
                             </motion.div>
@@ -1035,8 +1152,8 @@ export default function TestSeries() {
           )}
 
           {/* Move Test Dialog */}
-          <MoveTest {...moveTestState}/>
-          
+          <MoveTest {...moveTestState} />
+
         </TabsContent>
 
         {/* Admin Bank */}
@@ -1069,40 +1186,41 @@ export default function TestSeries() {
                           const alreadyLinked = importedAdminTestIds.has(test.id);
 
                           return (
-                          <Card key={test.id} className="bg-muted/30 border-dashed hover:border-primary transition-colors">
-                            <CardHeader>
-                              <CardTitle className="flex justify-between items-start">
-                                <span className="truncate">{test.title}</span>
-                                <Badge variant="outline">Admin</Badge>
-                              </CardTitle>
-                            </CardHeader>
-                            <CardContent className="space-y-4">
-                              <p className="text-sm text-muted-foreground line-clamp-2">{test.description}</p>
-                              <div className="flex gap-2 text-xs text-muted-foreground">
-                                <span className="flex items-center gap-1"><BookOpen className="h-3 w-3" /> {test.subject || "—"}</span>
-                                <span>•</span>
-                                <span>{test.level || "—"}</span>
-                              </div>
-                              <Button
-                                className="w-full rounded-xl"
-                                disabled={importingId === test.id || alreadyLinked}
-                                onClick={() => handleImport(test)}
-                              >
-                                {alreadyLinked ? (
-                                  <>
-                                    <CheckCircle2 className="mr-2 h-4 w-4" /> Added to Library
-                                  </>
-                                ) : importingId === test.id ? (
-                                  <Loader2 className="animate-spin h-4 w-4" />
-                                ) : (
-                                  <>
-                                    <Download className="mr-2 h-4 w-4" /> Import to Library
-                                  </>
-                                )}
-                              </Button>
-                            </CardContent>
-                          </Card>
-                        )})}
+                            <Card key={test.id} className="bg-muted/30 border-dashed hover:border-primary transition-colors">
+                              <CardHeader>
+                                <CardTitle className="flex justify-between items-start">
+                                  <span className="truncate">{test.title}</span>
+                                  <Badge variant="outline">Admin</Badge>
+                                </CardTitle>
+                              </CardHeader>
+                              <CardContent className="space-y-4">
+                                <p className="text-sm text-muted-foreground line-clamp-2">{test.description}</p>
+                                <div className="flex gap-2 text-xs text-muted-foreground">
+                                  <span className="flex items-center gap-1"><BookOpen className="h-3 w-3" /> {test.subject || "—"}</span>
+                                  <span>•</span>
+                                  <span>{test.level || "—"}</span>
+                                </div>
+                                <Button
+                                  className="w-full rounded-xl"
+                                  disabled={importingId === test.id || alreadyLinked}
+                                  onClick={() => handleImport(test)}
+                                >
+                                  {alreadyLinked ? (
+                                    <>
+                                      <CheckCircle2 className="mr-2 h-4 w-4" /> Added to Library
+                                    </>
+                                  ) : importingId === test.id ? (
+                                    <Loader2 className="animate-spin h-4 w-4" />
+                                  ) : (
+                                    <>
+                                      <Download className="mr-2 h-4 w-4" /> Import to Library
+                                    </>
+                                  )}
+                                </Button>
+                              </CardContent>
+                            </Card>
+                          )
+                        })}
                       </div>
                     )}
                   </div>

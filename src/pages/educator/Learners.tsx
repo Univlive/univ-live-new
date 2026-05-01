@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowRight, Check, ChevronDown, ChevronUp, Copy, Download,
-  Loader2, RefreshCw, Search, Upload, UserCheck, UserPlus, UserX,
+  Loader2, RefreshCw, Search, Upload, UserCheck, UserPlus, UserX, Pencil,
 } from "lucide-react";
 import {
-  collection, doc, getDocs, onSnapshot, orderBy, query, updateDoc,
+  collection, doc, getDocs, onSnapshot, orderBy, query, updateDoc, writeBatch,
 } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,9 @@ import {
 import {
   Card, CardContent, CardHeader, CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
 
 const API = import.meta.env.VITE_MONKEY_KING_API_URL;
 
@@ -29,11 +32,14 @@ type Learner = {
   email?: string;
   status?: "ACTIVE" | "INACTIVE";
   joinedAt?: any;
+  batchId?: string;
+  courseId?: string;
+  branchId?: string;
 };
 
 type Branch = { id: string; name: string };
-type Course = { id: string; name: string };
-type Batch = { id: string; name: string; seatLimit: number; usedSeats: number };
+type Course = { id: string; name: string; branchId: string };
+type Batch = { id: string; name: string; seatLimit: number; usedSeats: number; courseId: string; branchId: string };
 
 type BulkRow = {
   row: number;
@@ -83,6 +89,18 @@ export default function Learners() {
   const [selCourse, setSelCourse] = useState("");
   const [selBatch, setSelBatch] = useState("");
 
+  // Full hierarchy for name resolution and assign-batch dialog
+  const [allBranches, setAllBranches] = useState<Branch[]>([]);
+  const [allCourses, setAllCourses] = useState<Course[]>([]);
+  const [allBatches, setAllBatches] = useState<Batch[]>([]);
+
+  // Assign-batch dialog
+  const [assignTarget, setAssignTarget] = useState<Learner | null>(null);
+  const [assignBranch, setAssignBranch] = useState("");
+  const [assignCourse, setAssignCourse] = useState("");
+  const [assignBatch, setAssignBatch] = useState("");
+  const [assigning, setAssigning] = useState(false);
+
   // Invite link
   const [inviteOpen, setInviteOpen] = useState(false);
   const [generatingLink, setGeneratingLink] = useState(false);
@@ -117,10 +135,42 @@ export default function Learners() {
       setEducator(snap.exists() ? snap.data() : null);
     });
 
-    // Load branches
+    // Load branches (for invite form)
     getDocs(collection(db, "educators", educatorId, "branches")).then((snap) =>
       setBranches(snap.docs.map((d) => ({ id: d.id, name: d.data().name || d.id })))
     );
+
+    // Load full hierarchy for name resolution + assign-batch dialog
+    async function loadFullHierarchy() {
+      const branchSnap = await getDocs(collection(db, "educators", educatorId, "branches"));
+      const bs: Branch[] = branchSnap.docs.map((d) => ({ id: d.id, name: d.data().name || d.id }));
+      setAllBranches(bs);
+
+      const cs: Course[] = [];
+      const bts: Batch[] = [];
+      for (const b of branchSnap.docs) {
+        const courseSnap = await getDocs(collection(db, "educators", educatorId, "branches", b.id, "courses"));
+        for (const c of courseSnap.docs) {
+          cs.push({ id: c.id, name: c.data().name || c.id, branchId: b.id });
+          const batchSnap = await getDocs(
+            collection(db, "educators", educatorId, "branches", b.id, "courses", c.id, "batches")
+          );
+          for (const bt of batchSnap.docs) {
+            bts.push({
+              id: bt.id,
+              name: bt.data().name || bt.id,
+              seatLimit: bt.data().seatLimit || 0,
+              usedSeats: bt.data().usedSeats || 0,
+              courseId: c.id,
+              branchId: b.id,
+            });
+          }
+        }
+      }
+      setAllCourses(cs);
+      setAllBatches(bts);
+    }
+    loadFullHierarchy();
 
     return () => { unsubL(); unsubSeats(); unsubEdu(); };
   }, [educatorId, refreshTick]);
@@ -149,11 +199,18 @@ export default function Learners() {
   }, [educatorId, selBranch, selCourse]);
 
   const selectedBatch = batches.find((b) => b.id === selBatch);
-  const availableSeats = selectedBatch ? selectedBatch.seatLimit - selectedBatch.usedSeats : 0;
 
   const seatLimit = Math.max(0, Number(educator?.seatLimit || 0));
   const usedSeats = useMemo(() => Object.values(seatMap).filter(Boolean).length, [seatMap]);
   const canAssign = seatLimit > 0 && usedSeats < seatLimit;
+
+  // When a batch has no explicit seatLimit set (trial/global-pool seats),
+  // fall back to the educator's global remaining pool.
+  const availableSeats = selectedBatch
+    ? selectedBatch.seatLimit > 0
+      ? selectedBatch.seatLimit - selectedBatch.usedSeats
+      : seatLimit - usedSeats
+    : 0;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -204,6 +261,44 @@ export default function Learners() {
       toast.error(e?.message || "Failed to update learner");
     }
   };
+
+  function openAssignBatch(learner: Learner) {
+    setAssignTarget(learner);
+    setAssignBranch(learner.branchId || "");
+    setAssignCourse(learner.courseId || "");
+    setAssignBatch(learner.batchId || "");
+  }
+
+  async function saveAssignBatch() {
+    if (!assignTarget || !assignBranch || !assignCourse || !assignBatch) return;
+    const batchInfo = allBatches.find((b) => b.id === assignBatch);
+    setAssigning(true);
+    try {
+      const batch = writeBatch(db);
+      batch.update(doc(db, "educators", educatorId, "students", assignTarget.id), {
+        branchId: assignBranch,
+        courseId: assignCourse,
+        batchId: assignBatch,
+      });
+      batch.update(doc(db, "users", assignTarget.id), {
+        branchId: assignBranch,
+        courseId: assignCourse,
+        batchId: assignBatch,
+      });
+      batch.update(doc(db, "educators", educatorId, "billingSeats", assignTarget.id), {
+        branchId: assignBranch,
+        courseId: assignCourse,
+        batchId: assignBatch,
+      });
+      await batch.commit();
+      toast.success(`Assigned to ${batchInfo?.name || assignBatch}`);
+      setAssignTarget(null);
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to assign batch");
+    } finally {
+      setAssigning(false);
+    }
+  }
 
   async function generateInviteLink() {
     if (!selBranch || !selCourse || !selBatch) { toast.error("Select branch, course and batch"); return; }
@@ -340,7 +435,7 @@ export default function Learners() {
                     <SelectContent>
                       {batches.map((b) => (
                         <SelectItem key={b.id} value={b.id}>
-                          {b.name} ({b.seatLimit - b.usedSeats} free)
+                          {b.name} ({b.seatLimit > 0 ? b.seatLimit - b.usedSeats : seatLimit - usedSeats} free)
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -355,7 +450,7 @@ export default function Learners() {
                   </p>
                 ) : (
                   <p className="text-sm text-destructive">
-                    No seats available - purchase more seats in Billing
+                    No seats available — all {seatLimit} institute seats are in use
                   </p>
                 )
               )}
@@ -471,6 +566,9 @@ export default function Learners() {
         {filtered.map((l) => {
           const seatOn = Boolean(seatMap[l.id]);
           const inactive = l.status === "INACTIVE";
+          const batchName = allBatches.find((b) => b.id === l.batchId)?.name;
+          const courseName = allCourses.find((c) => c.id === l.courseId)?.name;
+          const branchName = allBranches.find((b) => b.id === l.branchId)?.name;
           return (
             <div key={l.id} className="border rounded-lg p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <button type="button" onClick={() => nav(`/educator/learners/${l.id}`)} className="text-left group">
@@ -479,17 +577,24 @@ export default function Learners() {
                   {inactive && <span className="text-xs text-red-500 ml-2">(INACTIVE)</span>}
                 </div>
                 <div className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">{l.email || l.id}</div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  Seat:{" "}
-                  {seatOn
+                <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                  <span>Seat: {seatOn
                     ? <span className="text-green-600 font-medium">GRANTED</span>
                     : <span className="text-orange-600 font-medium">NOT GRANTED</span>}
+                  </span>
+                  {batchName
+                    ? <span>Batch: <span className="font-medium text-foreground">{branchName && `${branchName} › `}{courseName && `${courseName} › `}{batchName}</span></span>
+                    : <span className="text-orange-500">No batch assigned</span>}
                 </div>
               </button>
 
               <div className="flex flex-wrap gap-2">
                 <Button variant="secondary" onClick={() => nav(`/educator/learners/${l.id}`)}>
                   View Details <ArrowRight className="h-4 w-4 ml-2" />
+                </Button>
+                <Button variant="outline" onClick={() => openAssignBatch(l)}>
+                  <Pencil className="h-4 w-4 mr-2" />
+                  {l.batchId ? "Change Batch" : "Assign Batch"}
                 </Button>
                 {!seatOn ? (
                   <Button disabled={!canAssign || busyId === l.id || inactive} onClick={() => grantSeat(l.id)}>
@@ -510,6 +615,55 @@ export default function Learners() {
           );
         })}
       </div>
+
+      {/* Assign / Change Batch Dialog */}
+      <Dialog open={!!assignTarget} onOpenChange={(o) => { if (!o) setAssignTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{assignTarget?.batchId ? "Change Batch" : "Assign Batch"} — {assignTarget?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <Label>Branch</Label>
+              <Select value={assignBranch} onValueChange={(v) => { setAssignBranch(v); setAssignCourse(""); setAssignBatch(""); }}>
+                <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                <SelectContent>
+                  {allBranches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Course</Label>
+              <Select value={assignCourse} onValueChange={(v) => { setAssignCourse(v); setAssignBatch(""); }} disabled={!assignBranch}>
+                <SelectTrigger><SelectValue placeholder="Select course" /></SelectTrigger>
+                <SelectContent>
+                  {allCourses.filter((c) => c.branchId === assignBranch).map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Batch</Label>
+              <Select value={assignBatch} onValueChange={setAssignBatch} disabled={!assignCourse}>
+                <SelectTrigger><SelectValue placeholder="Select batch" /></SelectTrigger>
+                <SelectContent>
+                  {allBatches.filter((b) => b.courseId === assignCourse && b.branchId === assignBranch).map((b) => (
+                    <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAssignTarget(null)}>Cancel</Button>
+            <Button disabled={!assignBatch || assigning} onClick={saveAssignBatch}>
+              {assigning && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {seatLimit <= 0 && (
         <div className="text-sm text-muted-foreground border rounded-lg p-4">

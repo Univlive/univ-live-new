@@ -5,6 +5,8 @@ import { motion } from "framer-motion";
 import {
   ArrowLeft,
   BookOpen,
+  ChevronDown,
+  ChevronRight,
   Plus,
   Search,
   Trash2,
@@ -14,8 +16,6 @@ import {
   XCircle,
   BarChart3,
   Loader2,
-  Download,
-  Upload,
   X,
   GripVertical,
 } from "lucide-react";
@@ -64,7 +64,6 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import {
   Dialog,
@@ -87,6 +86,11 @@ import ImageTextarea from "@/components/educator/ImageTextarea";
 
 type Difficulty = "easy" | "medium" | "hard";
 
+type TestSection = {
+  id: string;
+  name: string;
+};
+
 type TestSeries = {
   id: string;
   title: string;
@@ -96,6 +100,7 @@ type TestSeries = {
   positiveMarks?: number;
   negativeMarks?: number;
   questionsCount?: number;
+  sections?: TestSection[];
 };
 
 type QuestionDoc = {
@@ -114,10 +119,20 @@ type QuestionDoc = {
   isActive?: boolean;
   usageCount?: number;
 
-  // ✅ new: supports mixing global question bank + manual questions
   source?: "manual" | "question_bank" | string;
   bankQuestionId?: string;
-  contentFormat?: "text" | "html";
+  contentFormat?: "text" | "html" | "latex";
+  sectionId?: string;
+
+  // Extended fields
+  format?: "single_correct_mcq" | "multicorrect_mcq" | "subjective" | "subjective_long";
+  correctOptions?: number[];
+  topics?: string[];
+  questionImage?: string;
+  optionImages?: string[];
+  explanationImage?: string;
+  subjectId?: string;
+  subjectName?: string;
 
   createdAtTs?: Timestamp | null;
   updatedAtTs?: Timestamp | null;
@@ -183,6 +198,28 @@ function normalizeDifficulty(v: any): Difficulty {
   return "medium";
 }
 
+function normalizeSections(rawSections: any, subjectFallback?: string): TestSection[] {
+  const parsed = Array.isArray(rawSections)
+    ? rawSections
+        .map((section: any, index: number) => ({
+          id: String(section?.id || `sec_${index + 1}`).trim(),
+          name: String(section?.name || `Section ${index + 1}`).trim(),
+        }))
+        .filter((section) => section.id)
+    : [];
+
+  if (parsed.length > 0) return parsed;
+
+  return [{ id: "main", name: String(subjectFallback || "General").trim() || "General" }];
+}
+
+function resolveSectionId(sectionId: string | undefined, sections: TestSection[]): string {
+  const fallback = sections[0]?.id || "main";
+  const normalized = String(sectionId || "").trim();
+  if (!normalized) return fallback;
+  return sections.some((section) => section.id === normalized) ? normalized : fallback;
+}
+
 const DIFFICULTY_OPTIONS: Difficulty[] = ["easy", "medium", "hard"];
 
 function sortQuestionsForDisplay(rows: QuestionDoc[]): QuestionDoc[] {
@@ -242,6 +279,10 @@ export default function Questions() {
   const [search, setSearch] = useState("");
   const [difficultyFilter, setDifficultyFilter] = useState<"all" | Difficulty>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [sectionFilter, setSectionFilter] = useState<string>("all");
+
+  // collapsed section IDs in the section-grouped view
+  const [collapsedQSections, setCollapsedQSections] = useState<string[]>([]);
 
   const [reordering, setReordering] = useState(false);
 
@@ -253,6 +294,7 @@ export default function Questions() {
   // editor dialog
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [addingToSection, setAddingToSection] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [formQuestion, setFormQuestion] = useState("");
@@ -260,16 +302,22 @@ export default function Questions() {
   const [formCorrect, setFormCorrect] = useState<number>(0);
   const [formExplanation, setFormExplanation] = useState("");
   const [formDifficulty, setFormDifficulty] = useState<Difficulty>("medium");
+  const [formSectionId, setFormSectionId] = useState<string>("main");
   const [formSubject, setFormSubject] = useState("");
   const [formTopic, setFormTopic] = useState("");
   const [formMarks, setFormMarks] = useState<string>("");
   const [formNegMarks, setFormNegMarks] = useState<string>("");
   const [formActive, setFormActive] = useState(true);
 
-  // bulk import dialog
-  const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkText, setBulkText] = useState("");
-  const [bulkSaving, setBulkSaving] = useState(false);
+  // Extended editor fields
+  const [formFormat, setFormFormat] = useState<NonNullable<QuestionDoc["format"]>>("single_correct_mcq");
+  const [formTopics, setFormTopics] = useState("");
+  const [formMultiCorrects, setFormMultiCorrects] = useState<number[]>([0]);
+  const [formQImgUrl, setFormQImgUrl] = useState("");
+  const [formOImgUrls, setFormOImgUrls] = useState<string[]>(["", "", "", ""]);
+  const [formEImgUrl, setFormEImgUrl] = useState("");
+  const [formSubjectId, setFormSubjectId] = useState("");
+  const [subjects, setSubjects] = useState<{ id: string; name: string }[]>([]);
 
   // import from GLOBAL question bank
   const [qbOpen, setQbOpen] = useState(false);
@@ -280,6 +328,20 @@ export default function Questions() {
   const [qbTopic, setQbTopic] = useState<string>("all");
   const [qbDifficulty, setQbDifficulty] = useState<"all" | Difficulty>("all");
   const [qbSelected, setQbSelected] = useState<Record<string, boolean>>({});
+  const [qbSectionId, setQbSectionId] = useState<string>("main");
+
+  const selectedTestSections = useMemo(
+    () => normalizeSections(selectedTest?.sections, selectedTest?.subject),
+    [selectedTest]
+  );
+  const sectionNameById = useMemo(
+    () =>
+      selectedTestSections.reduce<Record<string, string>>((acc, section) => {
+        acc[section.id] = section.name;
+        return acc;
+      }, {}),
+    [selectedTestSections]
+  );
 
   // Auth
   useEffect(() => {
@@ -288,6 +350,13 @@ export default function Questions() {
       setAuthLoading(false);
     });
     return () => unsub();
+  }, []);
+
+  // Load subjects for subject dropdown
+  useEffect(() => {
+    getDocs(query(collection(db, "subjects"), orderBy("name"))).then((snap) => {
+      setSubjects(snap.docs.map((d) => ({ id: d.id, name: d.data().name as string })));
+    });
   }, []);
 
   // Load tests
@@ -315,6 +384,7 @@ export default function Questions() {
             positiveMarks: safeNum(data?.positiveMarks, undefined as any),
             negativeMarks: safeNum(data?.negativeMarks, undefined as any),
             questionsCount: safeNum(data?.questionsCount, 0),
+            sections: normalizeSections(data?.sections, safeStr(data?.subject, "General")),
           };
         });
         setTests(rows);
@@ -349,6 +419,20 @@ export default function Questions() {
     if (testId && testId !== selectedTestId) setSelectedTestId(testId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testId]);
+
+  useEffect(() => {
+    const fallbackSectionId = selectedTestSections[0]?.id || "main";
+
+    if (!selectedTestSections.some((section) => section.id === formSectionId)) {
+      setFormSectionId(fallbackSectionId);
+    }
+    if (!selectedTestSections.some((section) => section.id === qbSectionId)) {
+      setQbSectionId(fallbackSectionId);
+    }
+    if (sectionFilter !== "all" && !selectedTestSections.some((section) => section.id === sectionFilter)) {
+      setSectionFilter("all");
+    }
+  }, [selectedTestSections, formSectionId, qbSectionId, sectionFilter]);
 
   // Load questions
   useEffect(() => {
@@ -386,6 +470,7 @@ export default function Questions() {
             source: safeStr(data?.source, undefined as any) as any,
             bankQuestionId: safeStr(data?.bankQuestionId, "") || undefined,
             contentFormat: (safeStr(data?.contentFormat, "") as any) || undefined,
+            sectionId: safeStr(data?.sectionId, "") || undefined,
             createdAtTs: (data?.createdAt as Timestamp) || null,
             updatedAtTs: (data?.updatedAt as Timestamp) || null,
             questionOrder: data?.questionOrder != null ? Number(data.questionOrder) : undefined,
@@ -452,6 +537,7 @@ export default function Questions() {
         setQbSubject("all");
         setQbTopic("all");
         setQbDifficulty("all");
+        setQbSectionId(selectedTestSections[0]?.id || "main");
       } catch (e) {
         console.error(e);
         toast({
@@ -467,7 +553,7 @@ export default function Questions() {
     return () => {
       alive = false;
     };
-  }, [uid, qbOpen]);
+  }, [uid, qbOpen, selectedTestSections]);
 
   const qbSubjects = useMemo(() => {
     const s = new Set<string>();
@@ -532,6 +618,7 @@ export default function Questions() {
           correctOption: safeNum(q.correctOption, 0),
           explanation: q.explanation || "",
           difficulty: normalizeDifficulty(q.difficulty),
+          sectionId: resolveSectionId(qbSectionId, selectedTestSections),
           subject: q.subject || selectedTest?.subject || "",
           topic: q.topic || "",
           isActive: true,
@@ -592,6 +679,10 @@ export default function Questions() {
       const active = x.isActive !== false;
       if (statusFilter === "active" && !active) return false;
       if (statusFilter === "inactive" && active) return false;
+      if (sectionFilter !== "all") {
+        const currentSectionId = resolveSectionId(x.sectionId, selectedTestSections);
+        if (currentSectionId !== sectionFilter) return false;
+      }
 
       if (!q) return true;
 
@@ -606,7 +697,23 @@ export default function Questions() {
 
       return hay.includes(q);
     });
-  }, [questions, search, difficultyFilter, statusFilter]);
+  }, [questions, search, difficultyFilter, statusFilter, sectionFilter, selectedTestSections]);
+
+  // Group filtered questions by section
+  const questionsBySection = useMemo(() => {
+    const map: Record<string, QuestionDoc[]> = {};
+    // Initialize all sections with empty arrays
+    selectedTestSections.forEach((section) => {
+      map[section.id] = [];
+    });
+    // Distribute filtered questions into sections
+    filtered.forEach((q) => {
+      const sid = resolveSectionId(q.sectionId, selectedTestSections);
+      if (!map[sid]) map[sid] = [];
+      map[sid].push(q);
+    });
+    return map;
+  }, [filtered, selectedTestSections]);
 
   const dndEnabled = search.trim().length === 0 && difficultyFilter === "all" && statusFilter === "all";
 
@@ -621,16 +728,25 @@ export default function Questions() {
 
   function resetEditor() {
     setEditingId(null);
+    setAddingToSection(null);
     setFormQuestion("");
     setFormOptions(["", "", "", ""]);
     setFormCorrect(0);
     setFormExplanation("");
     setFormDifficulty("medium");
+    setFormSectionId(selectedTestSections[0]?.id || "main");
     setFormSubject(selectedTest?.subject || "");
     setFormTopic("");
     setFormMarks(selectedTest?.positiveMarks != null ? String(selectedTest.positiveMarks) : "");
     setFormNegMarks(selectedTest?.negativeMarks != null ? String(selectedTest.negativeMarks) : "");
     setFormActive(true);
+    setFormFormat("single_correct_mcq");
+    setFormTopics("");
+    setFormMultiCorrects([0]);
+    setFormQImgUrl("");
+    setFormOImgUrls(["", "", "", ""]);
+    setFormEImgUrl("");
+    setFormSubjectId("");
   }
 
   function getNextQuestionOrder() {
@@ -690,7 +806,27 @@ export default function Questions() {
       return;
     }
     resetEditor();
+    setAddingToSection(null);
     setEditorOpen(true);
+  }
+
+  function openCreateForSection(sectionId: string) {
+    if (!selectedTestId) {
+      toast({ title: "Select a test first", description: "Choose a test to add questions." });
+      return;
+    }
+    resetEditor();
+    setFormSectionId(sectionId);
+    setAddingToSection(sectionId);
+    setEditorOpen(true);
+    // Make sure this section is expanded
+    setCollapsedQSections((prev) => prev.filter((id) => id !== sectionId));
+  }
+
+  function toggleQSectionCollapse(sectionId: string) {
+    setCollapsedQSections((prev) =>
+      prev.includes(sectionId) ? prev.filter((id) => id !== sectionId) : [...prev, sectionId]
+    );
   }
 
   function openEdit(q: QuestionDoc) {
@@ -704,11 +840,19 @@ export default function Questions() {
     setFormCorrect(Number.isFinite(q.correctOption) ? q.correctOption : 0);
     setFormExplanation(q.explanation || "");
     setFormDifficulty(q.difficulty || "medium");
+    setFormSectionId(resolveSectionId(q.sectionId, selectedTestSections));
     setFormSubject(q.subject || selectedTest?.subject || "");
     setFormTopic(q.topic || "");
     setFormMarks(q.marks != null ? String(q.marks) : (selectedTest?.positiveMarks != null ? String(selectedTest.positiveMarks) : ""));
     setFormNegMarks(q.negativeMarks != null ? String(q.negativeMarks) : (selectedTest?.negativeMarks != null ? String(selectedTest.negativeMarks) : ""));
     setFormActive(q.isActive !== false);
+    setFormFormat(q.format || "single_correct_mcq");
+    setFormTopics((q.topics?.length ? q.topics : q.topic ? [q.topic] : []).join(", "));
+    setFormMultiCorrects(q.correctOptions?.length ? q.correctOptions : [q.correctOption ?? 0]);
+    setFormQImgUrl(q.questionImage || "");
+    setFormOImgUrls(q.optionImages?.length ? [...q.optionImages, "", "", "", ""].slice(0, 4) : ["", "", "", ""]);
+    setFormEImgUrl(q.explanationImage || "");
+    setFormSubjectId(q.subjectId || "");
     setEditorOpen(true);
   }
 
@@ -717,44 +861,55 @@ export default function Questions() {
     if (!selectedTestId) return;
 
     const questionText = formQuestion.trim();
+    const isMcq = formFormat === "single_correct_mcq" || formFormat === "multicorrect_mcq";
     const options = formOptions.map((x) => x.trim()).filter((x) => x.length > 0);
 
     if (!questionText) {
       toast({ title: "Question required", description: "Please enter the question.", variant: "destructive" });
       return;
     }
-    if (options.length < 2) {
-      toast({ title: "Options required", description: "Add at least 2 options (recommended 4).", variant: "destructive" });
-      return;
-    }
-    if (formCorrect < 0 || formCorrect >= (Array.isArray(formOptions) ? formOptions.length : 0)) {
-      toast({ title: "Invalid correct option", description: "Select a valid correct option index.", variant: "destructive" });
-      return;
-    }
-    if (!formOptions[formCorrect]?.trim()) {
-      toast({ title: "Correct option empty", description: "The selected correct option cannot be empty.", variant: "destructive" });
-      return;
+    if (isMcq) {
+      if (options.length < 2) {
+        toast({ title: "Options required", description: "Add at least 2 options.", variant: "destructive" });
+        return;
+      }
+      if (formFormat === "single_correct_mcq" && !formOptions[formCorrect]?.trim()) {
+        toast({ title: "Correct option empty", description: "The selected correct option cannot be empty.", variant: "destructive" });
+        return;
+      }
     }
 
     const marks = formMarks.trim() === "" ? undefined : safeNum(formMarks, undefined as any);
     const negativeMarks = formNegMarks.trim() === "" ? undefined : safeNum(formNegMarks, undefined as any);
+    const normalizedSectionId = resolveSectionId(formSectionId, selectedTestSections);
+    const topicsArr = formTopics.split(",").map((s) => s.trim()).filter(Boolean);
+    const matchedSubject = subjects.find((s) => s.id === formSubjectId);
 
     setSaving(true);
     try {
       const basePayload: any = {
         question: questionText,
-        options: formOptions.map((x) => x.trim()),
-        correctOption: formCorrect,
+        options: isMcq ? formOptions.map((x) => x.trim()) : [],
+        correctOption: formFormat === "single_correct_mcq" ? formCorrect : (formMultiCorrects[0] ?? 0),
         explanation: formExplanation.trim() || "",
         difficulty: formDifficulty,
+        sectionId: normalizedSectionId,
         subject: formSubject.trim() || selectedTest?.subject || "",
-        topic: formTopic.trim() || "",
+        topic: topicsArr[0] || formTopic.trim() || "",
         isActive: !!formActive,
         usageCount: 0,
         source: "manual",
         contentFormat: "html",
+        format: formFormat,
         updatedAt: serverTimestamp(),
       };
+
+      if (topicsArr.length) basePayload.topics = topicsArr;
+      if (formFormat === "multicorrect_mcq" && formMultiCorrects.length > 1) basePayload.correctOptions = formMultiCorrects;
+      if (formQImgUrl.trim()) basePayload.questionImage = formQImgUrl.trim();
+      if (formOImgUrls.some(Boolean)) basePayload.optionImages = formOImgUrls;
+      if (formEImgUrl.trim()) basePayload.explanationImage = formEImgUrl.trim();
+      if (matchedSubject) { basePayload.subjectId = matchedSubject.id; basePayload.subjectName = matchedSubject.name; }
 
       if (marks != null && Number.isFinite(marks)) basePayload.marks = marks;
       if (negativeMarks != null && Number.isFinite(negativeMarks)) basePayload.negativeMarks = negativeMarks;
@@ -832,103 +987,6 @@ export default function Questions() {
     }
   }
 
-  async function copyExportJson() {
-    try {
-      const payload = questions.map((q) => ({
-        question: q.question,
-        options: q.options,
-        correctOption: q.correctOption,
-        explanation: q.explanation || "",
-        difficulty: q.difficulty,
-        subject: q.subject || "",
-        topic: q.topic || "",
-        marks: q.marks ?? null,
-        negativeMarks: q.negativeMarks ?? null,
-        isActive: q.isActive !== false,
-      }));
-      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-      toast({ title: "Export copied", description: "Questions JSON copied to clipboard." });
-    } catch {
-      toast({ title: "Copy failed", description: "Could not copy export JSON.", variant: "destructive" });
-    }
-  }
-
-  async function bulkImport() {
-    if (!uid || !selectedTestId) return;
-
-    const text = bulkText.trim();
-    if (!text) {
-      toast({ title: "Paste JSON first", description: "Provide an array of questions in JSON.", variant: "destructive" });
-      return;
-    }
-
-    let arr: any[] = [];
-    try {
-      const parsed = JSON.parse(text);
-      if (!Array.isArray(parsed)) throw new Error("Not array");
-      arr = parsed;
-    } catch {
-      toast({ title: "Invalid JSON", description: "Expected a JSON array.", variant: "destructive" });
-      return;
-    }
-
-    if (arr.length === 0) {
-      toast({ title: "Nothing to import", description: "Array is empty.", variant: "destructive" });
-      return;
-    }
-
-    setBulkSaving(true);
-    try {
-      // simple sequential add (safe and minimal setup)
-      let added = 0;
-      for (const item of arr) {
-        const qText = String(item?.question || "").trim();
-        const opts = Array.isArray(item?.options) ? item.options.map((x: any) => String(x || "").trim()) : [];
-        const correct = safeNum(item?.correctOption, 0);
-        if (!qText || opts.length < 2 || correct < 0 || correct >= opts.length) continue;
-
-        const payload: any = {
-          question: qText,
-          options: opts,
-          correctOption: correct,
-          explanation: String(item?.explanation || ""),
-          difficulty: normalizeDifficulty(item?.difficulty),
-          subject: String(item?.subject || selectedTest?.subject || ""),
-          topic: String(item?.topic || ""),
-          isActive: item?.isActive !== false,
-          usageCount: 0,
-          source: "manual",
-          contentFormat: "html",
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        };
-
-        if (item?.marks != null) payload.marks = safeNum(item.marks, 0);
-        if (item?.negativeMarks != null) payload.negativeMarks = safeNum(item.negativeMarks, 0);
-
-        await addDoc(collection(db, "test_series", selectedTestId, "questions"), payload);
-
-        added += 1;
-      }
-
-      if (added > 0) {
-        await updateDoc(doc(db, "test_series", selectedTestId), {
-          questionsCount: increment(added),
-          updatedAt: serverTimestamp(),
-        });
-      }
-
-      toast({ title: "Import done", description: `Imported ${added} questions.` });
-      setBulkOpen(false);
-      setBulkText("");
-    } catch (e) {
-      console.error(e);
-      toast({ title: "Import failed", description: "Could not import questions.", variant: "destructive" });
-    } finally {
-      setBulkSaving(false);
-    }
-  }
-
   if (authLoading || testsLoading) {
     return (
       <div className="space-y-6">
@@ -970,7 +1028,7 @@ export default function Questions() {
           <X className="h-5 w-5" />
         </Button>
       </div>
-      
+
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
         <div className="xl:col-span-3 space-y-6">
           <div className="space-y-2">
@@ -982,24 +1040,54 @@ export default function Questions() {
               placeholder="Write your question with text, HTML/expressions, and images..."
               minHeight="170px"
             />
+            <Input
+              value={formQImgUrl}
+              onChange={(e) => setFormQImgUrl(e.target.value)}
+              placeholder="Question image URL (optional)"
+              className="text-xs font-mono rounded-xl"
+            />
+            {formQImgUrl && <img src={formQImgUrl} alt="" className="h-16 w-auto rounded-xl border object-contain" />}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {formOptions.map((opt, idx) => (
-              <div key={idx} className="space-y-2">
-                <Label className="text-sm font-semibold">{`Option ${String.fromCharCode(65 + idx)}`}</Label>
-                <ImageTextarea
-                  value={opt}
-                  onChange={(v) => {
-                    setFormOptions((prev) => prev.map((x, i) => (i === idx ? v : x)));
-                  }}
-                  folder="/admin-test-options"
-                  placeholder={`Enter option ${idx + 1} with text/image/html`}
-                  minHeight="95px"
-                />
-              </div>
-            ))}
-          </div>
+          {(formFormat === "single_correct_mcq" || formFormat === "multicorrect_mcq") && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {formOptions.map((opt, idx) => (
+                <div key={idx} className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-semibold">{`Option ${String.fromCharCode(65 + idx)}`}</Label>
+                    {formFormat === "multicorrect_mcq" && (
+                      <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formMultiCorrects.includes(idx)}
+                          onChange={(e) =>
+                            setFormMultiCorrects((prev) =>
+                              e.target.checked ? [...prev, idx] : prev.filter((x) => x !== idx)
+                            )
+                          }
+                        />
+                        Correct
+                      </label>
+                    )}
+                  </div>
+                  <ImageTextarea
+                    value={opt}
+                    onChange={(v) => setFormOptions((prev) => prev.map((x, i) => (i === idx ? v : x)))}
+                    folder="/admin-test-options"
+                    placeholder={`Enter option ${idx + 1}`}
+                    minHeight="95px"
+                  />
+                  <Input
+                    value={formOImgUrls[idx]}
+                    onChange={(e) => setFormOImgUrls((prev) => { const c = [...prev]; c[idx] = e.target.value; return c; })}
+                    placeholder="Option image URL (optional)"
+                    className="text-xs font-mono rounded-xl"
+                  />
+                  {formOImgUrls[idx] && <img src={formOImgUrls[idx]} alt="" className="h-10 w-auto rounded border object-contain" />}
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label className="text-sm font-semibold">Explanation (optional)</Label>
@@ -1010,38 +1098,64 @@ export default function Questions() {
               placeholder="Explain the answer with text, images, or formatted content"
               minHeight="125px"
             />
+            <Input
+              value={formEImgUrl}
+              onChange={(e) => setFormEImgUrl(e.target.value)}
+              placeholder="Explanation image URL (optional)"
+              className="text-xs font-mono rounded-xl"
+            />
+            {formEImgUrl && <img src={formEImgUrl} alt="" className="h-16 w-auto rounded-xl border object-contain" />}
           </div>
         </div>
 
         <div className="xl:col-span-2 space-y-5">
           <div className="grid grid-cols-1 gap-4">
             <div className="space-y-2">
-              <Label className="text-sm font-semibold">Correct Option</Label>
-              <Select value={String(formCorrect)} onValueChange={(v) => setFormCorrect(Number(v))}>
-                <SelectTrigger className="rounded-xl h-11">
-                  <SelectValue />
-                </SelectTrigger>
+              <Label className="text-sm font-semibold">Format</Label>
+              <Select value={formFormat} onValueChange={(v: any) => setFormFormat(v)}>
+                <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {[0, 1, 2, 3].map((i) => (
-                    <SelectItem key={i} value={String(i)}>
-                      Option {String.fromCharCode(65 + i)}
-                    </SelectItem>
+                  <SelectItem value="single_correct_mcq">Single Correct MCQ</SelectItem>
+                  <SelectItem value="multicorrect_mcq">Multi-Correct MCQ</SelectItem>
+                  <SelectItem value="subjective">Subjective</SelectItem>
+                  <SelectItem value="subjective_long">Subjective Long</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {formFormat === "single_correct_mcq" && (
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Correct Option</Label>
+                <Select value={String(formCorrect)} onValueChange={(v) => setFormCorrect(Number(v))}>
+                  <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {[0, 1, 2, 3].map((i) => (
+                      <SelectItem key={i} value={String(i)}>Option {String.fromCharCode(65 + i)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Difficulty</Label>
+              <Select value={formDifficulty} onValueChange={(v: any) => setFormDifficulty(v)}>
+                <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {DIFFICULTY_OPTIONS.map((d) => (
+                    <SelectItem key={d} value={d}>{d.charAt(0).toUpperCase() + d.slice(1)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label className="text-sm font-semibold">Difficulty</Label>
-              <Select value={formDifficulty} onValueChange={(v: any) => setFormDifficulty(v)}>
-                <SelectTrigger className="rounded-xl h-11">
-                  <SelectValue />
-                </SelectTrigger>
+              <Label className="text-sm font-semibold">Section</Label>
+              <Select value={formSectionId} onValueChange={setFormSectionId}>
+                <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Select section" /></SelectTrigger>
                 <SelectContent>
-                  {DIFFICULTY_OPTIONS.map((d) => (
-                    <SelectItem key={d} value={d}>
-                      {d.charAt(0).toUpperCase() + d.slice(1)}
-                    </SelectItem>
+                  {selectedTestSections.map((section) => (
+                    <SelectItem key={section.id} value={section.id}>{section.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -1057,20 +1171,23 @@ export default function Questions() {
 
             <div className="space-y-2">
               <Label className="text-sm font-semibold">Subject</Label>
-              <Input
-                value={formSubject}
-                onChange={(e) => setFormSubject(e.target.value)}
-                placeholder={selectedTest?.subject || "e.g. Physics"}
-                className="rounded-xl h-11"
-              />
+              <Select value={formSubjectId || "__none"} onValueChange={(v) => setFormSubjectId(v === "__none" ? "" : v)}>
+                <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder={formSubject || "Select subject"} /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none">— None —</SelectItem>
+                  {subjects.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">
-              <Label className="text-sm font-semibold">Topic</Label>
+              <Label className="text-sm font-semibold">Topics <span className="font-normal text-muted-foreground text-xs">(comma-separated)</span></Label>
               <Input
-                value={formTopic}
-                onChange={(e) => setFormTopic(e.target.value)}
-                placeholder="e.g. Kinematics"
+                value={formTopics}
+                onChange={(e) => setFormTopics(e.target.value)}
+                placeholder="e.g. Kinematics, Newton's Laws"
                 className="rounded-xl h-11"
               />
             </div>
@@ -1174,42 +1291,6 @@ export default function Questions() {
             </Select>
           </div>
 
-          <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" className="rounded-xl" disabled={!selectedTestId}>
-                <Upload className="h-4 w-4 mr-2" />
-                Bulk Import
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="rounded-2xl max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>Bulk Import Questions (JSON)</DialogTitle>
-                <DialogDescription>
-                  Paste a JSON array. Each item:{" "}
-                  <span className="font-mono">
-                    {"{ question, options[], correctOption, explanation?, difficulty?, subject?, topic?, marks?, negativeMarks?, isActive? }"}
-                  </span>
-                </DialogDescription>
-              </DialogHeader>
-
-              <Textarea
-                value={bulkText}
-                onChange={(e) => setBulkText(e.target.value)}
-                placeholder='[{"question":"...","options":["A","B","C","D"],"correctOption":1,"difficulty":"easy"}]'
-                className="min-h-[220px] rounded-xl"
-              />
-
-              <div className="flex gap-2 justify-end">
-                <Button variant="outline" className="rounded-xl" onClick={() => setBulkOpen(false)} disabled={bulkSaving}>
-                  Cancel
-                </Button>
-                <Button className="rounded-xl gradient-bg text-white" onClick={bulkImport} disabled={bulkSaving}>
-                  {bulkSaving ? "Importing..." : "Import"}
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-
           <Dialog open={qbOpen} onOpenChange={setQbOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" className="rounded-xl" disabled={!selectedTestId}>
@@ -1283,6 +1364,22 @@ export default function Questions() {
                       <SelectItem value="easy">Easy</SelectItem>
                       <SelectItem value="medium">Medium</SelectItem>
                       <SelectItem value="hard">Hard</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="lg:col-span-12">
+                  <Label className="text-xs">Add To Section</Label>
+                  <Select value={qbSectionId} onValueChange={setQbSectionId}>
+                    <SelectTrigger className="rounded-xl mt-1">
+                      <SelectValue placeholder="Select section" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {selectedTestSections.map((section) => (
+                        <SelectItem key={section.id} value={section.id}>
+                          {section.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1364,11 +1461,6 @@ export default function Questions() {
             </DialogContent>
           </Dialog>
 
-          <Button variant="outline" className="rounded-xl" onClick={copyExportJson} disabled={!selectedTestId || questions.length === 0}>
-            <Download className="h-4 w-4 mr-2" />
-            Export JSON
-          </Button>
-
           <Button className="rounded-xl gradient-bg text-white" onClick={openCreate} disabled={!selectedTestId}>
             <Plus className="h-4 w-4 mr-2" />
             Add Question
@@ -1429,6 +1521,20 @@ export default function Questions() {
           </div>
 
           <div className="flex gap-2 flex-wrap">
+            <Select value={sectionFilter} onValueChange={setSectionFilter}>
+              <SelectTrigger className="w-[180px] rounded-xl">
+                <SelectValue placeholder="Section" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Sections</SelectItem>
+                {selectedTestSections.map((section) => (
+                  <SelectItem key={section.id} value={section.id}>
+                    {section.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
             <Select value={difficultyFilter} onValueChange={(v: any) => setDifficultyFilter(v)}>
               <SelectTrigger className="w-[160px] rounded-xl">
                 <SelectValue placeholder="Difficulty" />
@@ -1459,6 +1565,7 @@ export default function Questions() {
                 setSearch("");
                 setDifficultyFilter("all");
                 setStatusFilter("all");
+                setSectionFilter("all");
               }}
             >
               Reset
@@ -1498,8 +1605,9 @@ export default function Questions() {
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-3">
-              {editorOpen && !editingId && (
+            <div className="space-y-4">
+              {/* Inline editor for new questions (shows at top when no specific section is targeted) */}
+              {editorOpen && !editingId && addingToSection === null && (
                 <Card className="border-primary/40 shadow-md ring-1 ring-primary/20">
                   <CardContent className="p-6">
                     {renderInlineEditor()}

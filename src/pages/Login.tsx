@@ -46,35 +46,32 @@ export default function Login() {
   const [resetEmail, setResetEmail] = useState("");
   const [sendingReset, setSendingReset] = useState(false);
 
-  const effectiveRole: RoleUI = isTenantDomain ? "student" : role;
-
-  // If user didn't provide a role via query param, default to educator on main domain.
+  // Default role: educator on main domain, student on tenant domain
   useEffect(() => {
     if (tenantLoading) return;
     if (!roleParam) {
-      if (!isTenantDomain) setRole("educator");
-      else setRole("student");
+      setRole(isTenantDomain ? "student" : "educator");
     }
   }, [isTenantDomain, tenantLoading, roleParam]);
 
-  // Auto-redirect if the user is already authenticated
+  // Auto-redirect if already authenticated
   useEffect(() => {
     if (authLoading || tenantLoading) return;
     if (!firebaseUser || !profile) return;
 
-    const role = String(profile.role || "").toUpperCase();
-    if (isTenantDomain && role === "STUDENT") {
-      nav("/student", { replace: true });
-    } else if (!isTenantDomain && (role === "EDUCATOR" || role === "ADMIN")) {
+    const r = String(profile.role || "").toUpperCase();
+    if (r === "EDUCATOR" || r === "ADMIN") {
       nav("/educator", { replace: true });
+    } else if (r === "STUDENT") {
+      nav("/student", { replace: true });
     }
-  }, [authLoading, tenantLoading, firebaseUser, profile, isTenantDomain, nav]);
+  }, [authLoading, tenantLoading, firebaseUser, profile, nav]);
 
   const title = useMemo(() => {
     if (tenantLoading) return "Loading…";
     if (isTenantDomain) return `Login to ${tenantSlug || "your coaching"}`;
-    return effectiveRole === "educator" ? "Educator Login" : "Student Login";
-  }, [tenantLoading, isTenantDomain, tenantSlug, effectiveRole]);
+    return role === "educator" ? "Educator Login" : "Student Login";
+  }, [tenantLoading, isTenantDomain, tenantSlug, role]);
 
   async function handleForgotPassword() {
     const targetEmail = resetEmail.trim();
@@ -115,22 +112,32 @@ export default function Login() {
       const data: any = snap.exists() ? snap.data() : {};
 
       const roleDb = String(data?.role || "STUDENT").toUpperCase();
+      const statusDb = String(data?.status || "active").toLowerCase();
+      
+      if (statusDb === "suspended") {
+        toast.error("Your account has been suspended. Please contact support.");
+        await auth.signOut();
+        return;
+      }
+
       const enrolledTenants: string[] = Array.isArray(data?.enrolledTenants)
         ? data.enrolledTenants
         : typeof data?.tenantSlug === "string"
           ? [data.tenantSlug]
           : [];
 
-      // ---- tenant domain: students only ----
+      // ---- educator / admin: always redirect to /educator ----
+      if (roleDb === "EDUCATOR" || roleDb === "ADMIN") {
+        toast.success("Welcome back!");
+        await refreshProfile();
+        nav("/educator", { replace: true });
+        return;
+      }
+
+      // ---- student on tenant domain ----
       if (isTenantDomain) {
         if (!tenantSlug) {
           toast.error("Invalid coaching URL (tenant slug missing).");
-          await auth.signOut();
-          return;
-        }
-
-        if (roleDb === "EDUCATOR" || roleDb === "ADMIN") {
-          toast.error("Educators must login from the main website, not the coaching URL.");
           await auth.signOut();
           return;
         }
@@ -146,12 +153,8 @@ export default function Login() {
           await registerStudentForTenant(token, tenantSlug);
         } catch (apiErr: any) {
           console.error("[Login] Sync error:", apiErr);
-          if (apiErr.message.includes("<!DOCTYPE html>")) {
-            console.warn("API server not detected. Please ensure 'vercel dev' is running.");
-          }
         }
 
-        // --- Single Session Logic for Students ---
         const sid = generateSessionId();
         setLocalSessionId(sid);
         await syncSessionWithFirestore(cred.user.uid, sid);
@@ -160,32 +163,11 @@ export default function Login() {
         await refreshProfile();
         nav("/student", { replace: true });
         return;
-
       }
 
-      // ---- main domain: educators only (students must use coaching URL) ----
-      if (effectiveRole === "student") {
-        toast.error("Students must login from their coaching URL (tenant website).");
-        await auth.signOut();
-        return;
-      }
-
-      if (!(roleDb === "EDUCATOR" || roleDb === "ADMIN")) {
-        toast.error("This account is not an educator account.");
-        await auth.signOut();
-        return;
-      }
-
-      const tenantSlugDb = data?.tenantSlug;
-      if (!tenantSlugDb) {
-        toast.error("Educator account misconfigured (missing tenant slug).");
-        await auth.signOut();
-        return;
-      }
-
-      toast.success("Logged in!");
-      await refreshProfile();
-      nav("/educator", { replace: true });
+      // ---- student on main domain: send them to their coaching URL ----
+      toast.error("Students must login from their coaching URL.");
+      await auth.signOut();
       return;
     } catch (error: any) {
       console.error(error);
@@ -205,7 +187,7 @@ export default function Login() {
       <div className="flex flex-col min-h-screen p-6 lg:p-12 relative">
         {/* Header / Nav */}
         <div className="flex justify-between items-center mb-8">
-          {effectiveRole === "educator" ? (
+          {role === "educator" ? (
             <img src={logo} className="w-25 h-10" alt="UNIV.LIVE Logo" />
           ) : (
             <div />
@@ -258,6 +240,26 @@ export default function Login() {
               </svg>
               Sign in with Google
             </Button> */}
+
+            {/* Role toggle — visible on tenant domain so educators can switch */}
+            {isTenantDomain && (
+              <div className="flex rounded-xl border p-1 bg-muted/40">
+                <button
+                  type="button"
+                  onClick={() => setRole("student")}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${role === "student" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  Student
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRole("educator")}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${role === "educator" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  Educator
+                </button>
+              </div>
+            )}
 
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
@@ -331,7 +333,7 @@ export default function Login() {
               Don’t have an account?{" "}
               <Link
                 className="font-medium text-[#4F46E5] hover:underline"
-                to={`/signup?role=${effectiveRole}`}
+                to={`/signup?role=${role}`}
               >
                 Sign up
               </Link>

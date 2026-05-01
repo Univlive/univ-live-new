@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Menu, X, ChevronRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import univLogo from "@/assets/univ-logo-1.png";
@@ -70,23 +69,6 @@ export default function Navbar() {
           ))}
         </div>
 
-        {/* Auth Buttons */}
-        <div className="hidden md:flex items-center gap-3">
-          <Link to="/login">
-            <Button variant="ghost" size="sm" className="font-medium">
-              Login
-            </Button>
-          </Link>
-          <Link to="/signup">
-            <Button 
-              size="sm" 
-              className="bg-gradient-to-r from-primary to-accent hover:opacity-90 text-primary-foreground font-medium px-5 rounded-full shadow-soft group"
-            >
-              Get Started For Free
-              <ChevronRight className="ml-1 h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
-            </Button>
-          </Link>
-        </div>
 
         {/* Mobile Menu Button */}
         <button
@@ -121,19 +103,6 @@ export default function Navbar() {
                   {link.name}
                 </Link>
               ))}
-              <div className="flex flex-col gap-2 mt-2 pt-4 border-t border-border">
-                <Link to="/login">
-                  <Button variant="outline" className="w-full justify-center rounded-xl">
-                    Login
-                  </Button>
-                </Link>
-                <Link to="/signup">
-                  <Button className="w-full justify-center bg-gradient-to-r from-primary to-accent text-primary-foreground rounded-xl">
-                    Get Started For Free
-                    <ChevronRight className="ml-1 h-4 w-4" />
-                  </Button>
-                </Link>
-              </div>
             </div>
           </motion.div>
         )}

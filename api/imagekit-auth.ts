@@ -146,7 +146,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Authenticate user
     let user;
     try {
-      if (scope === "website") {
+      if (scope === "website" || scope === "content") {
         user = await requireUser(req, { roles: ["ADMIN", "EDUCATOR"] });
       } else {
         user = await requireUser(req, { roles: ["ADMIN"] });
@@ -171,7 +171,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let authParams;
     try {
       authParams = imageKit.getAuthenticationParameters();
-      return res.status(200).json(authParams);
+
+      // Always return the public key so the client never needs VITE_IMAGEKIT_PUBLIC_KEY
+      const publicKey = process.env.IMAGEKIT_PUBLIC_KEY ?? "";
+
+      if (scope === "content") {
+        const role = user?.role || "EDUCATOR";
+        const maxFileSizeMB =
+          role === "ADMIN"
+            ? parseInt(process.env.ADMIN_MAX_FILE_SIZE_MB || "100", 10)
+            : parseInt(process.env.EDUCATOR_MAX_FILE_SIZE_MB || "20", 10);
+        return res.status(200).json({ ...authParams, publicKey, maxFileSizeMB });
+      }
+
+      return res.status(200).json({ ...authParams, publicKey });
     } catch (paramErr: any) {
       const paramMsg = String(paramErr?.message || "Failed to generate params");
       console.error(`[imagekit-auth] ❌ Param error:`, paramMsg);

@@ -13,6 +13,8 @@ import {
   X,
   ChevronRight,
   GitBranch,
+  BookOpen,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -89,6 +91,8 @@ export default function EducatorLayout() {
       { icon: LayoutDashboard, label: "Dashboard", href: "/educator/dashboard" },
       { icon: GitBranch, label: "Student Management", href: "/educator/divisions" },
       { icon: FileText, label: "Test Series", href: "/educator/test-series" },
+      { icon: Zap, label: "DPP Generator", href: "/educator/dpp" },
+      { icon: BookOpen, label: "Content", href: "/educator/content" },
       { icon: CreditCard, label: "Billing & Plan", href: "/educator/billing" },
     ],
     []

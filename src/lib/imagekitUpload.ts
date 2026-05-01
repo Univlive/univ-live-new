@@ -1,12 +1,13 @@
 // src/lib/imagekitUpload.ts
 import { auth } from "@/lib/firebase";
 
-export type ImageKitScope = "question-bank" | "website";
+export type ImageKitScope = "question-bank" | "website" | "content";
 
 type ImageKitAuthParams = {
   token: string;
   expire: number;
   signature: string;
+  publicKey?: string;
 };
 
 function getIdToken(forceRefresh: boolean = false): Promise<string> {
@@ -32,15 +33,22 @@ function getIdToken(forceRefresh: boolean = false): Promise<string> {
   });
 }
 
+export async function getContentUploadLimit(): Promise<number> {
+  const idToken = await getIdToken();
+  const res = await fetch("/api/imagekit-auth?scope=content", {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!res.ok) return 20;
+  const data = await res.json();
+  return typeof data.maxFileSizeMB === "number" ? data.maxFileSizeMB : 20;
+}
+
 export async function uploadToImageKit(
   file: Blob,
   fileName: string,
   folder = "/question-bank",
   scope: ImageKitScope = "question-bank"
 ) {
-  const publicKey = import.meta.env.VITE_IMAGEKIT_PUBLIC_KEY as string;
-  if (!publicKey) throw new Error("Missing VITE_IMAGEKIT_PUBLIC_KEY");
-
   const idToken = await getIdToken();
 
   async function fetchAuthParams(authScope: ImageKitScope): Promise<ImageKitAuthParams> {
@@ -84,20 +92,24 @@ export async function uploadToImageKit(
     authParams = await fetchAuthParams(scope);
   } catch (err: any) {
     const msg = err instanceof Error ? err.message : String(err);
-    const shouldFallback =
-      scope === "question-bank" &&
-      (msg.includes("[403]") || msg.toLowerCase().includes("forbidden"));
+    const is403 = msg.includes("[403]") || msg.toLowerCase().includes("forbidden");
+    const shouldFallback = is403 && (scope === "question-bank" || scope === "content");
 
     if (!shouldFallback) {
       throw err;
     }
 
-    // Some educator paths may still call the default scope; retry with educator-allowed scope.
-    console.warn("[uploadToImageKit] question-bank scope forbidden; retrying with website scope");
+    // "content" scope not yet deployed on server — fall back to "website" which
+    // already allows EDUCATOR + ADMIN and is live.
+    console.warn(`[uploadToImageKit] ${scope} scope forbidden; retrying with website scope`);
     authParams = await fetchAuthParams("website");
   }
 
   const { token, expire, signature } = authParams;
+  const publicKey =
+    (authParams as any).publicKey ||
+    (import.meta.env.VITE_IMAGEKIT_PUBLIC_KEY as string);
+  if (!publicKey) throw new Error("ImageKit public key not found — set VITE_IMAGEKIT_PUBLIC_KEY in .env");
 
   const form = new FormData();
   form.append("file", file);

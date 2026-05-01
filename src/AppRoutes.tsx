@@ -31,10 +31,18 @@ import AdminTestForm from "@/pages/admin/TestForm";
 import AdminLayout from "./pages/admin/AdminLayout";
 import AdminQuestionBank from "@/pages/admin/QuestionBank";
 import AdminSeatManagement from "@/pages/admin/SeatManagement";
+import AdminTemplates from "@/pages/admin/Templates";
+import AdminEducators from "@/pages/admin/Educators";
 import AdminPlanManagement from "@/pages/admin/PlanManagement";
 import AdminSubjectManagement from "@/pages/admin/SubjectManagement";
 import AdminCouponManagement from "@/pages/admin/CouponManagement";
 import AdminPaymentLogs from "@/pages/admin/PaymentLogs";
+import AdminContentLibrary from "@/pages/admin/ContentLibrary";
+import AdminDppTemplate from "@/pages/admin/DppTemplate";
+import EducatorContent from "@/pages/educator/ContentManagement";
+import DppGenerator from "@/pages/educator/DppGenerator";
+import StudentContent from "@/pages/student/StudentContent";
+import StudentChatbot from "@/pages/student/StudentChatbot";
 
 // Educator Dashboard
 import EducatorLayout from "@/components/educator/EducatorLayout";
@@ -50,6 +58,7 @@ import Billing from "@/pages/educator/Billing";
 import Settings from "@/pages/educator/Settings";
 import Divisions from "@/pages/educator/Divisions";
 import Join from "@/pages/Join";
+import EducatorQuestionBank from "@/pages/educator/QuestionBank";
 
 // Student Dashboard
 import StudentLayout from "@/pages/student/StudentLayout";
@@ -86,6 +95,8 @@ export default function AppRoutes() {
           <Route path="rankings" element={<StudentRankings />} />
           <Route path="messages" element={<StudentMessages />} />
           <Route path="settings" element={<StudentSettings />} />
+          <Route path="content" element={<StudentContent />} />
+          <Route path="chatbot" element={<StudentChatbot />} />
         </Route>
       </Route>
 
@@ -115,12 +126,15 @@ export default function AppRoutes() {
             <Route path="learners/:learnerId" element={<LearnerDetails />} />
             <Route path="test-series" element={<TestSeries />} />
             <Route path="test-series/:testId/questions" element={<ManageQuestionsPage />} />
+            <Route path="question-bank" element={<EducatorQuestionBank />} />
             <Route path="access-codes" element={<AccessCodes />} />
             <Route path="messages" element={<Messages />} />
             <Route path="website-settings" element={<WebsiteSettings />} />
             <Route path="billing" element={<Billing />} />
             <Route path="settings" element={<Settings />} />
             <Route path="divisions" element={<Divisions />} />
+            <Route path="content" element={<EducatorContent />} />
+            <Route path="dpp" element={<DppGenerator />} />
           </Route>
 
           <Route path="*" element={<NotFound />} />
@@ -131,7 +145,7 @@ export default function AppRoutes() {
           <Route path="/how-it-works" element={<HowItWorks />} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
+          <Route path="/admin/login" element={<Login />} />
           <Route path="/contact" element={<Contact />} />
           <Route path="/features" element={<Features />} />
           <Route path="/complete-profile" element={<CompleteProfile />} />
@@ -141,7 +155,7 @@ export default function AppRoutes() {
         <Route
           path="/admin"
           element={
-            <RequireRole allow={["ADMIN"]}>
+            <RequireRole allow={["ADMIN"]} redirectTo="/admin/login">
               <AdminLayout />
             </RequireRole>
           }
@@ -154,10 +168,14 @@ export default function AppRoutes() {
           <Route path="tests/new" element={<AdminTestForm />} />
           <Route path="tests/edit/:id" element={<AdminTestForm />} />
           <Route path="questions/:testId" element={<AdminQuestions />} />
+          <Route path="templates" element={<AdminTemplates />} />
           <Route path="question-bank" element={<AdminQuestionBank />} />
           <Route path="seat-management" element={<AdminSeatManagement />} />
+          <Route path="educators" element={<AdminEducators />} />
           <Route path="plans" element={<AdminPlanManagement />} />
           <Route path="subjects" element={<AdminSubjectManagement />} />
+          <Route path="content" element={<AdminContentLibrary />} />
+          <Route path="dpp-template" element={<AdminDppTemplate />} />
           <Route path="coupons" element={<AdminCouponManagement />} />
           <Route path="payment-logs" element={<AdminPaymentLogs />} />
         </Route>
@@ -177,12 +195,15 @@ export default function AppRoutes() {
             <Route path="learners/:learnerId" element={<LearnerDetails />} />
             <Route path="test-series" element={<TestSeries />} />
             <Route path="test-series/:testId/questions" element={<ManageQuestionsPage />} />
+            <Route path="question-bank" element={<EducatorQuestionBank />} />
             <Route path="access-codes" element={<AccessCodes />} />
             <Route path="messages" element={<Messages />} />
             <Route path="website-settings" element={<WebsiteSettings />} />
             <Route path="billing" element={<Billing />} />
             <Route path="settings" element={<Settings />} />
             <Route path="divisions" element={<Divisions />} />
+            <Route path="content" element={<EducatorContent />} />
+            <Route path="dpp" element={<DppGenerator />} />
           </Route>
 
           <Route path="*" element={<NotFound />} />

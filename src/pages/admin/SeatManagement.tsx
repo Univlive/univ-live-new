@@ -1,5 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
-import { collection, doc, getDoc, getDocs, onSnapshot, orderBy, query, updateDoc, where } from "firebase/firestore";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  collection,
+  doc,
+  getDocs,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
+  writeBatch,
+  increment,
+  addDoc,
+  Timestamp,
+} from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthProvider";
 import { toast } from "sonner";
@@ -10,167 +24,451 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Search, ShieldCheck } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ChevronsUpDown,
+  Copy,
+  ExternalLink,
+  Loader2,
+  ShieldCheck,
+  UserCheck,
+  UserX,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+// ---------- types ----------
+
+type Ts = Timestamp | null | undefined;
+
+type EducatorDoc = {
+  seatLimit?: number;
+  status?: string;
+  lastSeatTransactionId?: string;
+  seatUpdatedAt?: Ts;
+  lastSeatTransactionAt?: Ts;
+  maxBranches?: number;
+  allowedSubjectIds?: string[];
+  trialSeats?: number;
+  trialExpiryAt?: Ts;
+  trialStatus?: string;
+  displayName?: string;
+  email?: string;
+  phone?: string;
+};
 
 type TxRow = {
   id: string;
   transactionId?: string;
+  type?: string;
   previousSeatLimit?: number;
   newSeatLimit?: number;
   delta?: number;
   note?: string | null;
   usedSeatsAtUpdate?: number;
-  updatedAt?: any;
+  updatedAt?: Ts;
   updatedBy?: string;
   updatedByEmail?: string | null;
 };
 
-function fmtTs(ts: any) {
+type BillingSeat = {
+  id: string;
+  status: string;
+  assignedAt: Ts;
+  studentName?: string;
+  studentEmail?: string;
+  batchId?: string;
+  courseId?: string;
+};
+
+type InstituteOption = {
+  uid: string;
+  displayName: string;
+  email: string;
+  tenantSlug?: string;
+  phone?: string;
+};
+
+type BatchNode = { id: string; name: string; usedSeats?: number; startDate?: string; endDate?: string };
+type CourseNode = { id: string; name: string; seatLimit?: number; usedSeats?: number; planId?: string; batches: BatchNode[] };
+type BranchNode = { id: string; name: string; courses: CourseNode[] };
+
+// ---------- helpers ----------
+
+function fmtTs(ts: Ts) {
   if (!ts) return "-";
-  try {
-    const ms = typeof ts?.toMillis === "function" ? ts.toMillis() : ts?.seconds ? ts.seconds * 1000 : null;
-    if (!ms) return "-";
-    return new Date(ms).toLocaleString();
-  } catch {
-    return "-";
-  }
+  try { return new Date((ts as Timestamp).seconds * 1000).toLocaleString(); } catch { return "-"; }
 }
+
+function fmtDate(ts: Ts) {
+  if (!ts) return "-";
+  try { return new Date((ts as Timestamp).seconds * 1000).toLocaleDateString(); } catch { return "-"; }
+}
+
+async function postWithToken(firebaseUser: any, path: string, body: Record<string, unknown>) {
+  const token = await firebaseUser.getIdToken();
+  const base = import.meta.env.VITE_MONKEY_KING_API_URL || "";
+  const res = await fetch(`${base}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.detail || data?.error || "Request failed");
+  return data;
+}
+
+// ---------- component ----------
 
 export default function SeatManagement() {
   const { firebaseUser } = useAuth();
 
-  const [tenantSlug, setTenantSlug] = useState("");
-  const [educatorId, setEducatorId] = useState("");
+  // Institute selector
+  const [allInstitutes, setAllInstitutes] = useState<InstituteOption[]>([]);
+  const [loadingInstitutes, setLoadingInstitutes] = useState(true);
+  const [comboOpen, setComboOpen] = useState(false);
+  const [comboSearch, setComboSearch] = useState("");
+  const [targetId, setTargetId] = useState("");
 
-  const [targetId, setTargetId] = useState<string>("");
-
-  const [educator, setEducator] = useState<any>(null);
-  const [usedSeats, setUsedSeats] = useState<number>(0);
-
+  // Educator snapshot
+  const [educator, setEducator] = useState<EducatorDoc | null>(null);
+  const [usedSeats, setUsedSeats] = useState(0);
+  const [activeSeats, setActiveSeats] = useState<BillingSeat[]>([]);
+  const [loadingSeats, setLoadingSeats] = useState(false);
   const [tx, setTx] = useState<TxRow[]>([]);
-  const [loadingTarget, setLoadingTarget] = useState(false);
 
-  const [open, setOpen] = useState(false);
-  const [newSeatLimit, setNewSeatLimit] = useState<number>(0);
+  // Update seats dialog
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const [newSeatLimit, setNewSeatLimit] = useState(0);
   const [transactionId, setTransactionId] = useState("");
-  const [note, setNote] = useState("");
+  const [updateNote, setUpdateNote] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // Trial seats dialog
+  const [trialOpen, setTrialOpen] = useState(false);
+  const [trialCount, setTrialCount] = useState(5);
+  const [trialExpiry, setTrialExpiry] = useState("");
+  const [trialNote, setTrialNote] = useState("");
+  const [trialBusy, setTrialBusy] = useState(false);
+
+  // Payment link dialog
+  const [payLinkOpen, setPayLinkOpen] = useState(false);
+  const [plBranches, setPlBranches] = useState<{ id: string; name: string }[]>([]);
+  const [plCourses, setPlCourses] = useState<{ id: string; name: string }[]>([]);
+  const [plBranchId, setPlBranchId] = useState("");
+  const [plCourseId, setPlCourseId] = useState("");
+  const [plPlanId, setPlPlanId] = useState("");
+  const [plSeats, setPlSeats] = useState(10);
+  const [plAmount, setPlAmount] = useState(0);
+  const [plAmountManual, setPlAmountManual] = useState(false);
+  const [plPhone, setPlPhone] = useState("");
+  const [plBusy, setPlBusy] = useState(false);
+  const [plResult, setPlResult] = useState<{ url: string; id: string } | null>(null);
+  const [plCopied, setPlCopied] = useState(false);
+  const [allPlans, setAllPlans] = useState<{ id: string; name: string; pricePerSeat: number }[]>([]);
+
+  // Hierarchy tab
+  const [hierarchy, setHierarchy] = useState<BranchNode[]>([]);
+  const [loadingHierarchy, setLoadingHierarchy] = useState(false);
+  const [expandedBranches, setExpandedBranches] = useState<Record<string, boolean>>({});
+  const [expandedCourses, setExpandedCourses] = useState<Record<string, boolean>>({});
+
   // Division controls
-  const [allSubjects, setAllSubjects] = useState<{ id: string; name: string }[]>([]);
-  const [maxBranchesInput, setMaxBranchesInput] = useState<number>(5);
+  const [maxBranchesInput, setMaxBranchesInput] = useState(5);
   const [allowedSubjectIds, setAllowedSubjectIds] = useState<string[]>([]);
   const [savingDivision, setSavingDivision] = useState(false);
+  const [allSubjects, setAllSubjects] = useState<{ id: string; name: string }[]>([]);
+
+  // AI config
+  const [chatTokenLimit, setChatTokenLimit] = useState(100000);
+  const [dppDailyLimit, setDppDailyLimit] = useState(3);
+  const [savingAiConfig, setSavingAiConfig] = useState(false);
 
   const seatLimit = Math.max(0, Number(educator?.seatLimit || 0));
   const available = Math.max(0, seatLimit - usedSeats);
 
-  const canUpdate = useMemo(() => targetId && firebaseUser, [targetId, firebaseUser]);
+  const selectedInstitute = allInstitutes.find((i) => i.uid === targetId) || null;
 
-  async function postWithToken(path: string, body: any) {
-    if (!firebaseUser) throw new Error("Not logged in");
-    const token = await firebaseUser.getIdToken();
-    const res = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify(body),
+  const filteredInstitutes = useMemo(() => {
+    const q = comboSearch.toLowerCase();
+    if (!q) return allInstitutes;
+    return allInstitutes.filter(
+      (i) =>
+        i.displayName.toLowerCase().includes(q) ||
+        i.email.toLowerCase().includes(q) ||
+        (i.tenantSlug || "").toLowerCase().includes(q)
+    );
+  }, [allInstitutes, comboSearch]);
+
+  // Load all institutes on mount
+  useEffect(() => {
+    setLoadingInstitutes(true);
+    getDocs(query(collection(db, "users"), where("role", "==", "EDUCATOR")))
+      .then((snap) => {
+        const list: InstituteOption[] = snap.docs.map((d) => {
+          const data = d.data() as any;
+          return {
+            uid: d.id,
+            displayName: data.displayName || data.name || "Unnamed",
+            email: data.email || "",
+            tenantSlug: data.tenantSlug || "",
+            phone: data.phone || data.phoneNumber || "",
+          };
+        });
+        list.sort((a, b) => a.displayName.localeCompare(b.displayName));
+        setAllInstitutes(list);
+      })
+      .finally(() => setLoadingInstitutes(false));
+  }, []);
+
+  // Load plans on mount
+  useEffect(() => {
+    getDocs(collection(db, "plans")).then((snap) => {
+      setAllPlans(
+        snap.docs
+          .map((d) => ({ id: d.id, name: (d.data() as any).name || d.id, pricePerSeat: (d.data() as any).pricePerSeat || 0 }))
+          .filter((p) => p.pricePerSeat > 0)
+      );
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data?.error || "Request failed");
-    return data;
-  }
+  }, []);
 
-  const resolveTarget = async () => {
-    setLoadingTarget(true);
-    try {
-      let id = educatorId.trim();
-
-      if (!id && tenantSlug.trim()) {
-        const slug = tenantSlug.trim().toLowerCase();
-        const tSnap = await getDoc(doc(db, "tenants", slug));
-        if (!tSnap.exists()) throw new Error("Tenant not found");
-        id = String((tSnap.data() as any)?.educatorId || "").trim();
-      }
-
-      if (!id) throw new Error("Enter educatorId or tenantSlug");
-      setTargetId(id);
-      toast.success("Loaded coaching");
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to load");
-      setTargetId("");
-      setEducator(null);
-      setTx([]);
-      setUsedSeats(0);
-    } finally {
-      setLoadingTarget(false);
-    }
-  };
-
-  // Load global subjects once
+  // Load global subjects
   useEffect(() => {
     getDocs(collection(db, "subjects")).then((snap) =>
-      setAllSubjects(snap.docs.map((d) => ({ id: d.id, name: d.data().name })))
+      setAllSubjects(snap.docs.map((d) => ({ id: d.id, name: (d.data() as any).name })))
     );
   }, []);
 
-  // Sync division controls from educator doc
+  // Sync division + AI config from educator doc
   useEffect(() => {
     if (!educator) return;
     setMaxBranchesInput(educator.maxBranches ?? 5);
     setAllowedSubjectIds(educator.allowedSubjectIds ?? []);
+    setChatTokenLimit((educator as any).chatDailyTokenLimit ?? 100000);
+    setDppDailyLimit((educator as any).dppDailyLimit ?? 3);
   }, [educator]);
 
-  // subscribe to educator + seat usage + transactions
+  // Subscribe educator + billingSeats + transactions
   useEffect(() => {
     if (!targetId) return;
 
     const un1 = onSnapshot(doc(db, "educators", targetId), (snap) => {
-      setEducator(snap.exists() ? snap.data() : null);
+      setEducator(snap.exists() ? (snap.data() as EducatorDoc) : null);
     });
 
-    const qSeats = query(
-      collection(db, "educators", targetId, "billingSeats"),
-      where("status", "==", "active")
+    const un2 = onSnapshot(
+      query(collection(db, "educators", targetId, "billingSeats"), where("status", "==", "active")),
+      async (snap) => {
+        setUsedSeats(snap.size);
+        setLoadingSeats(true);
+        const rows: BillingSeat[] = await Promise.all(
+          snap.docs.map(async (d) => {
+            const data = d.data() as any;
+            const learnerSnap = await getDocs(
+              query(collection(db, "educators", targetId, "students"), where("__name__", "==", d.id))
+            ).catch(() => null);
+            const learner = learnerSnap?.docs[0]?.data() as any;
+            return {
+              id: d.id,
+              status: data.status,
+              assignedAt: data.assignedAt,
+              batchId: data.batchId,
+              courseId: data.courseId,
+              studentName: learner?.name || "Unknown",
+              studentEmail: learner?.email || "",
+            };
+          })
+        );
+        setActiveSeats(rows);
+        setLoadingSeats(false);
+      }
     );
-    const un2 = onSnapshot(qSeats, (snap) => setUsedSeats(snap.size));
 
-    const qTx = query(
-      collection(db, "educators", targetId, "seatTransactions"),
-      orderBy("updatedAt", "desc")
+    const un3 = onSnapshot(
+      query(collection(db, "educators", targetId, "seatTransactions"), orderBy("updatedAt", "desc")),
+      (snap) => setTx(snap.docs.map((d) => ({ id: d.id, ...(d.data() as TxRow) })))
     );
-    const un3 = onSnapshot(qTx, (snap) => {
-      const rows: TxRow[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-      setTx(rows);
-    });
 
-    return () => {
-      un1();
-      un2();
-      un3();
-    };
+    return () => { un1(); un2(); un3(); };
   }, [targetId]);
 
-  const openUpdateDialog = () => {
-    setNewSeatLimit(seatLimit);
-    setTransactionId("");
-    setNote("");
-    setOpen(true);
+  // Pre-fill payment link phone from educator doc
+  useEffect(() => {
+    if (educator?.phone) setPlPhone(educator.phone);
+  }, [educator]);
+
+  // Load hierarchy when tab becomes active or targetId changes
+  const loadHierarchy = async () => {
+    if (!targetId) return;
+    setLoadingHierarchy(true);
+    try {
+      const branchSnap = await getDocs(collection(db, "educators", targetId, "branches"));
+      const branches: BranchNode[] = await Promise.all(
+        branchSnap.docs.map(async (bDoc) => {
+          const courseSnap = await getDocs(
+            collection(db, "educators", targetId, "branches", bDoc.id, "courses")
+          );
+          const courses: CourseNode[] = await Promise.all(
+            courseSnap.docs.map(async (cDoc) => {
+              const batchSnap = await getDocs(
+                collection(db, "educators", targetId, "branches", bDoc.id, "courses", cDoc.id, "batches")
+              );
+              const batches: BatchNode[] = batchSnap.docs.map((batchDoc) => {
+                const bd = batchDoc.data() as any;
+                return { id: batchDoc.id, name: bd.name || batchDoc.id, usedSeats: bd.usedSeats, startDate: bd.startDate, endDate: bd.endDate };
+              });
+              const cd = cDoc.data() as any;
+              return { id: cDoc.id, name: cd.name || cDoc.id, seatLimit: cd.seatLimit, usedSeats: cd.usedSeats, planId: cd.planId, batches };
+            })
+          );
+          const bd = bDoc.data() as any;
+          return { id: bDoc.id, name: bd.name || bDoc.id, courses };
+        })
+      );
+      setHierarchy(branches);
+    } finally {
+      setLoadingHierarchy(false);
+    }
   };
 
+  // Load payment link branches/courses
+  useEffect(() => {
+    if (!payLinkOpen || !targetId) return;
+    getDocs(collection(db, "educators", targetId, "branches")).then((snap) => {
+      setPlBranches(snap.docs.map((d) => ({ id: d.id, name: (d.data() as any).name || d.id })));
+    });
+  }, [payLinkOpen, targetId]);
+
+  useEffect(() => {
+    if (!plBranchId || !targetId) { setPlCourses([]); setPlCourseId(""); return; }
+    getDocs(collection(db, "educators", targetId, "branches", plBranchId, "courses")).then((snap) => {
+      setPlCourses(snap.docs.map((d) => ({ id: d.id, name: (d.data() as any).name || d.id })));
+    });
+    setPlCourseId("");
+  }, [plBranchId, targetId]);
+
+  // Auto-calc payment link amount
+  useEffect(() => {
+    if (plAmountManual) return;
+    const plan = allPlans.find((p) => p.id === plPlanId);
+    if (plan) setPlAmount(plan.pricePerSeat * plSeats);
+  }, [plPlanId, plSeats, plAmountManual, allPlans]);
+
+  // ---------- actions ----------
+
   const submitUpdate = async () => {
-    if (!canUpdate) return;
+    if (!targetId || !firebaseUser) return;
     setBusy(true);
     try {
-      await postWithToken("/api/admin/update-seats", {
+      await postWithToken(firebaseUser, "/api/admin/update-seats", {
         educatorId: targetId,
         newSeatLimit: Math.max(0, Math.floor(newSeatLimit || 0)),
         transactionId: transactionId.trim(),
-        note: note.trim(),
+        note: updateNote.trim(),
       });
       toast.success("Seats updated");
-      setOpen(false);
+      setUpdateOpen(false);
     } catch (e: any) {
-      toast.error(e?.message || "Failed to update seats");
+      toast.error(e.message || "Failed to update seats");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitTrial = async () => {
+    if (!targetId || !trialExpiry) return;
+    setTrialBusy(true);
+    try {
+      const expiryTs = Timestamp.fromDate(new Date(trialExpiry));
+      const batch = writeBatch(db);
+      batch.update(doc(db, "educators", targetId), {
+        seatLimit: increment(trialCount),
+        trialSeats: increment(trialCount),
+        trialExpiryAt: expiryTs,
+        trialStatus: "active",
+        updatedAt: serverTimestamp(),
+      });
+      const txRef = doc(collection(db, "educators", targetId, "seatTransactions"));
+      batch.set(txRef, {
+        type: "trial",
+        delta: trialCount,
+        newSeatLimit: seatLimit + trialCount,
+        trialExpiresAt: expiryTs,
+        note: trialNote.trim() || null,
+        updatedAt: serverTimestamp(),
+        updatedBy: firebaseUser?.uid,
+      });
+      await batch.commit();
+      toast.success(`${trialCount} trial seats allotted`);
+      setTrialOpen(false);
+      setTrialCount(5);
+      setTrialExpiry("");
+      setTrialNote("");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to allot trial seats");
+    } finally {
+      setTrialBusy(false);
+    }
+  };
+
+  const submitPaymentLink = async () => {
+    if (!targetId || !plBranchId || !plCourseId || !plPlanId || !plSeats || !plAmount || !firebaseUser) return;
+    setPlBusy(true);
+    try {
+      const institute = allInstitutes.find((i) => i.uid === targetId);
+      const result = await postWithToken(firebaseUser, "/api/payment/admin/create-payment-link", {
+        educator_id: targetId,
+        branch_id: plBranchId,
+        course_id: plCourseId,
+        plan_id: plPlanId,
+        seats: plSeats,
+        amount_paise: plAmount,
+        educator_phone: plPhone,
+        educator_name: institute?.displayName || "",
+        educator_email: institute?.email || "",
+        note: updateNote,
+      });
+      setPlResult({ url: result.cf_link_url, id: result.cf_link_id });
+    } catch (e: any) {
+      toast.error(e.message || "Failed to create payment link");
+    } finally {
+      setPlBusy(false);
+    }
+  };
+
+  const revokeSeat = async (studentId: string) => {
+    if (!confirm("Revoke this student's seat? They lose access immediately.")) return;
+    try {
+      await updateDoc(doc(db, "educators", targetId, "billingSeats", studentId), {
+        status: "revoked",
+        revokedAt: serverTimestamp(),
+        revokedBy: firebaseUser?.uid,
+      });
+      toast.success("Seat revoked");
+    } catch {
+      toast.error("Failed to revoke seat");
+    }
+  };
+
+  const toggleEducatorStatus = async () => {
+    const newStatus = educator?.status === "suspended" ? "active" : "suspended";
+    if (!confirm(`Set educator status to ${newStatus}?`)) return;
+    setBusy(true);
+    try {
+      const batch = writeBatch(db);
+      batch.update(doc(db, "educators", targetId), { status: newStatus, updatedAt: serverTimestamp() });
+      batch.update(doc(db, "users", targetId), { status: newStatus, updatedAt: serverTimestamp() });
+      await batch.commit();
+      toast.success(`Educator ${newStatus}`);
+    } catch {
+      toast.error("Failed to update status");
     } finally {
       setBusy(false);
     }
@@ -183,226 +481,624 @@ export default function SeatManagement() {
       await updateDoc(doc(db, "educators", targetId), {
         maxBranches: maxBranchesInput,
         allowedSubjectIds,
+        updatedAt: serverTimestamp(),
       });
       toast.success("Division controls saved");
     } catch {
-      toast.error("Save failed");
+      toast.error("Failed to save");
     } finally {
       setSavingDivision(false);
     }
   };
 
+  const saveAiConfig = async () => {
+    if (!targetId) return;
+    setSavingAiConfig(true);
+    try {
+      await updateDoc(doc(db, "educators", targetId), {
+        chatDailyTokenLimit: Math.max(0, Math.floor(chatTokenLimit)),
+        dppDailyLimit: Math.max(0, Math.floor(dppDailyLimit)),
+        updatedAt: serverTimestamp(),
+      });
+      toast.success("AI config saved");
+    } catch {
+      toast.error("Failed to save AI config");
+    } finally {
+      setSavingAiConfig(false);
+    }
+  };
+
+  const copyPayLink = () => {
+    if (!plResult) return;
+    navigator.clipboard.writeText(plResult.url);
+    setPlCopied(true);
+    setTimeout(() => setPlCopied(false), 2000);
+  };
+
+  // ---------- render ----------
+
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center gap-3">
-        <ShieldCheck className="h-6 w-6 text-primary" />
-        <h1 className="text-2xl font-bold">Seat Management</h1>
-        <Badge variant="secondary">Admin</Badge>
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <ShieldCheck className="h-6 w-6 text-primary" />
+          <h1 className="text-2xl font-bold">Educators & Config</h1>
+          <Badge variant="secondary">Admin</Badge>
+        </div>
+        {targetId && educator && (
+          <Button
+            variant={educator.status === "suspended" ? ("success" as any) : "destructive"}
+            size="sm"
+            onClick={toggleEducatorStatus}
+            disabled={busy}
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : educator.status === "suspended" ? <UserCheck className="h-4 w-4 mr-2" /> : <UserX className="h-4 w-4 mr-2" />}
+            {educator.status === "suspended" ? "Reactivate" : "Suspend"}
+          </Button>
+        )}
       </div>
 
+      {/* Institute selector */}
       <Card>
         <CardHeader>
-          <CardTitle>Find Coaching / Tenant</CardTitle>
+          <CardTitle>Select Institute</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid md:grid-cols-3 gap-3">
-            <div>
-              <label className="text-sm text-muted-foreground">Tenant Slug (optional)</label>
-              <Input value={tenantSlug} onChange={(e) => setTenantSlug(e.target.value)} placeholder="e.g. tayaari-exam" />
-            </div>
-            <div>
-              <label className="text-sm text-muted-foreground">Educator UID (optional)</label>
-              <Input value={educatorId} onChange={(e) => setEducatorId(e.target.value)} placeholder="Firebase UID" />
-            </div>
-            <div className="flex items-end">
-              <Button onClick={resolveTarget} disabled={loadingTarget} className="w-full">
-                {loadingTarget ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
-                Load
+        <CardContent>
+          <Popover open={comboOpen} onOpenChange={setComboOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" role="combobox" aria-expanded={comboOpen} className="w-full max-w-md justify-between">
+                {selectedInstitute ? (
+                  <span className="truncate">
+                    {selectedInstitute.displayName}
+                    {selectedInstitute.tenantSlug && (
+                      <span className="ml-2 text-xs text-muted-foreground">· {selectedInstitute.tenantSlug}</span>
+                    )}
+                  </span>
+                ) : loadingInstitutes ? (
+                  <span className="text-muted-foreground flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Loading institutes…</span>
+                ) : (
+                  <span className="text-muted-foreground">Search institute…</span>
+                )}
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
               </Button>
-            </div>
-          </div>
+            </PopoverTrigger>
+            <PopoverContent className="w-[420px] p-0" align="start">
+              <Command>
+                <CommandInput placeholder="Search by name, email, or slug…" value={comboSearch} onValueChange={setComboSearch} />
+                <CommandList>
+                  <CommandEmpty>No institutes found.</CommandEmpty>
+                  <CommandGroup>
+                    {filteredInstitutes.slice(0, 50).map((inst) => (
+                      <CommandItem
+                        key={inst.uid}
+                        value={inst.uid}
+                        onSelect={() => {
+                          setTargetId(inst.uid);
+                          setComboOpen(false);
+                          setComboSearch("");
+                          setHierarchy([]);
+                          setActiveSeats([]);
+                          setTx([]);
+                          setPlResult(null);
+                        }}
+                      >
+                        <Check className={cn("mr-2 h-4 w-4", targetId === inst.uid ? "opacity-100" : "opacity-0")} />
+                        <div className="flex flex-col min-w-0">
+                          <span className="font-medium truncate">{inst.displayName}</span>
+                          <span className="text-xs text-muted-foreground truncate">
+                            {inst.email}{inst.tenantSlug ? ` · ${inst.tenantSlug}` : ""}
+                          </span>
+                        </div>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
 
-          {targetId ? (
-            <div className="text-sm text-muted-foreground">
-              Target educatorId: <span className="font-mono text-foreground">{targetId}</span>
+          {targetId && (
+            <div className="mt-3 flex items-center gap-3 flex-wrap">
+              <span className="text-sm text-muted-foreground">
+                UID: <span className="font-mono text-foreground">{targetId}</span>
+              </span>
+              {educator?.status === "suspended" && (
+                <Badge variant="destructive" className="gap-1">
+                  <AlertTriangle className="h-3 w-3" /> Account Suspended
+                </Badge>
+              )}
             </div>
-          ) : null}
+          )}
         </CardContent>
       </Card>
 
-      <div className="grid lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-1">
-          <CardHeader>
-            <CardTitle>Current Seats</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Total Assigned</span>
-              <span className="text-xl font-bold">{seatLimit}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Used</span>
-              <span className="text-xl font-bold">{usedSeats}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Available</span>
-              <span className="text-xl font-bold">{available}</span>
-            </div>
-
-            <div className="pt-2 space-y-1 text-sm text-muted-foreground">
-              <div>
-                Last Tx ID: <span className="font-mono text-foreground">{educator?.lastSeatTransactionId || "-"}</span>
-              </div>
-              <div>Last update: {fmtTs(educator?.seatUpdatedAt || educator?.lastSeatTransactionAt)}</div>
-            </div>
-
-            <Button onClick={openUpdateDialog} disabled={!canUpdate} className="w-full">
-              Update Seats
-            </Button>
-            <p className="text-xs text-muted-foreground">
-              Note: You cannot reduce below currently used active seats ({usedSeats}).
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Seat Transaction History</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Transaction ID</TableHead>
-                    <TableHead className="text-right">Seats</TableHead>
-                    <TableHead className="text-right">Δ</TableHead>
-                    <TableHead>Updated By</TableHead>
-                    <TableHead>Note</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {tx.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground">
-                        No transactions yet.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    tx.slice(0, 30).map((r) => (
-                      <TableRow key={r.id}>
-                        <TableCell>{fmtTs(r.updatedAt)}</TableCell>
-                        <TableCell className="font-mono">{r.transactionId || "-"}</TableCell>
-                        <TableCell className="text-right">{Number(r.newSeatLimit ?? 0)}</TableCell>
-                        <TableCell className="text-right">{Number(r.delta ?? 0)}</TableCell>
-                        <TableCell className="text-sm">{r.updatedByEmail || r.updatedBy || "-"}</TableCell>
-                        <TableCell className="text-sm">{r.note || "-"}</TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
       {targetId && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Division Controls</CardTitle>
-            <p className="text-sm text-muted-foreground">Set branch limit and allowed subjects for this educator</p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <label className="text-sm text-muted-foreground">Max Branches</label>
-              <Input
-                type="number"
-                min={1}
-                value={maxBranchesInput}
-                onChange={(e) => setMaxBranchesInput(Number(e.target.value))}
-                className="max-w-xs"
-              />
-            </div>
-            <div>
-              <label className="text-sm text-muted-foreground block mb-2">
-                Allowed Subjects (empty = all subjects allowed)
-              </label>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                {allSubjects.map((s) => (
-                  <label key={s.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted px-2 py-1 rounded text-sm">
-                    <input
-                      type="checkbox"
-                      checked={allowedSubjectIds.includes(s.id)}
-                      onChange={(e) =>
-                        setAllowedSubjectIds((prev) =>
-                          e.target.checked ? [...prev, s.id] : prev.filter((x) => x !== s.id)
-                        )
-                      }
-                    />
-                    {s.name}
-                  </label>
-                ))}
-                {allSubjects.length === 0 && (
-                  <p className="text-sm text-muted-foreground col-span-3">
-                    No subjects defined yet. Add subjects in the Subjects page first.
-                  </p>
-                )}
+        <>
+          <div className="grid lg:grid-cols-3 gap-6">
+            {/* Seat stats */}
+            <Card className="lg:col-span-1">
+              <CardHeader>
+                <CardTitle>Seats</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Total Assigned</span>
+                  <span className="text-xl font-bold">{seatLimit}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Used</span>
+                  <span className="text-xl font-bold">{usedSeats}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Available</span>
+                  <span className="text-xl font-bold text-green-600 dark:text-green-400">{available}</span>
+                </div>
+
+                {educator?.trialSeats && educator.trialSeats > 0 ? (
+                  <div className="flex items-center justify-between border-t pt-2">
+                    <span className="text-sm text-muted-foreground">Trial Seats</span>
+                    <div className="text-right">
+                      <span className="font-semibold">{educator.trialSeats}</span>
+                      {educator.trialExpiryAt && (
+                        <p className="text-xs text-muted-foreground">expires {fmtDate(educator.trialExpiryAt)}</p>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="pt-2 space-y-1 text-xs text-muted-foreground">
+                  <div>Last Tx: <span className="font-mono text-foreground">{educator?.lastSeatTransactionId || "-"}</span></div>
+                  <div>Updated: {fmtTs(educator?.seatUpdatedAt || educator?.lastSeatTransactionAt)}</div>
+                </div>
+
+                <div className="space-y-2 pt-1">
+                  <Button onClick={() => { setNewSeatLimit(seatLimit); setTransactionId(""); setUpdateNote(""); setUpdateOpen(true); }} className="w-full">
+                    Update Seats
+                  </Button>
+                  <Button variant="outline" onClick={() => setTrialOpen(true)} className="w-full">
+                    Allot Trial Seats
+                  </Button>
+                  <Button variant="outline" onClick={() => { setPlResult(null); setPlBranchId(""); setPlCourseId(""); setPlPlanId(""); setPlSeats(10); setPlAmountManual(false); setPayLinkOpen(true); }} className="w-full">
+                    Send Payment Link
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">Cannot reduce below {usedSeats} active seats.</p>
+              </CardContent>
+            </Card>
+
+            {/* Tabs: history / active / hierarchy / payment links */}
+            <Card className="lg:col-span-2">
+              <CardContent className="p-0">
+                <Tabs defaultValue="history">
+                  <div className="px-6 pt-4">
+                    <TabsList className="flex-wrap h-auto gap-1">
+                      <TabsTrigger value="history">Transactions</TabsTrigger>
+                      <TabsTrigger value="active">Students ({usedSeats})</TabsTrigger>
+                      <TabsTrigger value="hierarchy" onClick={loadHierarchy}>Hierarchy</TabsTrigger>
+                      <TabsTrigger value="paylinks">Payment Links</TabsTrigger>
+                    </TabsList>
+                  </div>
+
+                  {/* Transaction history */}
+                  <TabsContent value="history" className="p-6 mt-0">
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Date</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Transaction ID</TableHead>
+                            <TableHead className="text-right">Seats</TableHead>
+                            <TableHead className="text-right">Δ</TableHead>
+                            <TableHead>Note</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {tx.length === 0 ? (
+                            <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">No transactions yet.</TableCell></TableRow>
+                          ) : (
+                            tx.slice(0, 30).map((r) => (
+                              <TableRow key={r.id}>
+                                <TableCell className="text-sm">{fmtTs(r.updatedAt)}</TableCell>
+                                <TableCell>
+                                  {r.type === "trial" ? <Badge variant="outline" className="text-xs">Trial</Badge>
+                                    : r.type === "admin_link" ? <Badge variant="secondary" className="text-xs">Link</Badge>
+                                    : <Badge className="text-xs">Manual</Badge>}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs">{r.transactionId || r.id.slice(0, 8)}</TableCell>
+                                <TableCell className="text-right">{Number(r.newSeatLimit ?? 0)}</TableCell>
+                                <TableCell className="text-right">{Number(r.delta ?? 0)}</TableCell>
+                                <TableCell className="text-sm text-muted-foreground">{r.note || "-"}</TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </TabsContent>
+
+                  {/* Active students */}
+                  <TabsContent value="active" className="p-6 mt-0">
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Student</TableHead>
+                            <TableHead>Assigned On</TableHead>
+                            <TableHead className="text-right">Action</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {loadingSeats ? (
+                            <TableRow><TableCell colSpan={3} className="text-center py-10"><Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" /></TableCell></TableRow>
+                          ) : activeSeats.length === 0 ? (
+                            <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-10">No active seats.</TableCell></TableRow>
+                          ) : (
+                            activeSeats.map((s) => (
+                              <TableRow key={s.id}>
+                                <TableCell>
+                                  <div className="flex flex-col">
+                                    <span className="font-medium">{s.studentName}</span>
+                                    <span className="text-xs text-muted-foreground">{s.studentEmail}</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-sm">{fmtTs(s.assignedAt)}</TableCell>
+                                <TableCell className="text-right">
+                                  <Button variant="ghost" size="sm" onClick={() => revokeSeat(s.id)} className="text-destructive">Revoke</Button>
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </TabsContent>
+
+                  {/* Hierarchy tab */}
+                  <TabsContent value="hierarchy" className="p-6 mt-0">
+                    {loadingHierarchy ? (
+                      <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                    ) : hierarchy.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-10">No branches found. Click the Hierarchy tab to load.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {hierarchy.map((branch) => (
+                          <div key={branch.id} className="border rounded-xl overflow-hidden">
+                            <button
+                              className="w-full flex items-center gap-2 px-4 py-3 bg-muted/40 hover:bg-muted/70 transition-colors text-sm font-semibold"
+                              onClick={() => setExpandedBranches((p) => ({ ...p, [branch.id]: !p[branch.id] }))}
+                            >
+                              {expandedBranches[branch.id] ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                              {branch.name}
+                              <span className="text-xs font-normal text-muted-foreground ml-auto">{branch.courses.length} course{branch.courses.length !== 1 ? "s" : ""}</span>
+                            </button>
+                            {expandedBranches[branch.id] && branch.courses.map((course) => (
+                              <div key={course.id} className="border-t">
+                                <button
+                                  className="w-full flex items-center gap-2 pl-8 pr-4 py-2.5 hover:bg-muted/30 transition-colors text-sm"
+                                  onClick={() => setExpandedCourses((p) => ({ ...p, [course.id]: !p[course.id] }))}
+                                >
+                                  {expandedCourses[course.id] ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+                                  <span className="font-medium">{course.name}</span>
+                                  <span className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
+                                    {course.planId && <Badge variant="outline" className="text-[10px] h-5">{course.planId}</Badge>}
+                                    <span className="font-semibold text-foreground">{course.usedSeats ?? 0}/{course.seatLimit ?? 0}</span> seats
+                                  </span>
+                                </button>
+                                {expandedCourses[course.id] && course.batches.map((batch) => (
+                                  <div key={batch.id} className="pl-14 pr-4 py-2 flex items-center gap-3 border-t bg-background/50 text-sm">
+                                    <span className="text-muted-foreground">↳</span>
+                                    <span>{batch.name}</span>
+                                    {(batch.startDate || batch.endDate) && (
+                                      <span className="text-xs text-muted-foreground">{batch.startDate} – {batch.endDate}</span>
+                                    )}
+                                    <span className="ml-auto text-xs text-muted-foreground">{batch.usedSeats ?? 0} active</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  {/* Payment links */}
+                  <PaymentLinksTab targetId={targetId} />
+                </Tabs>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Division controls */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Division Controls</CardTitle>
+              <p className="text-sm text-muted-foreground">Set branch limit and allowed subjects for this educator</p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label className="text-sm text-muted-foreground">Max Branches</Label>
+                <Input type="number" min={1} value={maxBranchesInput} onChange={(e) => setMaxBranchesInput(Number(e.target.value))} className="max-w-xs mt-1" />
               </div>
-            </div>
-            <Button onClick={saveDivisionControls} disabled={savingDivision}>
-              {savingDivision && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-              Save Division Controls
-            </Button>
-          </CardContent>
-        </Card>
+              <div>
+                <Label className="text-sm text-muted-foreground block mb-2">Allowed Subjects (empty = all)</Label>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {allSubjects.map((s) => (
+                    <label key={s.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted px-2 py-1 rounded text-sm">
+                      <input
+                        type="checkbox"
+                        checked={allowedSubjectIds.includes(s.id)}
+                        onChange={(e) =>
+                          setAllowedSubjectIds((prev) =>
+                            e.target.checked ? [...prev, s.id] : prev.filter((x) => x !== s.id)
+                          )
+                        }
+                      />
+                      {s.name}
+                    </label>
+                  ))}
+                  {allSubjects.length === 0 && <p className="text-sm text-muted-foreground col-span-3">No subjects defined yet.</p>}
+                </div>
+              </div>
+              <Button onClick={saveDivisionControls} disabled={savingDivision}>
+                {savingDivision && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Save Division Controls
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* AI Config */}
+          <Card>
+            <CardHeader>
+              <CardTitle>AI Config</CardTitle>
+              <p className="text-sm text-muted-foreground">Chatbot token limit and DPP generation quota for this educator</p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-sm text-muted-foreground">Chat Daily Token Limit</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={chatTokenLimit}
+                    onChange={(e) => setChatTokenLimit(Number(e.target.value))}
+                    className="max-w-xs mt-1"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Tokens per day for the AI chatbot (default 100,000)</p>
+                </div>
+                <div>
+                  <Label className="text-sm text-muted-foreground">DPP Daily Limit</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={dppDailyLimit}
+                    onChange={(e) => setDppDailyLimit(Number(e.target.value))}
+                    className="max-w-xs mt-1"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Max DPP papers generated per day (default 3)</p>
+                </div>
+              </div>
+              <Button onClick={saveAiConfig} disabled={savingAiConfig}>
+                {savingAiConfig && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Save AI Config
+              </Button>
+            </CardContent>
+          </Card>
+        </>
       )}
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      {/* Update seats dialog */}
+      <Dialog open={updateOpen} onOpenChange={setUpdateOpen}>
         <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Update Assigned Seats</DialogTitle>
-          </DialogHeader>
-
+          <DialogHeader><DialogTitle>Update Assigned Seats</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div className="text-sm text-muted-foreground">
-              Current total: <span className="font-semibold text-foreground">{seatLimit}</span> • Used:{" "}
-              <span className="font-semibold text-foreground">{usedSeats}</span>
-            </div>
-
+            <p className="text-sm text-muted-foreground">Current: <b>{seatLimit}</b> · Used: <b>{usedSeats}</b></p>
             <div>
-              <label className="text-sm text-muted-foreground">New Total Seats</label>
-              <Input
-                type="number"
-                value={newSeatLimit}
-                onChange={(e) => setNewSeatLimit(Number(e.target.value))}
-                min={0}
-              />
+              <Label>New Total Seats</Label>
+              <Input type="number" value={newSeatLimit} onChange={(e) => setNewSeatLimit(Number(e.target.value))} min={0} className="mt-1" />
             </div>
-
             <div>
-              <label className="text-sm text-muted-foreground">Transaction ID (required)</label>
-              <Input value={transactionId} onChange={(e) => setTransactionId(e.target.value)} placeholder="e.g. TXN-2026-00021" />
+              <Label>Transaction ID <span className="text-destructive">*</span></Label>
+              <Input value={transactionId} onChange={(e) => setTransactionId(e.target.value)} placeholder="e.g. TXN-2026-00021" className="mt-1" />
             </div>
-
             <div>
-              <label className="text-sm text-muted-foreground">Note (optional)</label>
-              <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Paid via UPI, 10 seats added" />
+              <Label>Note (optional)</Label>
+              <Input value={updateNote} onChange={(e) => setUpdateNote(e.target.value)} placeholder="e.g. Paid via UPI, 10 seats added" className="mt-1" />
             </div>
-
             <div className="flex gap-2 justify-end pt-2">
-              <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
-                Cancel
-              </Button>
+              <Button variant="outline" onClick={() => setUpdateOpen(false)} disabled={busy}>Cancel</Button>
               <Button onClick={submitUpdate} disabled={busy || !transactionId.trim()}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                Save
+                {busy && <Loader2 className="h-4 w-4 animate-spin mr-2" />} Save
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Trial seats dialog */}
+      <Dialog open={trialOpen} onOpenChange={setTrialOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Allot Trial Seats</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>Number of Trial Seats</Label>
+              <Input type="number" value={trialCount} onChange={(e) => setTrialCount(Math.max(1, Number(e.target.value)))} min={1} className="mt-1" />
+            </div>
+            <div>
+              <Label>Trial Valid Until <span className="text-destructive">*</span></Label>
+              <Input type="date" value={trialExpiry} onChange={(e) => setTrialExpiry(e.target.value)} className="mt-1"
+                min={new Date().toISOString().split("T")[0]} />
+            </div>
+            <div>
+              <Label>Note (optional)</Label>
+              <Input value={trialNote} onChange={(e) => setTrialNote(e.target.value)} placeholder="e.g. 14-day demo trial" className="mt-1" />
+            </div>
+            <p className="text-xs text-muted-foreground">Trial seats count toward the institute's total seat pool. Educator must manually expire them if not converted.</p>
+            <div className="flex gap-2 justify-end pt-2">
+              <Button variant="outline" onClick={() => setTrialOpen(false)} disabled={trialBusy}>Cancel</Button>
+              <Button onClick={submitTrial} disabled={trialBusy || !trialExpiry}>
+                {trialBusy && <Loader2 className="h-4 w-4 animate-spin mr-2" />} Allot
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Payment link dialog */}
+      <Dialog open={payLinkOpen} onOpenChange={(v) => { setPayLinkOpen(v); if (!v) { setPlResult(null); setPlBusy(false); } }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader><DialogTitle>Create Cashfree Payment Link</DialogTitle></DialogHeader>
+          {plResult ? (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">Payment link created. Share with the institute to collect payment. Seats will auto-provision on payment.</p>
+              <div className="flex gap-2">
+                <Input value={plResult.url} readOnly className="font-mono text-xs" />
+                <Button size="icon" variant="outline" onClick={copyPayLink}>
+                  {plCopied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                </Button>
+                <Button size="icon" variant="outline" onClick={() => window.open(plResult.url, "_blank")}>
+                  <ExternalLink className="h-4 w-4" />
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground font-mono">Link ID: {plResult.id}</p>
+              <Button variant="outline" onClick={() => { setPlResult(null); setPayLinkOpen(false); }} className="w-full">Done</Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Branch</Label>
+                  <Select value={plBranchId} onValueChange={(v) => setPlBranchId(v)}>
+                    <SelectTrigger className="mt-1"><SelectValue placeholder="Select branch" /></SelectTrigger>
+                    <SelectContent>
+                      {plBranches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Course</Label>
+                  <Select value={plCourseId} onValueChange={setPlCourseId} disabled={!plBranchId}>
+                    <SelectTrigger className="mt-1"><SelectValue placeholder="Select course" /></SelectTrigger>
+                    <SelectContent>
+                      {plCourses.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div>
+                <Label>Plan</Label>
+                <Select value={plPlanId} onValueChange={(v) => { setPlPlanId(v); setPlAmountManual(false); }}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select plan" /></SelectTrigger>
+                  <SelectContent>
+                    {allPlans.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>{p.name} — ₹{(p.pricePerSeat / 100).toFixed(0)}/seat</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Seats</Label>
+                  <Input type="number" min={1} value={plSeats} onChange={(e) => setPlSeats(Math.max(1, Number(e.target.value)))} className="mt-1" />
+                </div>
+                <div>
+                  <Label>Amount (paise)</Label>
+                  <Input
+                    type="number" min={0} value={plAmount}
+                    onChange={(e) => { setPlAmount(Number(e.target.value)); setPlAmountManual(true); }}
+                    className="mt-1"
+                    placeholder="Auto-calculated"
+                  />
+                  {plAmount > 0 && <p className="text-xs text-muted-foreground mt-1">₹{(plAmount / 100).toFixed(0)}</p>}
+                </div>
+              </div>
+              <div>
+                <Label>Educator Phone</Label>
+                <Input value={plPhone} onChange={(e) => setPlPhone(e.target.value)} placeholder="10-digit mobile" className="mt-1" />
+              </div>
+              <div className="flex gap-2 justify-end pt-2">
+                <Button variant="outline" onClick={() => setPayLinkOpen(false)} disabled={plBusy}>Cancel</Button>
+                <Button onClick={submitPaymentLink} disabled={plBusy || !plBranchId || !plCourseId || !plPlanId || !plSeats || !plAmount}>
+                  {plBusy && <Loader2 className="h-4 w-4 animate-spin mr-2" />} Create Link
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
+  );
+}
+
+// ---- Payment Links sub-tab ----
+function PaymentLinksTab({ targetId }: { targetId: string }) {
+  const [links, setLinks] = useState<any[]>([]);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!targetId) return;
+    const unsub = onSnapshot(
+      query(collection(db, "educators", targetId, "paymentLinks"), orderBy("createdAt", "desc")),
+      (snap) => setLinks(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+    );
+    return () => unsub();
+  }, [targetId]);
+
+  const copy = (url: string, id: string) => {
+    navigator.clipboard.writeText(url);
+    setCopied(id);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  return (
+    <TabsContent value="paylinks" className="p-6 mt-0">
+      {links.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-10">No payment links yet.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>Course</TableHead>
+                <TableHead className="text-right">Seats</TableHead>
+                <TableHead className="text-right">Amount</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Link</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {links.map((l) => (
+                <TableRow key={l.id}>
+                  <TableCell className="text-sm">{l.createdAt ? new Date(l.createdAt.seconds * 1000).toLocaleDateString() : "-"}</TableCell>
+                  <TableCell className="text-sm">{l.courseName || l.courseId || "-"}</TableCell>
+                  <TableCell className="text-right">{l.seats}</TableCell>
+                  <TableCell className="text-right">₹{((l.amount || 0) / 100).toFixed(0)}</TableCell>
+                  <TableCell>
+                    <Badge variant={l.status === "PAID" ? "default" : l.status === "EXPIRED" ? "destructive" : "secondary"} className="text-xs">
+                      {l.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {l.cfLinkUrl ? (
+                      <div className="flex items-center gap-1">
+                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => copy(l.cfLinkUrl, l.id)}>
+                          {copied === l.id ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                        </Button>
+                        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => window.open(l.cfLinkUrl, "_blank")}>
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ) : "-"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </TabsContent>
   );
 }
