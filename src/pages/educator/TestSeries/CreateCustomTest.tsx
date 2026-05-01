@@ -1,13 +1,16 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-import { DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Slider } from "@/components/ui/slider";
+import { TopicMultiSelect } from "@/components/ui/topic-multi-select";
 import { Plus, Loader2, Clock, BookOpen, ListChecks, Sparkles } from "lucide-react";
+import { toast } from "sonner";
 import SectionCard from "@/components/admin/SectionCard";
 
 function getDifficultyLabel(level: number): string {
@@ -125,6 +128,14 @@ const CreateCustomTest = ({
     const [formSections, setFormSections] = useState<any[]>([]);
     const [formMarkingScheme, setFormMarkingScheme] = useState<any>({ correct: 4, incorrect: -1, unanswered: 0 });
 
+    // Add Section popup state
+    const [addSectionOpen, setAddSectionOpen] = useState(false);
+    const [newSectionName, setNewSectionName] = useState("");
+    const [newSectionQuestionsCount, setNewSectionQuestionsCount] = useState("");
+    const [newSectionDifficulty, setNewSectionDifficulty] = useState(0.5);
+    const [newSectionTopics, setNewSectionTopics] = useState<string[]>([]);
+    const [newSectionAttemptLimit, setNewSectionAttemptLimit] = useState("");
+
     // Reset form & template selection when dialog opens
     useEffect(() => {
         if (createOpen) {
@@ -186,6 +197,17 @@ const CreateCustomTest = ({
 
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
+
+        // Validation: if sections exist, every section must have questionsCount > 0
+        if (formSections.length > 0) {
+            const emptySections = formSections.filter(s => (Number(s.questionsCount) || 0) <= 0);
+            if (emptySections.length > 0) {
+                const names = emptySections.map(s => s.name?.trim() || "Unnamed").join(", ");
+                toast.error(`Cannot create test: section(s) "${names}" have no questions. Set a question count for each section or remove them.`);
+                return;
+            }
+        }
+
         const averagedDifficultyLevel = getAverageDifficulty(formSections, 0.5);
         const values: Record<string, any> = {
             title: formTitle.trim(),
@@ -228,6 +250,39 @@ const CreateCustomTest = ({
             if (resolvedTemplate.attemptsAllowed) values.attemptsAllowed = resolvedTemplate.attemptsAllowed;
         }
         await handleCreateCustom(values);
+    };
+
+    const openAddSectionDialog = () => {
+        setNewSectionName(`Section ${formSections.length + 1}`);
+        setNewSectionQuestionsCount("");
+        setNewSectionAttemptLimit("");
+        setNewSectionDifficulty(computedDifficultyLevel);
+        setNewSectionTopics([]);
+        setAddSectionOpen(true);
+    };
+
+    const handleConfirmAddSection = () => {
+        const name = newSectionName.trim() || `Section ${formSections.length + 1}`;
+        const qCount = Math.max(0, Number(newSectionQuestionsCount) || 0);
+
+        if (qCount <= 0) {
+            toast.error("Question count must be greater than 0");
+            return;
+        }
+
+        setFormSections([
+            ...formSections,
+            {
+                id: `sec_${Date.now()}`,
+                name,
+                questionsCount: qCount,
+                attemptlimit: newSectionAttemptLimit.trim() ? Math.max(0, Number(newSectionAttemptLimit) || 0) : null,
+                durationMinutes: null,
+                difficultyLevel: clampDifficulty(newSectionDifficulty),
+                topics: newSectionTopics,
+            },
+        ]);
+        setAddSectionOpen(false);
     };
 
     // Admin templates first, then educator templates
@@ -401,20 +456,7 @@ const CreateCustomTest = ({
                             type="button"
                             size="sm"
                             variant="outline"
-                            onClick={() =>
-                                setFormSections([
-                                    ...formSections,
-                                    {
-                                        id: `sec_${Date.now()}`,
-                                        name: `Section ${formSections.length + 1}`,
-                                        questionsCount: 0,
-                                        attemptlimit: null,
-                                        durationMinutes: null,
-                                        difficultyLevel: computedDifficultyLevel,
-                                        topics: [],
-                                    },
-                                ])
-                            }
+                            onClick={openAddSectionDialog}
                         >
                             <Plus className="h-4 w-4 mr-2" /> Add Section
                         </Button>
@@ -456,6 +498,85 @@ const CreateCustomTest = ({
                         ))
                     )}
                 </div>
+
+                {/* Add Section Dialog */}
+                <Dialog open={addSectionOpen} onOpenChange={setAddSectionOpen}>
+                    <DialogContent className="max-w-md rounded-2xl" onClick={(e) => e.stopPropagation()}>
+                        <DialogHeader>
+                            <DialogTitle>Add New Section</DialogTitle>
+                            <DialogDescription>
+                                Fill in the section details. Question count must be greater than 0.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                            <div className="space-y-2">
+                                <Label>Section Name</Label>
+                                <Input
+                                    value={newSectionName}
+                                    onChange={(e) => setNewSectionName(e.target.value)}
+                                    placeholder="e.g. Physics"
+                                    className="rounded-xl"
+                                />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-2">
+                                    <Label>Question Count *</Label>
+                                    <Input
+                                        type="number"
+                                        min={1}
+                                        value={newSectionQuestionsCount}
+                                        onChange={(e) => setNewSectionQuestionsCount(e.target.value)}
+                                        placeholder="e.g. 25"
+                                        className="rounded-xl"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Attempt Limit</Label>
+                                    <Input
+                                        type="number"
+                                        min={0}
+                                        value={newSectionAttemptLimit}
+                                        onChange={(e) => setNewSectionAttemptLimit(e.target.value)}
+                                        placeholder="All"
+                                        className="rounded-xl"
+                                    />
+                                    <p className="text-[10px] text-muted-foreground">Leave blank to allow all</p>
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>
+                                    Difficulty: <span className={`font-semibold ${getDifficultyColor(newSectionDifficulty)}`}>{newSectionDifficulty.toFixed(2)} — {getDifficultyLabel(newSectionDifficulty)}</span>
+                                </Label>
+                                <Slider
+                                    value={[newSectionDifficulty]}
+                                    onValueChange={([v]) => setNewSectionDifficulty(clampDifficulty(v))}
+                                    min={0}
+                                    max={1}
+                                    step={0.05}
+                                />
+                                <div className="flex justify-between text-[10px] text-muted-foreground">
+                                    <span>Easy</span>
+                                    <span>Medium</span>
+                                    <span>Hard</span>
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Topics (optional)</Label>
+                                <TopicMultiSelect
+                                    selectedTopics={newSectionTopics}
+                                    setSelectedTopics={setNewSectionTopics}
+                                    placeholder="Search and select topics..."
+                                />
+                            </div>
+                        </div>
+                        <DialogFooter className="flex gap-2 justify-end pt-2">
+                            <Button variant="outline" className="rounded-xl" onClick={() => setAddSectionOpen(false)}>Cancel</Button>
+                            <Button className="rounded-xl gradient-bg text-white" onClick={handleConfirmAddSection}>
+                                Confirm
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
 
                 <Button type="submit" className="w-full rounded-xl mt-6" disabled={creating}>
                     {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create Test"}

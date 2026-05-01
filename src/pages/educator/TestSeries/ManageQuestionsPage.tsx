@@ -15,7 +15,17 @@ type TestMeta = {
   subject?: string;
   source?: string;
   originSource?: string;
-  sections?: { id: string; name: string; questionsCount?: number | null }[];
+  sections?: {
+    id: string;
+    name: string;
+    questionsCount?: number | null;
+    topics?: string[];
+    difficultyLevel?: number;
+    questionsLimit?: number;
+    attemptsLimit?: number;
+    timeLimit?: number;
+    markingScheme?: any;
+  }[];
   linkedAdminTestId?: string;
   originalTestId?: string;
   isQuestionSourceShared?: boolean;
@@ -59,8 +69,14 @@ export default function ManageQuestionsPage() {
                     questionsCount: Number.isFinite(Number(section?.questionsCount))
                       ? Number(section.questionsCount)
                       : null,
+                    topics: Array.isArray(section?.topics) ? section.topics.map(String).filter(Boolean) : [],
+                    difficultyLevel: Number.isFinite(Number(section?.difficultyLevel)) ? Number(section.difficultyLevel) : undefined,
+                    questionsLimit: Number.isFinite(Number(section?.questionsLimit)) ? Number(section.questionsLimit) : undefined,
+                    attemptsLimit: Number.isFinite(Number(section?.attemptsLimit ?? section?.attemptlimit)) ? Number(section.attemptsLimit ?? section.attemptlimit) : undefined,
+                    timeLimit: Number.isFinite(Number(section?.timeLimit ?? section?.durationMinutes)) ? Number(section.timeLimit ?? section.durationMinutes) : undefined,
+                    markingScheme: section?.markingScheme ?? undefined,
                   }))
-                  .filter((section) => section.id)
+                  .filter((section: any) => section.id)
               : [],
             linkedAdminTestId: String(data?.linkedAdminTestId || ""),
             originalTestId: String(data?.originalTestId || ""),
