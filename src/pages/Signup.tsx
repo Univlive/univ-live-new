@@ -108,8 +108,8 @@ export default function Signup() {
 
           // --- Single Session Logic for Students ---
           const sid = generateSessionId();
-          setLocalSessionId(sid);
           await syncSessionWithFirestore(cred.user.uid, sid);
+          setLocalSessionId(sid);
 
           toast.success("Account created!");
           nav("/student");
@@ -139,8 +139,8 @@ export default function Signup() {
 
               // --- Single Session Logic for Students ---
               const sid = generateSessionId();
-              setLocalSessionId(sid);
               await syncSessionWithFirestore(cred2.user.uid, sid);
+              setLocalSessionId(sid);
 
               toast.success("Signed in and enrolled!");
               nav("/student");

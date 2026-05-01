@@ -9,7 +9,7 @@ import { AIReviewPanel } from "@/components/student/AIReviewPanel";
 
 import { useAuth } from "@/contexts/AuthProvider";
 import { db } from "@/lib/firebase";
-import { collection, doc, getDoc, getDocs, updateDoc, serverTimestamp } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import { useAIStream } from "@/hooks/useAIStream";
 import { aiFeatureFlags, getAiFeatureDisabledMessage } from "@/lib/aiFeatureFlags";
 
@@ -401,16 +401,6 @@ export default function StudentResults() {
         setComputedScore(derived.score);
         setComputedMaxScore(derived.maxScore);
         setComputedAccuracyPct(derived.accuracyPct);
-
-        // If stored score differs from recomputed, write back so dashboard/leaderboard stay in sync
-        if (a.score !== derived.score || a.maxScore !== derived.maxScore) {
-          updateDoc(doc(db, "attempts", attemptId!), {
-            score: derived.score,
-            maxScore: derived.maxScore,
-            accuracy: derived.accuracyPct / 100,
-            marksRecalculatedAt: serverTimestamp(),
-          }).catch(console.error);
-        }
 
         // Trigger AI analysis if not already completed
         if (isAiPerformanceAnalysisEnabled && (!a.aiReviewStatus || a.aiReviewStatus === "queued") && !a.aiReview) {
