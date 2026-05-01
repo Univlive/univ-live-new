@@ -71,6 +71,7 @@ import {
 import { TagInput } from "@/components/ui/tag-input";
 import ImageTextarea from "@/components/educator/ImageTextarea";
 import { Slider } from "@/components/ui/slider";
+import { TopicMultiSelect } from "@/components/ui/topic-multi-select";
 
 function getDifficultyLabel(level: number): string {
   if (level <= 0.3) return "Easy";
@@ -93,6 +94,17 @@ function normalizeLegacyDifficulty(level?: string | number): number {
   return 0.5;
 }
 
+function clampDifficulty(level?: number) {
+  if (!Number.isFinite(Number(level))) return 0.5;
+  return Math.min(1, Math.max(0, Number(level)));
+}
+
+function getAverageDifficulty(sections: Array<{ difficultyLevel?: number }>, fallback = 0.5) {
+  if (sections.length === 0) return fallback;
+  const total = sections.reduce((acc, s) => acc + clampDifficulty(s.difficultyLevel ?? fallback), 0);
+  return total / sections.length;
+}
+
 type Difficulty = "Easy" | "Medium" | "Hard";
 
 type Section = {
@@ -105,6 +117,8 @@ type Section = {
   } | null;
   selectionRule?: "UPTO" | "EXACT" | null;
   durationMinutes?: number;
+  difficultyLevel?: number;
+  topics?: string[];
 };
 
 type MarkingScheme = {
@@ -480,6 +494,7 @@ function SortableSectionCard({
     transform: CSS.Transform.toString(transform),
     transition,
   };
+  const sectionDifficulty = clampDifficulty(section.difficultyLevel ?? 0.5);
 
   return (
     <div
@@ -659,6 +674,35 @@ function SortableSectionCard({
         )}
 
         {!collapsed && (
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="space-y-2">
+              <Label>Section Difficulty</Label>
+              <div className="flex items-center gap-3">
+                <Slider
+                  value={[sectionDifficulty]}
+                  onValueChange={(v) => onUpdate(section.id, { difficultyLevel: clampDifficulty(v[0]) })}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  className="flex-1"
+                />
+                <span className={`text-xs font-semibold min-w-[70px] text-right ${getDifficultyColor(sectionDifficulty)}`}>
+                  {sectionDifficulty.toFixed(2)} — {getDifficultyLabel(sectionDifficulty)}
+                </span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Section Topics</Label>
+              <TopicMultiSelect
+                selectedTopics={section.topics || []}
+                setSelectedTopics={(topics) => onUpdate(section.id, { topics })}
+                placeholder="Search and select section topics..."
+              />
+            </div>
+          </div>
+        )}
+
+        {!collapsed && (
           <>
             {/* Questions in this section */}
             <div className="space-y-3">
@@ -832,7 +876,6 @@ export default function TestForm() {
   // Form fields
   const [title, setTitle] = useState("");
   const [subject, setSubject] = useState<string>("General Test");
-  const [difficultyLevel, setDifficultyLevel] = useState<number>(0.5);
   const [description, setDescription] = useState("");
 
   const [durationMinutes, setDurationMinutes] = useState<string>("60");
@@ -856,7 +899,7 @@ export default function TestForm() {
 
   // sections editor
   const [sections, setSections] = useState<Section[]>([
-    { id: uid("sec"), name: "Section 1", questionsCount: 0, durationMinutes: undefined, attemptConstraints: null, selectionRule: null },
+    { id: uid("sec"), name: "Section 1", questionsCount: 0, durationMinutes: undefined, attemptConstraints: null, selectionRule: null, difficultyLevel: 0.5, topics: [] },
   ]);
   const [collapsedSectionIds, setCollapsedSectionIds] = useState<string[]>([]);
   const [sectionValidationMap, setSectionValidationMap] = useState<
@@ -886,6 +929,8 @@ export default function TestForm() {
   const computedQuestionsCount = useMemo(() => {
     return sections.reduce((acc, s) => acc + safeNum(s.questionsCount, 0), 0);
   }, [sections]);
+
+  const computedDifficultyLevel = useMemo(() => getAverageDifficulty(sections, 0.5), [sections]);
 
   const computedSectionDuration = useMemo(() => {
     return sections.reduce((acc, section) => {
@@ -939,7 +984,7 @@ export default function TestForm() {
 
         setTitle(String(d?.title || ""));
         setSubject(String(d?.subject || "General Test"));
-        setDifficultyLevel(normalizeLegacyDifficulty(d?.difficultyLevel ?? d?.level ?? d?.difficulty));
+        const baseDifficulty = normalizeLegacyDifficulty(d?.difficultyLevel ?? d?.level ?? d?.difficulty);
         setDescription(String(d?.description || ""));
 
         setDurationMinutes(String(safeNum(d?.durationMinutes ?? d?.duration, 60)));
@@ -981,8 +1026,12 @@ export default function TestForm() {
                     : s?.duration != null
                     ? safeNum(s.duration, undefined as any)
                     : undefined,
+                difficultyLevel: clampDifficulty(
+                  s?.difficultyLevel ?? normalizeLegacyDifficulty(s?.difficulty ?? s?.level ?? baseDifficulty)
+                ),
+                topics: Array.isArray(s?.topics) ? s.topics.map(String) : [],
               }))
-            : [{ id: uid("sec"), name: "Section 1", questionsCount: 0, attemptConstraints: null, selectionRule: null }];
+            : [{ id: uid("sec"), name: "Section 1", questionsCount: 0, attemptConstraints: null, selectionRule: null, difficultyLevel: baseDifficulty, topics: [] }];
 
         setSections(parsed);
         setCollapsedSectionIds([]);
@@ -1059,7 +1108,7 @@ export default function TestForm() {
   function addSection() {
     setSections((prev) => [
       ...prev,
-      { id: uid("sec"), name: `Section ${prev.length + 1}`, questionsCount: 0, attemptConstraints: null, selectionRule: null },
+      { id: uid("sec"), name: `Section ${prev.length + 1}`, questionsCount: 0, attemptConstraints: null, selectionRule: null, difficultyLevel: computedDifficultyLevel, topics: [] },
     ]);
   }
 
@@ -1286,6 +1335,8 @@ export default function TestForm() {
             s.durationMinutes != null && String(s.durationMinutes) !== ""
               ? Math.max(0, safeNum(s.durationMinutes, 0))
               : null,
+          difficultyLevel: clampDifficulty(s.difficultyLevel),
+          topics: Array.isArray(s.topics) ? s.topics : [],
         };
       })
       .filter((s) => s.name);
@@ -1294,11 +1345,13 @@ export default function TestForm() {
       return toast.error("Please add at least one section");
     }
 
+    const averagedDifficultyLevel = getAverageDifficulty(cleanedSections, 0.5);
+
     const payload: Record<string, any> = {
       title: t,
       subject: subject || "General Test",
-      level: getDifficultyLabel(difficultyLevel),
-      difficultyLevel,
+      level: getDifficultyLabel(averagedDifficultyLevel),
+      difficultyLevel: averagedDifficultyLevel,
       description: description.trim() || "",
       durationMinutes: dur,
       attemptsAllowed: attempts,
@@ -1323,6 +1376,8 @@ export default function TestForm() {
         questionsCount: s.questionsCount,
         attemptConstraints: s.attemptConstraints || null,
         selectionRule: s.selectionRule || null,
+        difficultyLevel: s.difficultyLevel,
+        topics: s.topics,
         // store as durationMinutes, keep backward compat too
         durationMinutes: s.durationMinutes,
       })),
@@ -1458,25 +1513,10 @@ export default function TestForm() {
             </div>
 
             <div className="space-y-2 md:col-span-2">
-              <Label>Difficulty Level</Label>
-              <div className="flex items-center gap-4">
-                <Slider
-                  value={[difficultyLevel]}
-                  onValueChange={(v) => setDifficultyLevel(v[0])}
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  className="flex-1"
-                />
-                <span className={`text-sm font-semibold min-w-[70px] text-right ${getDifficultyColor(difficultyLevel)}`}>
-                  {difficultyLevel.toFixed(2)} — {getDifficultyLabel(difficultyLevel)}
-                </span>
-              </div>
-              <div className="flex justify-between text-[10px] text-muted-foreground px-1">
-                <span>Easy (0.0)</span>
-                <span>Medium (0.5)</span>
-                <span>Hard (1.0)</span>
-              </div>
+              <Label>Test Difficulty (avg of sections)</Label>
+              <span className={`text-sm font-semibold min-w-[70px] text-right ${getDifficultyColor(computedDifficultyLevel)}`}>
+                {computedDifficultyLevel.toFixed(2)} — {getDifficultyLabel(computedDifficultyLevel)}
+              </span>
             </div>
 
             <div className="space-y-2">

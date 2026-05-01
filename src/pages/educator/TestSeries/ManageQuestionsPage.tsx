@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthProvider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
-import QuestionsManager from "./QuestionsManager";
+import QuestionsManager from "./QuestionManager/QuestionsManager";
 
 type TestMeta = {
   title?: string;

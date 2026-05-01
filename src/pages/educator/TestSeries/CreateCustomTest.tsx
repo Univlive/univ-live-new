@@ -6,11 +6,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Slider } from "@/components/ui/slider";
-import { Plus, Loader2, Clock, BookOpen, ListChecks, Sparkles, Trash2 } from "lucide-react";
-import { attempts } from "@/mock/studentMock";
+import { Plus, Loader2, Clock, BookOpen, ListChecks, Sparkles } from "lucide-react";
+import SectionCard from "@/components/admin/SectionCard";
 
 function getDifficultyLabel(level: number): string {
     if (level <= 0.3) return "Easy";
@@ -31,6 +29,17 @@ function normalizeLegacyDifficulty(level?: string | number): number {
     if (s === "medium" || s === "general") return 0.5;
     if (s === "hard") return 0.85;
     return 0.5;
+}
+
+function clampDifficulty(level?: number) {
+    if (!Number.isFinite(Number(level))) return 0.5;
+    return Math.min(1, Math.max(0, Number(level)));
+}
+
+function getAverageDifficulty(sections: Array<{ difficultyLevel?: number }>, fallback = 0.5) {
+    if (sections.length === 0) return fallback;
+    const total = sections.reduce((acc, s) => acc + clampDifficulty(s.difficultyLevel ?? fallback), 0);
+    return total / sections.length;
 }
 
 type TemplateOption = {
@@ -54,6 +63,9 @@ type FullTemplateData = {
         questionsCount?: number;
         attemptlimit?: number | null;
         durationMinutes?: number | null;
+        difficultyLevel?: number;
+        difficulty?: string;
+        topics?: string[];
         markingScheme?: {
             correct?: number;
             incorrect?: number;
@@ -109,7 +121,6 @@ const CreateCustomTest = ({
     const [formTitle, setFormTitle] = useState("");
     const [formDescription, setFormDescription] = useState("");
     const [formSubject, setFormSubject] = useState("");
-    const [formDifficultyLevel, setFormDifficultyLevel] = useState<number>(0.5);
     const [formDuration, setFormDuration] = useState("60");
     const [formSections, setFormSections] = useState<any[]>([]);
     const [formMarkingScheme, setFormMarkingScheme] = useState<any>({ correct: 4, incorrect: -1, unanswered: 0 });
@@ -120,7 +131,6 @@ const CreateCustomTest = ({
             setFormTitle("");
             setFormDescription("");
             setFormSubject("");
-            setFormDifficultyLevel(0.5);
             setFormDuration("60");
             setFormSections([]);
             setFormMarkingScheme({ correct: 4, incorrect: -1, unanswered: 0 });
@@ -142,18 +152,27 @@ const CreateCustomTest = ({
             if (selectedTemplateId === "none" || !selectedTemplateId) {
                 setFormDescription("");
                 setFormSubject("");
-                setFormDifficultyLevel(0.5);
                 setFormDuration("60");
                 setFormSections([]);
                 setFormMarkingScheme({ correct: 4, incorrect: -1, unanswered: 0 });
             }
             return;
         }
+        const baseDifficulty = normalizeLegacyDifficulty(resolvedTemplate.difficultyLevel ?? resolvedTemplate.level);
         setFormDescription(String(resolvedTemplate.description || ""));
         setFormSubject(String(resolvedTemplate.subject || ""));
-        setFormDifficultyLevel(normalizeLegacyDifficulty(resolvedTemplate.difficultyLevel ?? resolvedTemplate.level));
         setFormDuration(String(safeNum(resolvedTemplate.durationMinutes ?? resolvedTemplate.duration, 60)));
-        setFormSections(resolvedTemplate.sections ? JSON.parse(JSON.stringify(resolvedTemplate.sections)) : []);
+        setFormSections(
+            resolvedTemplate.sections
+                ? JSON.parse(JSON.stringify(resolvedTemplate.sections)).map((s: any) => ({
+                    ...s,
+                    attemptlimit: s.attemptlimit ?? null,
+                    durationMinutes: s.durationMinutes ?? null,
+                    difficultyLevel: clampDifficulty(s?.difficultyLevel ?? normalizeLegacyDifficulty(s?.difficulty ?? s?.level ?? baseDifficulty)),
+                    topics: Array.isArray(s?.topics) ? s.topics.map(String) : [],
+                }))
+                : []
+        );
         setFormMarkingScheme(resolvedTemplate.markingScheme ? JSON.parse(JSON.stringify(resolvedTemplate.markingScheme)) : { correct: 4, incorrect: -1, unanswered: 0 });
     }, [resolvedTemplate]);
 
@@ -167,12 +186,13 @@ const CreateCustomTest = ({
 
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
+        const averagedDifficultyLevel = getAverageDifficulty(formSections, 0.5);
         const values: Record<string, any> = {
             title: formTitle.trim(),
             description: formDescription.trim(),
             subject: formSubject.trim(),
-            level: getDifficultyLabel(formDifficultyLevel),
-            difficultyLevel: formDifficultyLevel,
+            level: getDifficultyLabel(averagedDifficultyLevel),
+            difficultyLevel: averagedDifficultyLevel,
             durationMinutes: Number(formDuration) || 60,
             sections: formSections.map(s => {
                 const totalQ = Number(s.questionsCount) || 0;
@@ -187,6 +207,8 @@ const CreateCustomTest = ({
                     questionsCount: totalQ,
                     attemptlimit: attemptLimit,
                     durationMinutes: s.durationMinutes ? Number(s.durationMinutes) : null,
+                    difficultyLevel: clampDifficulty(s.difficultyLevel),
+                    topics: Array.isArray(s.topics) ? s.topics : [],
                     markingScheme: s.markingScheme ? {
                         correct: Number(s.markingScheme.correct),
                         incorrect: Number(s.markingScheme.incorrect),
@@ -220,6 +242,8 @@ const CreateCustomTest = ({
             (resolvedTemplate.sections || []).reduce((acc: number, s: any) => acc + safeNum(s?.questionsCount, 0), 0),
             0
         ) : 0;
+
+    const computedDifficultyLevel = getAverageDifficulty(formSections, 0.5);
 
     return (
         <DialogContent className="max-w-xl rounded-2xl max-h-[90vh] overflow-y-auto">
@@ -259,7 +283,10 @@ const CreateCustomTest = ({
                                     <SelectGroup>
                                         <SelectLabel>Your Templates</SelectLabel>
                                         {educatorTpls.map((template) => (
-                                            <SelectItem key={template.id} value={`edu:${template.id.replace("edu:", "")}`}>
+                                            <SelectItem
+                                                key={template.id}
+                                                value={`edu:${template.id.replace("edu:", "")}`}
+                                            >
                                                 {template.label}
                                             </SelectItem>
                                         ))}
@@ -337,20 +364,10 @@ const CreateCustomTest = ({
                         <Input value={formSubject} onChange={(e) => setFormSubject(e.target.value)} className="rounded-xl" placeholder="e.g. Maths" />
                     </div>
                     <div className="space-y-2">
-                        <Label>Difficulty Level</Label>
-                        <div className="flex items-center gap-3">
-                            <Slider
-                                value={[formDifficultyLevel]}
-                                onValueChange={(v) => setFormDifficultyLevel(v[0])}
-                                min={0}
-                                max={1}
-                                step={0.05}
-                                className="flex-1"
-                            />
-                            <span className={`text-xs font-semibold min-w-[60px] text-right ${getDifficultyColor(formDifficultyLevel)}`}>
-                                {formDifficultyLevel.toFixed(2)} — {getDifficultyLabel(formDifficultyLevel)}
-                            </span>
-                        </div>
+                        <Label>Test Difficulty (avg of sections)</Label>
+                        <span className={`text-xs font-semibold min-w-[60px] text-right ${getDifficultyColor(computedDifficultyLevel)}`}>
+                            {computedDifficultyLevel.toFixed(2)} — {getDifficultyLabel(computedDifficultyLevel)}
+                        </span>
                     </div>
                 </div>
 
@@ -380,7 +397,25 @@ const CreateCustomTest = ({
                 <div className="space-y-3">
                     <div className="flex items-center justify-between">
                         <h3 className="font-semibold text-sm">Sections</h3>
-                        <Button type="button" size="sm" variant="outline" onClick={() => setFormSections([...formSections, { id: `sec_${Date.now()}`, name: `Section ${formSections.length + 1}`, questionsCount: 0, attemptlimit: null }])}>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                                setFormSections([
+                                    ...formSections,
+                                    {
+                                        id: `sec_${Date.now()}`,
+                                        name: `Section ${formSections.length + 1}`,
+                                        questionsCount: 0,
+                                        attemptlimit: null,
+                                        durationMinutes: null,
+                                        difficultyLevel: computedDifficultyLevel,
+                                        topics: [],
+                                    },
+                                ])
+                            }
+                        >
                             <Plus className="h-4 w-4 mr-2" /> Add Section
                         </Button>
                     </div>
@@ -391,88 +426,33 @@ const CreateCustomTest = ({
                         </p>
                     ) : (
                         formSections.map((sec, index) => (
-                            <div key={index} className="flex flex-col gap-3 p-3 bg-muted/10 border rounded-xl">
-                                <div className="flex items-end gap-3 flex-wrap">
-                                    <div className="flex-1 min-w-[150px] space-y-2">
-                                        <Label className="text-xs">Section Name</Label>
-                                        <Input className="h-8" value={sec.name} onChange={(e) => {
-                                            const newSec = [...formSections];
-                                            newSec[index].name = e.target.value;
-                                            setFormSections(newSec);
-                                        }} />
-                                    </div>
-                                    <div className="w-16 space-y-2">
-                                        <Label className="text-xs">Questions</Label>
-                                        <Input type="number" className="h-8" value={sec.questionsCount} onChange={(e) => {
-                                            const newSec = [...formSections];
-                                            newSec[index].questionsCount = e.target.value;
-                                            setFormSections(newSec);
-                                        }} min={0} />
-                                    </div>
-                                    <div className="w-16 space-y-2">
-                                        <Label className="text-xs">Attempt Limit</Label>
-                                        <Input
-                                            type="number"
-                                            className="h-8"
-                                            value={sec.attemptlimit ?? ""}
-                                            onChange={(e) => {
-                                                const newSec = [...formSections];
-                                                newSec[index].attemptlimit = e.target.value ? Number(e.target.value) : null;
-                                                setFormSections(newSec);
-                                            }}
-                                            min={0}
-                                            placeholder="All"
-                                        />
-                                    </div>
-                                    <div className="w-16 space-y-2">
-                                        <Label className="text-xs">Time (opt)</Label>
-                                        <Input type="number" className="h-8" value={sec.durationMinutes || ""} onChange={(e) => {
-                                            const newSec = [...formSections];
-                                            newSec[index].durationMinutes = e.target.value;
-                                            setFormSections(newSec);
-                                        }} placeholder="min" />
-                                    </div>
-                                    <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive mb-0.5" onClick={() => {
-                                        setFormSections(formSections.filter((_, i) => i !== index));
-                                    }}>
-                                        <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                </div>
-
-                                <div className="flex items-center gap-4 bg-background p-2 rounded-lg border text-xs">
-                                    <div className="flex items-center gap-2">
-                                        <Switch
-                                            checked={!!sec.markingScheme}
-                                            onCheckedChange={(checked) => {
-                                                const newSec = [...formSections];
-                                                newSec[index].markingScheme = checked ? { ...formMarkingScheme } : null;
-                                                setFormSections(newSec);
-                                            }}
-                                        />
-                                        <Label className="text-xs">Custom Marks</Label>
-                                    </div>
-                                    {sec.markingScheme && (
-                                        <div className="flex items-center gap-3">
-                                            <div className="flex items-center gap-1.5">
-                                                <Label className="text-[10px] text-green-600">Correct (+)</Label>
-                                                <Input type="number" className="h-6 w-14 text-[10px]" value={sec.markingScheme.correct} onChange={(e) => {
-                                                    const newSec = [...formSections];
-                                                    newSec[index].markingScheme.correct = e.target.value;
-                                                    setFormSections(newSec);
-                                                }} />
-                                            </div>
-                                            <div className="flex items-center gap-1.5">
-                                                <Label className="text-[10px] text-red-500">Incorrect (-)</Label>
-                                                <Input type="number" className="h-6 w-14 text-[10px]" value={sec.markingScheme.incorrect} onChange={(e) => {
-                                                    const newSec = [...formSections];
-                                                    newSec[index].markingScheme.incorrect = e.target.value;
-                                                    setFormSections(newSec);
-                                                }} />
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
+                            <SectionCard
+                                key={sec.id || index}
+                                sectionId={sec.id || `sec_${index + 1}`}
+                                sectionName={sec.name}
+                                questionCount={Number(sec.questionsCount) || 0}
+                                attemptLimit={sec.attemptlimit ?? undefined}
+                                durationMinutes={sec.durationMinutes ?? undefined}
+                                sectionDifficulty={sec.difficultyLevel}
+                                sectionTopics={sec.topics}
+                                markingScheme={sec.markingScheme}
+                                defaultMarkingScheme={formMarkingScheme}
+                                onEdit={(payload) => {
+                                    const updated = [...formSections];
+                                    updated[index] = {
+                                        ...updated[index],
+                                        name: payload.name,
+                                        questionsCount: payload.questionsCount,
+                                        attemptlimit: payload.attemptLimit ?? null,
+                                        durationMinutes: payload.durationMinutes ?? null,
+                                        difficultyLevel: clampDifficulty(payload.difficultyLevel),
+                                        topics: payload.topics || [],
+                                        markingScheme: payload.markingScheme,
+                                    };
+                                    setFormSections(updated);
+                                }}
+                                onRemove={() => setFormSections(formSections.filter((_, i) => i !== index))}
+                            />
                         ))
                     )}
                 </div>
