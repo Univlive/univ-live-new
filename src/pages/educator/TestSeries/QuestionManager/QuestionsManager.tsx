@@ -31,7 +31,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
-import { TagInput } from "@/components/ui/tag-input";
+import { TopicMultiSelect } from "@/components/ui/topic-multi-select";
 import { toast } from "sonner";
 import ReactCrop, {
     type Crop,
@@ -497,6 +497,18 @@ const QuestionsManager = ({
         });
         return Array.from(topics).sort((a, b) => a.localeCompare(b));
     }, [questionBankRows]);
+
+    // Combined topics from both educator and admin question banks for the Auto Import dialog
+    const allAvailableTopics = useMemo(() => {
+        const topics = new Set<string>();
+        questionBankRows.forEach((q) => {
+            if (q.topic && q.topic.trim()) topics.add(q.topic.trim());
+        });
+        adminQuestionBankRows.forEach((q) => {
+            if (q.topic && q.topic.trim()) topics.add(q.topic.trim());
+        });
+        return Array.from(topics).sort((a, b) => a.localeCompare(b));
+    }, [questionBankRows, adminQuestionBankRows]);
 
     const autoFillSubjects = useMemo(() => {
         const subjects = new Set<string>();
@@ -2686,17 +2698,18 @@ const QuestionsManager = ({
 
                                                 {/* Topics */}
                                                 <div>
-                                                    <Label className="text-xs text-muted-foreground mb-1 block">Topics (type & press Enter to add)</Label>
-                                                    <TagInput
-                                                        placeholder="Add topic..."
-                                                        tags={section.topics}
-                                                        setTags={(nextTags) => {
+                                                    <Label className="text-xs text-muted-foreground mb-1 block">Topics</Label>
+                                                    <TopicMultiSelect
+                                                        placeholder="Search and select topics..."
+                                                        selectedTopics={section.topics}
+                                                        setSelectedTopics={(nextTopics) => {
                                                             setAutoImportSections((prev) =>
                                                                 prev.map((s) =>
-                                                                    s.id === section.id ? { ...s, topics: nextTags } : s
+                                                                    s.id === section.id ? { ...s, topics: nextTopics } : s
                                                                 )
                                                             );
                                                         }}
+                                                        availableTopics={allAvailableTopics}
                                                         className="rounded-xl"
                                                     />
                                                 </div>
