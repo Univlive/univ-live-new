@@ -99,13 +99,6 @@ function parseMcqCorrectIndex(value: any, optionCount: number): number | null {
   return null;
 }
 
-function normalizeAccuracyPercent(val: any, fallback = 0) {
-  const n = Number(val);
-  if (!Number.isFinite(n)) return fallback;
-  const pct = n <= 1.01 ? n * 100 : n;
-  return Math.max(0, Math.min(100, Math.round(pct)));
-}
-
 function formatTime(seconds: number) {
   const mins = Math.floor(seconds / 60);
   return `${mins} min`;
@@ -130,8 +123,8 @@ function computeFromQuestionsAndResponses(
   for (const q of questions) {
     const d = q.data;
     const sectionId = d.sectionId || "main";
-    const pos = safeNumber((d as any).marks ?? d.positiveMarks, 5);
-    const neg = Math.abs(safeNumber(d.negativeMarks, 1));
+    const pos = 5;
+    const neg = 1;
 
 
     maxScore += pos;
