@@ -11,6 +11,8 @@ interface TopicMultiSelectProps {
   setSelectedTopics: (topics: string[]) => void;
   placeholder?: string;
   className?: string;
+  /** When provided, skips the internal Firestore fetch and uses this list instead. */
+  availableTopics?: string[];
 }
 
 export function TopicMultiSelect({
@@ -18,6 +20,7 @@ export function TopicMultiSelect({
   setSelectedTopics,
   placeholder = "Search and select topics...",
   className,
+  availableTopics: externalTopics,
 }: TopicMultiSelectProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -26,8 +29,13 @@ export function TopicMultiSelect({
   const containerRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // Fetch unique topics from question_bank
+  // Use external topics if provided, otherwise fetch from Firestore
   useEffect(() => {
+    if (externalTopics) {
+      setAllTopics(externalTopics);
+      return;
+    }
+
     let cancelled = false;
     setLoadingTopics(true);
     getDocs(collection(db, "question_bank"))
@@ -45,7 +53,8 @@ export function TopicMultiSelect({
       .catch(console.error)
       .finally(() => { if (!cancelled) setLoadingTopics(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [externalTopics]);
+
 
   // Close on outside click
   useEffect(() => {

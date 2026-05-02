@@ -4,15 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, Loader2, Save, FileText } from "lucide-react";
-import { Switch } from "@/components/ui/switch";
-import { Slider } from "@/components/ui/slider";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Plus, Loader2, Save, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthProvider";
 import { TopicMultiSelect } from "@/components/ui/topic-multi-select";
+import SectionCard from "@/components/admin/SectionCard";
 
 function getDifficultyLabel(level: number): string {
   if (level <= 0.3) return "Easy";
@@ -26,12 +24,25 @@ function getDifficultyColor(level: number): string {
   return "text-red-600";
 }
 
+function clampDifficulty(level?: number) {
+  if (!Number.isFinite(Number(level))) return 0.5;
+  return Math.min(1, Math.max(0, Number(level)));
+}
+
+function getAverageDifficulty(sections: Array<{ difficultyLevel?: number }>, fallback = 0.5) {
+  if (sections.length === 0) return fallback;
+  const total = sections.reduce((acc, s) => acc + clampDifficulty(s.difficultyLevel ?? fallback), 0);
+  return total / sections.length;
+}
+
 type Section = {
   id: string;
   name: string;
   questionsCount: number;
   attemptlimit?: number | null;
   durationMinutes?: number | null;
+  difficultyLevel?: number;
+  topics?: string[];
   markingScheme?: {
     correct: number;
     incorrect: number;
@@ -56,7 +67,6 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
   const [label, setLabel] = useState("");
   const [description, setDescription] = useState("");
   const [subject, setSubject] = useState("");
-  const [difficultyLevel, setDifficultyLevel] = useState<number>(0.5);
   const [durationMinutes, setDurationMinutes] = useState<string>("60");
   const [syllabusTags, setSyllabusTags] = useState<string[]>([]);
 
@@ -67,20 +77,49 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
   });
 
   const [sections, setSections] = useState<Section[]>([
-    { id: "sec_1", name: "Section 1", questionsCount: 0, attemptlimit: null }
+    { id: "sec_1", name: "Section 1", questionsCount: 0, attemptlimit: null, difficultyLevel: 0.5, topics: [] }
   ]);
 
+  const computedDifficultyLevel = getAverageDifficulty(sections, 0.5);
+
   const handleAddSection = () => {
-    setSections([...sections, { id: `sec_${Date.now()}`, name: `Section ${sections.length + 1}`, questionsCount: 0, attemptlimit: null }]);
+    setSections([
+      ...sections,
+      {
+        id: `sec_${Date.now()}`,
+        name: `Section ${sections.length + 1}`,
+        questionsCount: 0,
+        attemptlimit: null,
+        difficultyLevel: computedDifficultyLevel,
+        topics: [],
+      },
+    ]);
   };
 
   const handleRemoveSection = (index: number) => {
     setSections(sections.filter((_, i) => i !== index));
   };
 
-  const handleSectionChange = (index: number, field: keyof Section, value: any) => {
+  const handleSectionEdit = (index: number, payload: {
+    name: string;
+    questionsCount: number;
+    attemptLimit?: number | null;
+    durationMinutes?: number | null;
+    difficultyLevel: number;
+    topics: string[];
+    markingScheme: Section["markingScheme"];
+  }) => {
     const newSections = [...sections];
-    newSections[index] = { ...newSections[index], [field]: value };
+    newSections[index] = {
+      ...newSections[index],
+      name: payload.name,
+      questionsCount: payload.questionsCount,
+      attemptlimit: payload.attemptLimit ?? null,
+      durationMinutes: payload.durationMinutes ?? null,
+      difficultyLevel: clampDifficulty(payload.difficultyLevel),
+      topics: payload.topics || [],
+      markingScheme: payload.markingScheme,
+    };
     setSections(newSections);
   };
 
@@ -100,12 +139,13 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
     setLoading(true);
 
     try {
+      const averagedDifficultyLevel = getAverageDifficulty(sections, 0.5);
       const payload = {
         label: label.trim(),
         description: description.trim(),
         subject: subject.trim(),
-        level: getDifficultyLabel(difficultyLevel),
-        difficultyLevel,
+        level: getDifficultyLabel(averagedDifficultyLevel),
+        difficultyLevel: averagedDifficultyLevel,
         durationMinutes: Number(durationMinutes) || 0,
         syllabus: syllabusTags,
         markingScheme: {
@@ -125,6 +165,8 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
             questionsCount: totalQ,
             attemptlimit: attemptLimit,
             durationMinutes: s.durationMinutes ? Number(s.durationMinutes) : null,
+            difficultyLevel: clampDifficulty(s.difficultyLevel),
+            topics: Array.isArray(s.topics) ? s.topics : [],
             markingScheme: s.markingScheme ? {
               correct: Number(s.markingScheme.correct),
               incorrect: Number(s.markingScheme.incorrect),
@@ -142,10 +184,9 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
       setLabel("");
       setDescription("");
       setSubject("");
-      setDifficultyLevel(0.5);
       setDurationMinutes("60");
       setSyllabusTags([]);
-      setSections([{ id: "sec_1", name: "Section 1", questionsCount: 0, attemptlimit: null }]);
+      setSections([{ id: "sec_1", name: "Section 1", questionsCount: 0, attemptlimit: null, difficultyLevel: 0.5, topics: [] }]);
 
       setOpen(false);
     } catch (error) {
@@ -194,25 +235,10 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2 col-span-2">
-              <Label>Difficulty Level</Label>
-              <div className="flex items-center gap-4">
-                <Slider
-                  value={[difficultyLevel]}
-                  onValueChange={(v) => setDifficultyLevel(v[0])}
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  className="flex-1"
-                />
-                <span className={`text-sm font-semibold min-w-[70px] text-right ${getDifficultyColor(difficultyLevel)}`}>
-                  {difficultyLevel.toFixed(2)} — {getDifficultyLabel(difficultyLevel)}
-                </span>
-              </div>
-              <div className="flex justify-between text-[10px] text-muted-foreground px-1">
-                <span>Easy (0.0)</span>
-                <span>Medium (0.5)</span>
-                <span>Hard (1.0)</span>
-              </div>
+              <Label>Template Difficulty (avg of sections)</Label>
+              <span className={`text-sm font-semibold min-w-[70px] text-right ${getDifficultyColor(computedDifficultyLevel)}`}>
+                {computedDifficultyLevel.toFixed(2)} — {getDifficultyLabel(computedDifficultyLevel)}
+              </span>
             </div>
             <div className="space-y-2">
               <Label>Duration (min)</Label>
@@ -245,68 +271,20 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
             </div>
 
             {sections.map((sec, index) => (
-              <div key={index} className="flex flex-col gap-3 p-3 bg-muted/10 border rounded-xl">
-                <div className="flex items-end gap-3 flex-wrap">
-                  <div className="flex-1 min-w-[150px] space-y-2">
-                    <Label>Section Name</Label>
-                    <Input value={sec.name} onChange={(e) => handleSectionChange(index, 'name', e.target.value)} />
-                  </div>
-                  <div className="w-24 space-y-2">
-                    <Label>Questions</Label>
-                    <Input type="number" value={sec.questionsCount} onChange={(e) => handleSectionChange(index, 'questionsCount', Number(e.target.value))} min={0} />
-                  </div>
-                  <div className="w-24 space-y-2">
-                    <Label>Attempt Limit</Label>
-                    <Input type="number" value={sec.attemptlimit ?? ""} onChange={(e) => handleSectionChange(index, 'attemptlimit', e.target.value ? Number(e.target.value) : null)} min={0} placeholder="All" />
-                  </div>
-                  <div className="w-24 space-y-2">
-                    <Label>Time (opt)</Label>
-                    <Input type="number" value={sec.durationMinutes || ""} onChange={(e) => handleSectionChange(index, 'durationMinutes', e.target.value ? Number(e.target.value) : null)} placeholder="min" />
-                  </div>
-                  <div className="w-24 space-y-2 flex flex-col">
-                    <Label>Custom Marks</Label>
-                    <div className="w-full h-full flex items-center justify-center pt-3 pb-2 ">
-                      <Switch
-                        checked={!!sec.markingScheme}
-                        onCheckedChange={(checked) => {
-                          handleSectionChange(index, 'markingScheme', checked ? { ...markingScheme } : null)
-                        }}
-                      />
-                    </div>
-                  </div>
-                  {sections.length > 1 && (
-                    <Button variant="ghost" size="icon" className="text-destructive mb-0.5" onClick={() => handleRemoveSection(index)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-
-                {/* Section Marking Scheme Override */}
-                {sec.markingScheme && (
-                  <div className="flex items-center gap-4 bg-background p-2 rounded-lg border text-xs">
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center gap-1.5">
-                        <Label className="text-xs text-green-600">Correct (+)</Label>
-                        <Input
-                          type="number"
-                          className="h-7 w-16 text-xs"
-                          value={sec.markingScheme.correct}
-                          onChange={(e) => handleSectionChange(index, 'markingScheme', { ...sec.markingScheme, correct: Number(e.target.value) })}
-                        />
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <Label className="text-xs text-red-500">Incorrect (-)</Label>
-                        <Input
-                          type="number"
-                          className="h-7 w-16 text-xs"
-                          value={sec.markingScheme.incorrect}
-                          onChange={(e) => handleSectionChange(index, 'markingScheme', { ...sec.markingScheme, incorrect: Number(e.target.value) })}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <SectionCard
+                key={sec.id}
+                sectionId={sec.id}
+                sectionName={sec.name}
+                questionCount={sec.questionsCount}
+                attemptLimit={sec.attemptlimit ?? undefined}
+                durationMinutes={sec.durationMinutes ?? undefined}
+                sectionDifficulty={sec.difficultyLevel}
+                sectionTopics={sec.topics}
+                markingScheme={sec.markingScheme}
+                defaultMarkingScheme={markingScheme}
+                onEdit={(payload) => handleSectionEdit(index, payload)}
+                onRemove={() => handleRemoveSection(index)}
+              />
             ))}
           </div>
 

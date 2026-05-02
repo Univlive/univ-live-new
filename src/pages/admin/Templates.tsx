@@ -4,7 +4,6 @@ import {
 	BookTemplate,
 	CheckCircle2,
 	Copy,
-	FileText,
 	Loader2,
 	MoreVertical,
 	Pencil,
@@ -19,14 +18,12 @@ import {
 	deleteDoc,
 	doc,
 	getDoc,
-	getDocs,
 	onSnapshot,
 	orderBy,
 	query,
 	serverTimestamp,
 	Timestamp,
 	updateDoc,
-	writeBatch,
 } from "firebase/firestore";
 
 import { db } from "@/lib/firebase";
@@ -59,7 +56,7 @@ type AdminTemplate = {
 	attemptsAllowed: number;
 	questionsCount: number;
 	isPublished: boolean;
-	sections: Array<{ name: string; questionsCount: number; attemptConstraints?: { min: number; max: number } | null; selectionRule?: string | null }>;
+	sections: Array<{ name: string; questionsCount: number; attemptlimit: number; selectionRule?: string | null }>;
 	markingScheme?: { correct: number; incorrect: number; unanswered: number };
 	syllabusCount: number;
 	updatedAtTs?: Timestamp | null;
@@ -72,6 +69,7 @@ function safeNum(value: any, fallback: number) {
 
 function fmtDate(ts?: Timestamp | null) {
 	if (!ts) return "-";
+
 	try {
 		return ts.toDate().toLocaleDateString(undefined, {
 			year: "numeric",
@@ -84,7 +82,7 @@ function fmtDate(ts?: Timestamp | null) {
 }
 
 export default function Templates() {
-	const navigate = useNavigate();
+	// const navigate = useNavigate();
 	const { profile, loading: authLoading } = useAuth();
 
 	const [loading, setLoading] = useState(true);
@@ -221,13 +219,13 @@ export default function Templates() {
 			}
 
 			const srcData = srcSnap.data() as any;
-			const newRef = await addDoc(collection(db, "templates"), {
-				...srcData,
-				title: `${String(srcData?.title || item.title)} (Copy)`,
-				isPublished: false,
-				createdAt: serverTimestamp(),
-				updatedAt: serverTimestamp(),
-			});
+			// const newRef = await addDoc(collection(db, "templates"), {
+			// 	...srcData,
+			// 	title: `${String(srcData?.title || item.title)} (Copy)`,
+			// 	isPublished: false,
+			// 	createdAt: serverTimestamp(),
+			// 	updatedAt: serverTimestamp(),
+			// });
 
 			toast({
 				title: "Template duplicated",
@@ -458,7 +456,7 @@ export default function Templates() {
 												{item.sections.slice(0, 3).map((sec, idx) => (
 													<span key={idx} className="bg-muted/50 px-1.5 py-0.5 rounded text-[10px]">
 														{sec.name} ({safeNum(sec.questionsCount, 0)}
-														{sec.attemptConstraints ? `, attempt ${sec.selectionRule === 'EXACT' ? '=' : '≤'}${sec.attemptConstraints.max}` : ''})
+														{sec.attemptlimit !== undefined ? `, To attempt ${sec.selectionRule === 'EXACT' ? '=' : '≤'}${sec.attemptlimit}` : ''})
 													</span>
 												))}
 												{item.sections.length > 3 && (

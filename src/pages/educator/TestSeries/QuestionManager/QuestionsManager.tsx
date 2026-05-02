@@ -1,19 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
     ArrowLeft,
-    GripVertical,
     Search,
-    Plus,
-    Trash2,
     Loader2,
-    X,
     CheckCircle2,
     FileUp,
-    ChevronDown,
-    ChevronRight,
-    Edit,
-    Copy,
-    XCircle,
 } from "lucide-react";
 
 import {
@@ -21,7 +12,6 @@ import {
     PointerSensor,
     KeyboardSensor,
     closestCenter,
-    useDroppable,
     useSensor,
     useSensors,
     type DragEndEvent,
@@ -30,10 +20,8 @@ import {
     SortableContext,
     arrayMove,
     sortableKeyboardCoordinates,
-    useSortable,
     verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -42,6 +30,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
+import { TopicMultiSelect } from "@/components/ui/topic-multi-select";
 import { toast } from "sonner";
 import ReactCrop, {
     type Crop,
@@ -51,12 +41,11 @@ import ReactCrop, {
 import "react-image-crop/dist/ReactCrop.css";
 
 import AiQuestionImportOverlay from "@/components/educator/AiQuestionImportOverlay";
-import ImageTextarea from "@/components/educator/ImageTextarea";
 import InlineStatusTracker from "@/components/educator/InlineStatusTracker";
-import QuestionEditor from "./QuestionEditor";
+import QuestionEditor from "../QuestionEditor";
+import SortableSectionCard from "../SortableSectionCard";
 import {
     buildImportedQuestionPayload,
-    formatNegativeMarksDisplay,
     importQuestionsFromPdf,
     type AiImportPreviewItem,
     type AiImportSummary,
@@ -65,6 +54,31 @@ import {
 import { aiFeatureFlags, getAiFeatureDisabledMessage } from "@/lib/aiFeatureFlags";
 import { HtmlView } from "@/lib/safeHtml";
 import { uploadToImageKit } from "@/lib/imagekitUpload";
+
+import {
+  uid,
+  buildSnapshotFromQuestion,
+  areSnapshotsEqual,
+  stripHtml,
+  splitPreviewContent,
+  isQuestionPublished,
+  hasPreviewContent,
+  combinePreviewContent,
+  normalizeOptionsForSnapshot,
+  normalizeSections,
+  resolveSectionId,
+} from "./QuestionManagerUtils";
+
+import type {
+  Difficulty,
+  TestSection,
+  TestQuestion,
+  QuestionBankQuestion,
+  DifficultyMix,
+  EditorDraftSnapshot,
+  PendingEditorAction,
+  PreviewCropTarget,
+} from "./QuestionManagerTypes";
 
 // Firebase
 import {
@@ -80,707 +94,19 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
+type AutoImportSection = {
+    id: string;
+    name: string;
+    topics: string[];
+    questionCount: number;
+    difficulty: number;
+};
+
 // ------------------------------
 // Sub-component: Educator Questions Manager (manual only)
 // Works for both imported admin tests and educator custom tests.
 // IMPORTANT: No question-bank import here.
 // ------------------------------
-
-type Difficulty = "easy" | "medium" | "hard";
-
-type TestSection = {
-    id: string;
-    name: string;
-    questionsCount?: number | null;
-    questionsLimit?: number | null;
-    attemptsLimit?: number | null;
-    timeLimit?: number | null;
-    markingScheme?: {
-        correct: number | null;
-        incorrect: number;
-        unattempted: number;
-    } | null;
-};
-
-function uid(prefix = "id") {
-    return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
-}
-
-type TestQuestion = {
-    id: string;
-    questionOrder?: number;
-
-    // Stored schema (admin-compatible)
-    question: string; // can be plain text OR HTML
-    options: string[]; // can be plain text OR HTML strings
-    correctOption: number; // index
-    explanation?: string; // plain/HTML
-
-    difficulty: Difficulty;
-    subject?: string;
-    topic?: string;
-
-    marks?: number; // positive marks
-    negativeMarks?: number;
-
-    isActive?: boolean;
-
-    // AI import metadata
-    source?: "ai_import" | "ai_import_partial" | string;
-    bankQuestionId?: string;
-    importStatus?: "ready" | "partial";
-    reviewRequired?: boolean;
-    importIssues?: string[];
-    importSourceIndex?: number;
-    rawImportBlock?: string;
-    questionImageUrl?: string;
-
-    // Section support
-    sectionId?: string;
-
-    createdAt?: any;
-    updatedAt?: any;
-};
-
-type QuestionBankQuestion = {
-    id: string;
-    question: string;
-    options: string[];
-    correctOption: number;
-    explanation?: string;
-    difficulty: Difficulty;
-    subject?: string;
-    topic?: string;
-    marks?: number;
-    negativeMarks?: number;
-    updatedAt?: any;
-};
-
-type DifficultyMix = {
-    easy: number;
-    medium: number;
-    hard: number;
-};
-
-function normalizeSections(rawSections: any, subjectFallback?: string): TestSection[] {
-    const parsed = Array.isArray(rawSections)
-        ? rawSections
-            .map((section: any, index: number) => ({
-                id: String(section?.id || `sec_${index + 1}`).trim(),
-                name: String(section?.name || `Section ${index + 1}`).trim(),
-                questionsCount: Number.isFinite(Number(section?.questionsCount)) ? Number(section.questionsCount) : null,
-            }))
-            .filter((section) => section.id)
-        : [];
-
-    if (parsed.length > 0) return parsed;
-
-    return [{ id: "main", name: String(subjectFallback || "General").trim() || "General", questionsCount: null }];
-}
-
-function resolveSectionId(sectionId: string | undefined, sections: TestSection[]): string {
-    const fallback = sections[0]?.id || "main";
-    const normalized = String(sectionId || "").trim();
-    if (!normalized) return fallback;
-    return sections.some((section) => section.id === normalized) ? normalized : fallback;
-}
-
-type EditorDraftSnapshot = {
-    question: string;
-    options: string[];
-    correct: number;
-    difficulty: Difficulty;
-    subject: string;
-    topic: string;
-    marks: string;
-    negativeMarks: string;
-    active: boolean;
-};
-
-type PendingEditorAction =
-    | { type: "close-manager" }
-    | { type: "close-editor" }
-    | { type: "open-new"; sectionId?: string; insertAfterQuestionId?: string }
-    | { type: "open-edit"; question: TestQuestion };
-
-type PreviewCropTarget =
-    | { kind: "question"; imageIndex: number }
-    | { kind: "option"; optionIndex: number; imageIndex: number };
-
-function normalizeOptionsForSnapshot(options: string[] = []) {
-    const normalized = options.slice(0, 6).map((value) => String(value ?? ""));
-    while (normalized.length < 4) normalized.push("");
-    return normalized;
-}
-
-function buildSnapshotFromQuestion(question?: TestQuestion): EditorDraftSnapshot {
-    if (!question) {
-        return {
-            question: "",
-            options: ["", "", "", ""],
-            correct: 0,
-            difficulty: "medium",
-            subject: "",
-            topic: "",
-            marks: "",
-            negativeMarks: "",
-            active: true,
-        };
-    }
-
-    const options = normalizeOptionsForSnapshot(question.options || []);
-    const parsedCorrect = Number.isFinite(question.correctOption) ? question.correctOption : 0;
-
-    return {
-        question: question.question || "",
-        options,
-        correct: Math.min(Math.max(0, parsedCorrect), options.length - 1),
-        difficulty: question.difficulty || "medium",
-        subject: question.subject || "",
-        topic: question.topic || "",
-        marks: question.marks != null ? String(question.marks) : "",
-        negativeMarks: question.negativeMarks != null ? String(question.negativeMarks) : "",
-        active: isQuestionPublished(question.isActive),
-    };
-}
-
-function areSnapshotsEqual(a: EditorDraftSnapshot, b: EditorDraftSnapshot) {
-    if (a.question !== b.question) return false;
-    if (a.correct !== b.correct) return false;
-    if (a.difficulty !== b.difficulty) return false;
-    if (a.subject !== b.subject) return false;
-    if (a.topic !== b.topic) return false;
-    if (a.marks !== b.marks) return false;
-    if (a.negativeMarks !== b.negativeMarks) return false;
-    if (a.active !== b.active) return false;
-    if (a.options.length !== b.options.length) return false;
-    for (let i = 0; i < a.options.length; i += 1) {
-        if (a.options[i] !== b.options[i]) return false;
-    }
-    return true;
-}
-
-function stripHtml(input: string) {
-    if (!input) return "";
-    return input.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-}
-
-const IMG_TAG_REGEX = /<img[^>]+src\s*=\s*["']([^"']+)["'][^>]*\/?>/gi;
-
-function splitPreviewContent(raw: string): { text: string; imageUrls: string[] } {
-    if (!raw) return { text: "", imageUrls: [] };
-
-    const imageUrls: string[] = [];
-    let match: RegExpExecArray | null;
-    const regex = new RegExp(IMG_TAG_REGEX.source, "gi");
-
-    while ((match = regex.exec(raw)) !== null) {
-        if (match[1]) imageUrls.push(match[1]);
-    }
-
-    const text = raw
-        .replace(new RegExp(IMG_TAG_REGEX.source, "gi"), "")
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
-
-    return { text, imageUrls };
-}
-
-function hasPreviewContent(raw: string) {
-    if (!raw) return false;
-    const imageRegex = new RegExp(IMG_TAG_REGEX.source, "gi");
-    if (imageRegex.test(raw)) return true;
-    return raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().length > 0;
-}
-
-function combinePreviewContent(text: string, imageUrls: string[]) {
-    if (imageUrls.length === 0) return text;
-    const tags = imageUrls.map((url) => `<img src="${url}" alt="" />`).join("\n");
-    if (!text) return tags;
-    return text.endsWith("\n") ? `${text}${tags}` : `${text}\n${tags}`;
-}
-
-function isQuestionPublished(isActive?: boolean) {
-    return isActive !== false;
-}
-
-function getPublishStatusLabel(isActive?: boolean) {
-    return isQuestionPublished(isActive) ? "Published" : "Draft";
-}
-
-type SortableQuestionListItemProps = {
-    q: TestQuestion;
-    displayOrder: number;
-    dragDisabled: boolean;
-    hideDragHandle?: boolean;
-    readOnly: boolean;
-    onOpenEdit: (q: TestQuestion) => void;
-    onAddAfterQuestion: (q: TestQuestion) => void;
-    onImportAfterQuestion: (q: TestQuestion) => void;
-    onDuplicate: (q: TestQuestion) => void;
-    onDelete: (id: string) => void;
-    onToggleActive: (q: TestQuestion, next: boolean) => void;
-};
-
-// Question Card
-
-function SortableQuestionListItem({
-    q,
-    displayOrder,
-    dragDisabled,
-    hideDragHandle,
-    readOnly,
-    onOpenEdit,
-    onAddAfterQuestion,
-    onImportAfterQuestion,
-    onDuplicate,
-    onDelete,
-    onToggleActive,
-}: SortableQuestionListItemProps) {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-        id: q.id,
-        disabled: dragDisabled,
-    });
-
-    const style = {
-        transform: CSS.Transform.toString(transform),
-        transition,
-    };
-    const isPublished = isQuestionPublished(q.isActive);
-    const publishLabel = getPublishStatusLabel(q.isActive);
-
-    return (
-        <>
-            <div
-                ref={setNodeRef}
-                style={style}
-                onClick={() => onOpenEdit(q)}
-                className={`p-3 rounded-xl cursor-pointer text-sm hover:bg-gray-300/10 transition-colors border bg-card ${isDragging ? "opacity-70" : ""}`}
-            >
-                <div className="flex items-start gap-2">
-
-                    {/* Drag Handle */}
-                    {readOnly || hideDragHandle ? (
-                        <div className="h-7 w-7 shrink-0" />
-                    ) : (
-                        <Button
-                            data-drag-handle
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 rounded-lg text-muted-foreground mt-0.5 cursor-grab active:cursor-grabbing shrink-0"
-                            onClick={(e) => e.stopPropagation()}
-                            aria-label="Drag to reorder"
-                            {...attributes}
-                            {...listeners}
-                            disabled={dragDisabled}
-                        >
-                            <GripVertical className="h-4 w-4" />
-                        </Button>
-                    )}
-
-                    {/* Content */}
-                    <div className="w-full min-w-0">
-
-                        {/* Question + Delete */}
-                        <div className="flex items-start gap-2">
-                            <div className="flex-1">
-                                <div className="flex items-center gap-2 min-w-0">
-
-                                    {/* Q Number */}
-                                    <span className="text-muted-foreground shrink-0">
-                                        Q{displayOrder}:
-                                    </span>
-
-                                    {/* Question */}
-                                    <div className="min-w-0 flex-1 overflow-hidden">
-                                        {hasPreviewContent(q.question || "") ? (
-                                            <HtmlView
-                                                html={q.question || ""}
-                                                className="text-sm line-clamp-1 break-words [&_p]:m-0 [&_img]:hidden"
-                                            />
-                                        ) : (
-                                            <p className="text-sm text-muted-foreground truncate">
-                                                (empty)
-                                            </p>
-                                        )}
-                                    </div>
-
-                                </div>
-                            </div>
-
-                            {!readOnly ? (
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="rounded-xl shrink-0"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        onOpenEdit(q);
-                                    }}
-                                    aria-label="Edit question"
-                                >
-                                    <Edit className="h-4 w-4" />
-                                </Button>
-                            ) : null}
-
-                            {!readOnly ? (
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="rounded-xl text-destructive shrink-0"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        onDelete(q.id);
-                                    }}
-                                    aria-label="Delete question"
-                                >
-                                    <Trash2 className="h-4 w-4" />
-                                </Button>
-                            ) : null}
-                        </div>
-
-                        {/* Meta */}
-                        <div className="mt-2 flex flex-wrap justify-between w-full gap-2">
-
-                            <div className="flex gap-1.5 flex-wrap">
-                                <Badge variant="secondary" className="text-[10px] rounded-full">
-                                    {(q.difficulty || "medium").toUpperCase()}
-                                </Badge>
-
-                                <Badge variant="outline" className="text-[10px] rounded-full">
-                                    +{q.marks ?? "-"} / {formatNegativeMarksDisplay(q.negativeMarks)}
-                                </Badge>
-
-                                {q.source === "ai_import" && (
-                                    <Badge variant="outline" className="text-[10px] rounded-full">AI</Badge>
-                                )}
-
-                                {q.source === "ai_import_partial" && (
-                                    <Badge variant="outline" className="text-[10px] rounded-full">AI Draft</Badge>
-                                )}
-
-                                {isPublished ? (
-                                    <Badge className="text-[10px] rounded-full">Published</Badge>
-                                ) : (
-                                    <Badge variant="destructive" className="text-[10px] rounded-full">
-                                        Draft
-                                    </Badge>
-                                )}
-                            </div>
-
-                            {!readOnly ? (
-                                <div
-                                    className="flex items-center gap-2"
-                                    onClick={(e) => e.stopPropagation()}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                >
-                                    <Switch
-                                        checked={isPublished}
-                                        onCheckedChange={(checked) => onToggleActive(q, checked)}
-                                    />
-                                </div>
-                            ) : null}
-
-                        </div>
-                    </div>
-                </div>
-            </div>
-            {/* Add Question bar  */}
-            {!readOnly ? (
-                <div className="group w-full relative flex items-center">
-
-                    {/* Line */}
-                    <div className="w-full h-2  
-                  opacity-0 group-hover:opacity-100 rounded-full
-                  transition-all duration-200" />
-
-                    {/* Button to add question after question */}
-                    <div className="absolute left-1/2 -translate-x-1/2 -translate-y-1/3
-                  opacity-0 group-hover:opacity-100 
-                  transition-all duration-200 flex gap-2">
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="rounded-full"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onAddAfterQuestion(q);
-                            }}
-                            aria-label="Add question after this"
-                        >
-                            <Plus className="h-3 w-3" /> Add Question
-                        </Button>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="rounded-full"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onImportAfterQuestion(q);
-                            }}
-                            aria-label="Import from question bank after this"
-                        >
-                            <Plus className="h-3 w-3" /> Import From Question Bank
-                        </Button>
-                    </div>
-
-                </div>
-            ) : null}
-        </>
-    );
-}
-
-type SortableSectionCardProps = {
-    section: TestSection;
-    index: number;
-    questions: TestQuestion[];
-    collapsed: boolean;
-    readOnly: boolean;
-    questionDndEnabled: boolean;
-    totalQuestionCount: number;
-    questionLimit: number | null;
-    onToggleCollapse: (sectionId: string) => void;
-    onRename: (sectionId: string, name: string) => void;
-    onDelete: (sectionId: string) => void;
-    onAddQuestion: (sectionId: string) => void;
-    onImportFromBank: (sectionId: string) => void;
-    onAddAfterQuestion: (q: TestQuestion) => void;
-    onImportAfterQuestion: (q: TestQuestion) => void;
-    onOpenEdit: (q: TestQuestion) => void;
-    onDuplicate: (q: TestQuestion) => void;
-    onDeleteQuestion: (id: string) => void;
-    onToggleActive: (q: TestQuestion, next: boolean) => void;
-    onAddSection: (sectionId: string) => void;
-    inlineEditor: ReactNode;
-    inlineEditorAfterQuestionId: string | null;
-    inlineEditorAtEnd: boolean;
-};
-
-function SortableSectionCard({
-    section,
-    index,
-    questions,
-    collapsed,
-    readOnly,
-    questionDndEnabled,
-    totalQuestionCount,
-    questionLimit,
-    onToggleCollapse,
-    onRename,
-    onDelete,
-    onAddQuestion,
-    onImportFromBank,
-    onAddAfterQuestion,
-    onImportAfterQuestion,
-    onOpenEdit,
-    onDuplicate,
-    onDeleteQuestion,
-    onToggleActive,
-    onAddSection,
-    inlineEditor,
-    inlineEditorAfterQuestionId,
-    inlineEditorAtEnd,
-}: SortableSectionCardProps) {
-    const [draftName, setDraftName] = useState(section.name);
-
-    useEffect(() => {
-        setDraftName(section.name);
-    }, [section.name]);
-
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-        id: section.id,
-        disabled: readOnly,
-    });
-
-    const style = {
-        transform: CSS.Transform.toString(transform),
-        transition,
-    };
-    const sectionDropId = `section-drop:${section.id}`;
-    const { setNodeRef: setDropZoneRef, isOver: isDropZoneOver } = useDroppable({
-        id: sectionDropId,
-        disabled: !questionDndEnabled,
-    });
-    const isAtCapacity = questionLimit != null && totalQuestionCount >= questionLimit;
-
-    // Section Card 
-    return (
-        <>
-            <div
-                ref={setNodeRef}
-                style={style}
-                className={`rounded-2xl border bg-background ${isDragging ? "opacity-70" : ""}`}
-            >
-                <div className="p-4 flex flex-col gap-3">
-                    <div className="flex items-start gap-3">
-                        {readOnly ? (
-                            <div className="h-9 w-9 shrink-0" />
-                        ) : (
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-9 w-9 rounded-xl text-muted-foreground cursor-grab active:cursor-grabbing shrink-0"
-                                onClick={(event) => event.stopPropagation()}
-                                aria-label="Drag section"
-                                {...attributes}
-                                {...listeners}
-                            >
-                                <GripVertical className="h-4 w-4" />
-                            </Button>
-                        )}
-
-                        <div className="flex-1 min-w-0 space-y-2">
-                            <div className="flex items-center justify-between gap-2">
-                                <Badge variant="secondary"> {section.name} </Badge>
-                                <div className="flex items-center gap-2">
-                                    {!readOnly ? (
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            size="sm"
-                                            className="rounded-xl"
-                                            onClick={() => onAddQuestion(section.id)}
-                                            disabled={isAtCapacity}
-                                        >
-                                            <Plus className="h-3.5 w-3 mr-1.5" /> Add Question
-                                        </Button>
-                                    ) : null}
-                                    <Button type="button" variant="ghost" size="icon" className="rounded-xl" onClick={() => onToggleCollapse(section.id)}>
-                                        {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                    </Button>
-                                    {!readOnly ? (
-                                        <Button type="button" variant="ghost" size="icon" className="rounded-xl text-destructive" onClick={() => onDelete(section.id)}>
-                                            <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                    ) : null}
-                                </div>
-                            </div>
-
-                            {readOnly ? (
-                                <p className="text-sm font-medium truncate">{section.name || `Section ${index + 1}`}</p>
-                            ) : (
-                                <Input
-                                    value={draftName}
-                                    onChange={(event) => setDraftName(event.target.value)}
-                                    onBlur={() => {
-                                        const nextName = draftName.trim() || `Section ${index + 1}`;
-                                        if (nextName !== section.name) {
-                                            onRename(section.id, nextName);
-                                        }
-                                    }}
-                                    placeholder={`Section ${index + 1}`}
-                                    className="rounded-xl"
-                                />
-                            )}
-
-                            <p className="text-xs text-muted-foreground">
-                                {questionLimit != null
-                                    ? `${totalQuestionCount} / ${questionLimit} questions`
-                                    : `${totalQuestionCount} question${totalQuestionCount === 1 ? "" : "s"}`}
-                            </p>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Questions Inside Section Card */}
-
-                {!collapsed ? (
-                    <div
-                        ref={setDropZoneRef}
-                        className={`p-4 space-y-2 rounded-b-2xl transition-colors ${isDropZoneOver && questionDndEnabled ? "bg-primary/5" : ""
-                            }`}
-                    >
-                        {questions.length === 0 ? (
-                            <div className="space-y-2">
-                                <div className="rounded-xl border border-dashed border-border bg-muted/10 px-4 py-6 text-center text-sm text-muted-foreground">
-                                    <p>No questions in this section yet.</p>
-                                    {!readOnly ? (
-                                        <div className="flex flex-wrap items-center justify-center gap-3">
-                                            <Button
-                                                type="button"
-                                                className="rounded-xl mt-3"
-                                                onClick={() => onAddQuestion(section.id)}
-                                                disabled={isAtCapacity}
-                                            >
-                                                <Plus className="h-4 w-4 mr-2" /> Add first question
-                                            </Button>
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                className="rounded-xl mt-3"
-                                                onClick={() => onImportFromBank(section.id)}
-                                                disabled={isAtCapacity}
-                                            >
-                                                <Plus className="h-4 w-4 mr-2" /> Import from question bank
-                                            </Button>
-                                        </div>
-                                    ) : null}
-                                </div>
-                                {inlineEditor}
-                            </div>
-                        ) : (
-                            <SortableContext
-                                items={questions.map((q) => q.id)}
-                                strategy={verticalListSortingStrategy}
-                            >
-                                <div className="space-y-2">
-                                    {questions.map((question, questionIndex) => (
-                                        <div key={question.id} className="space-y-2">
-                                            <SortableQuestionListItem
-                                                q={question}
-                                                displayOrder={questionIndex + 1}
-                                                dragDisabled={!questionDndEnabled}
-                                                readOnly={readOnly}
-                                                onOpenEdit={onOpenEdit}
-                                                onAddAfterQuestion={onAddAfterQuestion}
-                                                onImportAfterQuestion={onImportAfterQuestion}
-                                                onDuplicate={onDuplicate}
-                                                onDelete={onDeleteQuestion}
-                                                onToggleActive={onToggleActive}
-                                            />
-                                            {inlineEditorAfterQuestionId === question.id ? inlineEditor : null}
-                                        </div>
-                                    ))}
-                                    {inlineEditorAtEnd ? inlineEditor : null}
-                                </div>
-                            </SortableContext>
-                        )}
-                    </div>
-                ) : null}
-            </div>
-            {!readOnly ? (
-                <div className="group w-full relative flex items-center">
-
-                    {/* Line */}
-                    <div className="w-full h-2  
-                  opacity-0 group-hover:opacity-100 rounded-full
-                  transition-all duration-200" />
-
-                    {/* Button to add question after question */}
-                    <div className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2
-                  opacity-0 group-hover:opacity-100 
-                  transition-all duration-200 flex gap-2">
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="rounded-full"
-                            onClick={() => onAddSection(section.id)}
-                            aria-label="Add Section after this"
-                        >
-                            <Plus className="h-3 w-3" /> Add Section
-                        </Button>
-                    </div>
-
-                </div>
-            ) : null}
-        </>
-    );
-}
 
 const QuestionsManager = ({
     testId,
@@ -880,6 +206,8 @@ const QuestionsManager = ({
     const [questionBankDifficulty, setQuestionBankDifficulty] = useState<"all" | Difficulty>("all");
     const [questionBankSectionId, setQuestionBankSectionId] = useState("");
     const [questionBankInsertAfterId, setQuestionBankInsertAfterId] = useState<string | null>(null);
+    const [adminQuestionBankRows, setAdminQuestionBankRows] = useState<QuestionBankQuestion[]>([]);
+    const [adminQuestionBankLoading, setAdminQuestionBankLoading] = useState(false);
     const [autoFillOpen, setAutoFillOpen] = useState(false);
     const [autoFillGenerating, setAutoFillGenerating] = useState(false);
     const [autoFillApplying, setAutoFillApplying] = useState(false);
@@ -895,6 +223,9 @@ const QuestionsManager = ({
     const [autoFillSubjectWeight, setAutoFillSubjectWeight] = useState<Record<string, number>>({});
     const [autoFillDraftRows, setAutoFillDraftRows] = useState<QuestionBankQuestion[]>([]);
     const [autoFillDraftSelected, setAutoFillDraftSelected] = useState<Record<string, boolean>>({});
+    const [autoImportSections, setAutoImportSections] = useState<AutoImportSection[]>([]);
+    const [autoImportIncludeAdmin, setAutoImportIncludeAdmin] = useState(false);
+    const [autoImportApplying, setAutoImportApplying] = useState(false);
     const pdfInputRef = useRef<HTMLInputElement | null>(null);
     const importAbortControllerRef = useRef<AbortController | null>(null);
     const isAiPdfImportEnabled = aiFeatureFlags.pdfImport;
@@ -1007,23 +338,7 @@ const QuestionsManager = ({
                 if (!active) return;
 
                 const rows: QuestionBankQuestion[] = bankSnap.docs
-                    .map((docSnap) => {
-                        const data = docSnap.data() as any;
-                        const optionsRaw = Array.isArray(data?.options) ? data.options : [];
-                        return {
-                            id: docSnap.id,
-                            question: String(data?.question ?? data?.text ?? ""),
-                            options: optionsRaw.map((value: any) => String(value ?? "")),
-                            correctOption: Number.isFinite(Number(data?.correctOption)) ? Number(data.correctOption) : 0,
-                            explanation: data?.explanation ? String(data.explanation) : "",
-                            difficulty: (data?.difficulty as Difficulty) || "medium",
-                            subject: data?.subject ? String(data.subject) : "",
-                            topic: data?.topic ? String(data.topic) : "",
-                            marks: data?.marks != null ? Number(data.marks) : undefined,
-                            negativeMarks: data?.negativeMarks != null ? Number(data.negativeMarks) : undefined,
-                            updatedAt: data?.updatedAt,
-                        };
-                    })
+                    .map(mapQuestionBankDoc)
                     .sort((a, b) => timestampToMillis(b.updatedAt) - timestampToMillis(a.updatedAt));
 
                 setQuestionBankRows(rows);
@@ -1045,6 +360,35 @@ const QuestionsManager = ({
             active = false;
         };
     }, [questionBankOpen, autoFillOpen, educatorUid, managedSections]);
+
+    useEffect(() => {
+        if (!autoFillOpen || !autoImportIncludeAdmin) return;
+        if (adminQuestionBankRows.length > 0) return;
+
+        let active = true;
+        (async () => {
+            try {
+                setAdminQuestionBankLoading(true);
+                const bankSnap = await getDocs(collection(db, "question_bank"));
+                if (!active) return;
+
+                const rows: QuestionBankQuestion[] = bankSnap.docs
+                    .map(mapQuestionBankDoc)
+                    .sort((a, b) => timestampToMillis(b.updatedAt) - timestampToMillis(a.updatedAt));
+
+                setAdminQuestionBankRows(rows);
+            } catch (error) {
+                console.error(error);
+                toast.error("Failed to load admin question bank");
+            } finally {
+                if (active) setAdminQuestionBankLoading(false);
+            }
+        })();
+
+        return () => {
+            active = false;
+        };
+    }, [autoFillOpen, autoImportIncludeAdmin, adminQuestionBankRows.length]);
 
     const filteredQuestions = useMemo(() => {
         const q = searchQ.trim().toLowerCase();
@@ -1154,6 +498,18 @@ const QuestionsManager = ({
         return Array.from(topics).sort((a, b) => a.localeCompare(b));
     }, [questionBankRows]);
 
+    // Combined topics from both educator and admin question banks for the Auto Import dialog
+    const allAvailableTopics = useMemo(() => {
+        const topics = new Set<string>();
+        questionBankRows.forEach((q) => {
+            if (q.topic && q.topic.trim()) topics.add(q.topic.trim());
+        });
+        adminQuestionBankRows.forEach((q) => {
+            if (q.topic && q.topic.trim()) topics.add(q.topic.trim());
+        });
+        return Array.from(topics).sort((a, b) => a.localeCompare(b));
+    }, [questionBankRows, adminQuestionBankRows]);
+
     const autoFillSubjects = useMemo(() => {
         const subjects = new Set<string>();
         questionBankRows.forEach((question) => {
@@ -1220,6 +576,62 @@ const QuestionsManager = ({
         });
         return numberMap;
     }, [questions]);
+
+    function clampDifficulty(level?: number) {
+        if (!Number.isFinite(Number(level))) return 0.5;
+        return Math.min(1, Math.max(0, Number(level)));
+    }
+
+    function getDifficultyLabel(level: number) {
+        if (level <= 0.3) return "Easy";
+        if (level <= 0.7) return "Medium";
+        return "Hard";
+    }
+
+    function normalizeDifficulty(value?: string) {
+        const raw = String(value || "medium").toLowerCase().trim();
+        if (raw === "easy" || raw === "medium" || raw === "hard") return raw as Difficulty;
+        return "medium";
+    }
+
+    function difficultyToValue(value?: string | number) {
+        if (typeof value === "number") return clampDifficulty(value);
+        const normalized = normalizeDifficulty(value);
+        if (normalized === "easy") return 0.15;
+        if (normalized === "hard") return 0.85;
+        return 0.5;
+    }
+
+    function normalizeTopicValue(topic?: string) {
+        return String(topic || "").trim().toLowerCase();
+    }
+
+    function shuffleList<T>(items: T[]) {
+        const copy = [...items];
+        for (let i = copy.length - 1; i > 0; i -= 1) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [copy[i], copy[j]] = [copy[j], copy[i]];
+        }
+        return copy;
+    }
+
+    function mapQuestionBankDoc(docSnap: any): QuestionBankQuestion {
+        const data = docSnap.data ? docSnap.data() : docSnap;
+        const optionsRaw = Array.isArray(data?.options) ? data.options : [];
+        return {
+            id: String(docSnap.id || data?.id || ""),
+            question: String(data?.question ?? data?.text ?? ""),
+            options: optionsRaw.map((value: any) => String(value ?? "")),
+            correctOption: Number.isFinite(Number(data?.correctOption)) ? Number(data.correctOption) : 0,
+            explanation: data?.explanation ? String(data.explanation) : "",
+            difficulty: normalizeDifficulty(data?.difficulty),
+            subject: data?.subject ? String(data.subject) : "",
+            topic: data?.topic ? String(data.topic) : "",
+            marks: data?.marks != null ? Number(data.marks) : undefined,
+            negativeMarks: data?.negativeMarks != null ? Number(data.negativeMarks) : undefined,
+            updatedAt: data?.updatedAt,
+        };
+    }
 
     function getNextQuestionOrder() {
         const maxOrder = questions.reduce((max, q) => {
@@ -1768,6 +1180,16 @@ const QuestionsManager = ({
             return;
         }
 
+        const draftSections: AutoImportSection[] = managedSections.map((section) => ({
+            id: section.id,
+            name: section.name,
+            topics: Array.isArray(section.topics) ? section.topics : [],
+            questionCount: Number(section.questionsCount) || 0,
+            difficulty: clampDifficulty(section.difficultyLevel ?? 0.5),
+        }));
+        setAutoImportSections(draftSections);
+        setAutoImportIncludeAdmin(false);
+
         const fallbackSectionId = resolveSectionId(autoFillSectionId || managedSections[0]?.id, managedSections);
         setAutoFillSectionId(fallbackSectionId);
         setAutoFillDraftRows([]);
@@ -2044,6 +1466,175 @@ const QuestionsManager = ({
             toast.error("Failed to add auto-fill draft questions");
         } finally {
             setAutoFillApplying(false);
+        }
+    }
+
+    async function handleAutoImportConfirm() {
+        if (readOnly || questionSource === "admin") return;
+        if (autoImportApplying) return;
+
+        const sections = autoImportSections;
+        if (!sections.length) {
+            toast.error("No sections to import into");
+            return;
+        }
+
+        setAutoImportApplying(true);
+        try {
+            // Build educator pool
+            const educatorPool: QuestionBankQuestion[] = [...questionBankRows];
+
+            // Build admin pool (if enabled)
+            const adminPool: QuestionBankQuestion[] = autoImportIncludeAdmin
+                ? [...adminQuestionBankRows]
+                : [];
+
+            // Track globally used IDs to prevent cross-section repetition
+            const globalUsedIds = new Set<string>(
+                Array.from(existingBankQuestionIds)
+            );
+
+            const allImportedRows: TestQuestion[] = [];
+            let baseOrder = getNextQuestionOrder();
+
+            for (const section of sections) {
+                const sectionTopics = section.topics.map(normalizeTopicValue).filter(Boolean);
+                if (!sectionTopics.length) continue; // skip sections with no topics
+
+                const needed = Math.max(0, section.questionCount);
+                if (needed === 0) continue;
+
+                const topicSet = new Set(sectionTopics);
+
+                // Filter by topic (STRICT)
+                const educatorMatches = educatorPool.filter(
+                    (q) => topicSet.has(normalizeTopicValue(q.topic)) && !globalUsedIds.has(q.id)
+                );
+                const adminMatches = adminPool.filter(
+                    (q) => topicSet.has(normalizeTopicValue(q.topic)) && !globalUsedIds.has(q.id)
+                );
+
+                // Score by difficulty proximity
+                const scoreDifficulty = (q: QuestionBankQuestion, targetDifficulty: number): number => {
+                    const qVal = difficultyToValue(q.difficulty);
+                    return 1 - Math.abs(qVal - targetDifficulty);
+                };
+
+                // Sort educator matches by difficulty score (best first)
+                const sortedEducator = [...educatorMatches].sort(
+                    (a, b) => scoreDifficulty(b, section.difficulty) - scoreDifficulty(a, section.difficulty)
+                );
+                const sortedAdmin = [...adminMatches].sort(
+                    (a, b) => scoreDifficulty(b, section.difficulty) - scoreDifficulty(a, section.difficulty)
+                );
+
+                // Pick questions: educator first, then admin
+                const picked: QuestionBankQuestion[] = [];
+                const pickedIds = new Set<string>();
+
+                // Phase 1: pick with difficulty preference
+                for (const q of sortedEducator) {
+                    if (picked.length >= needed) break;
+                    if (pickedIds.has(q.id)) continue;
+                    picked.push(q);
+                    pickedIds.add(q.id);
+                }
+                for (const q of sortedAdmin) {
+                    if (picked.length >= needed) break;
+                    if (pickedIds.has(q.id)) continue;
+                    picked.push(q);
+                    pickedIds.add(q.id);
+                }
+
+                // Phase 2 (fallback): if not enough, relax difficulty — just pick any remaining topic-matched
+                if (picked.length < needed) {
+                    const remainingEducator = educatorMatches.filter((q) => !pickedIds.has(q.id));
+                    const remainingAdmin = adminMatches.filter((q) => !pickedIds.has(q.id));
+                    for (const q of shuffleList(remainingEducator)) {
+                        if (picked.length >= needed) break;
+                        picked.push(q);
+                        pickedIds.add(q.id);
+                    }
+                    for (const q of shuffleList(remainingAdmin)) {
+                        if (picked.length >= needed) break;
+                        picked.push(q);
+                        pickedIds.add(q.id);
+                    }
+                }
+
+                // Shuffle the final selection
+                const shuffled = shuffleList(picked);
+
+                // Mark as globally used
+                shuffled.forEach((q) => globalUsedIds.add(q.id));
+
+                // Write to Firestore
+                for (let i = 0; i < shuffled.length; i++) {
+                    const question = shuffled[i];
+                    const questionOrder = baseOrder + allImportedRows.length;
+
+                    const payload: any = {
+                        question: question.question,
+                        options: Array.isArray(question.options) ? question.options : ["", "", "", ""],
+                        correctOption: Number.isFinite(Number(question.correctOption)) ? Number(question.correctOption) : 0,
+                        explanation: question.explanation || "",
+                        difficulty: question.difficulty || "medium",
+                        sectionId: section.id,
+                        subject: question.subject || "",
+                        topic: question.topic || "",
+                        marks: question.marks != null ? Number(question.marks) : null,
+                        negativeMarks: question.negativeMarks != null ? Number(question.negativeMarks) : null,
+                        isActive: true,
+                        source: "auto_import",
+                        bankQuestionId: question.id,
+                        questionOrder,
+                        createdAt: serverTimestamp(),
+                        updatedAt: serverTimestamp(),
+                    };
+
+                    const newRef = await addDoc(qCol, payload);
+                    allImportedRows.push({
+                        id: newRef.id,
+                        questionOrder,
+                        question: payload.question,
+                        options: payload.options,
+                        correctOption: payload.correctOption,
+                        explanation: payload.explanation,
+                        difficulty: payload.difficulty,
+                        subject: payload.subject,
+                        topic: payload.topic,
+                        marks: payload.marks,
+                        negativeMarks: payload.negativeMarks,
+                        isActive: true,
+                        source: "auto_import",
+                        bankQuestionId: question.id,
+                        sectionId: section.id,
+                    });
+                }
+            }
+
+            if (!allImportedRows.length) {
+                toast.error("No matching questions found for any section. Check topics.");
+                return;
+            }
+
+            await resequenceQuestionsForSections(managedSections, [...questions, ...allImportedRows]);
+            await syncTestQuestionCount();
+
+            const sectionSummary = sections
+                .map((s) => {
+                    const added = allImportedRows.filter((r) => r.sectionId === s.id).length;
+                    return `${s.name}: ${added}/${s.questionCount}`;
+                })
+                .join(", ");
+
+            toast.success(`Auto Import complete — ${sectionSummary}`);
+            setAutoFillOpen(false);
+        } catch (error) {
+            console.error(error);
+            toast.error("Auto Import failed");
+        } finally {
+            setAutoImportApplying(false);
         }
     }
 
@@ -2906,15 +2497,6 @@ const QuestionsManager = ({
                             Auto Import
                         </Button>
                     </div>
-                    {/* {isPageMode ? (
-                        <Button variant="outline" onClick={requestCloseManager} className="rounded-xl">
-                            <ArrowLeft className="h-4 w-4 mr-2" /> Back
-                        </Button>
-                    ) : (
-                        <Button variant="ghost" size="icon" onClick={requestCloseManager} className="rounded-xl">
-                            <X className="h-5 w-5" />
-                        </Button>
-                    )} */}
 
                 </div>
 
@@ -2930,45 +2512,6 @@ const QuestionsManager = ({
                                 <div>
                                     <p className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Sections</p>
                                 </div>
-
-                                {/* {!readOnly ? (
-                                    <div className="space-y-2">
-                                        <div className="flex gap-2">
-                                            <Input
-                                                value={newSectionName}
-                                                onChange={(event) => setNewSectionName(event.target.value)}
-                                                placeholder="New section name"
-                                                className="rounded-xl"
-                                            />
-                                            <Button className="rounded-xl shrink-0" onClick={addSection} type="button">
-                                                <Plus className="mr-2 h-4 w-4" /> Add Section
-                                            </Button>
-                                        </div>
-                                        <Button className="w-full rounded-xl" onClick={() => openNewInSection(managedSections[0]?.id || "main")}>
-                                            <Plus className="mr-2 h-4 w-4" /> Add Question
-                                        </Button>
-                                    </div>
-                                ) : null} */}
-
-                                {/* {!readOnly ? (
-                                    <>
-                                        <Button
-                                            variant="outline"
-                                            className="w-full rounded-xl"
-                                            onClick={() => pdfInputRef.current?.click()}
-                                            disabled={importBusy || !isAiPdfImportEnabled}
-                                            title={!isAiPdfImportEnabled ? getAiFeatureDisabledMessage("pdfImport") : undefined}
-                                        >
-                                            {importBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
-                                            Import PDF with AI
-                                        </Button>
-                                        {!isAiPdfImportEnabled ? (
-                                            <p className="text-xs text-muted-foreground">
-                                                {getAiFeatureDisabledMessage("pdfImport")}
-                                            </p>
-                                        ) : null}
-                                    </>
-                                ) : null} */}
                                 <input
                                     ref={pdfInputRef}
                                     type="file"
@@ -3075,6 +2618,7 @@ const QuestionsManager = ({
                                                             questions={sectionQuestions}
                                                             collapsed={collapsed}
                                                             readOnly={readOnly}
+                                                            editingId={editingId}
                                                             questionDndEnabled={dndEnabled}
                                                             totalQuestionCount={sectionQuestionCountById[section.id] || 0}
                                                             questionLimit={getSectionQuestionLimit(section.id)}
@@ -3111,13 +2655,6 @@ const QuestionsManager = ({
                     </div>
                 </div>
 
-                {/* <div className="p-3 border-t bg-muted/20 text-xs text-muted-foreground flex items-center justify-end">
-                    <span className="flex items-center gap-2">
-                        <FileUp className="h-4 w-4" />
-                        Manual + AI PDF Import
-                    </span>
-                </div> */}
-
                 <Dialog
                     open={autoFillOpen}
                     onOpenChange={(open) => {
@@ -3128,252 +2665,176 @@ const QuestionsManager = ({
                         }
                     }}
                 >
-                    <DialogContent className="rounded-2xl max-w-5xl">
+                    <DialogContent className="rounded-2xl max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
                         <DialogHeader>
-                            <DialogTitle>Smart Auto-Fill Mode</DialogTitle>
+                            <DialogTitle>Auto Import Questions</DialogTitle>
                             <DialogDescription>
-                                Configure constraints and auto-generate a draft paper from educator question bank. Draft questions are added as unpublished.
+                                Configure each section's topics, question count, and difficulty. Questions are matched strictly by topic from your question bank.
                             </DialogDescription>
                         </DialogHeader>
 
-                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-                            <div className="lg:col-span-3">
-                                <Label className="text-xs">Total Questions</Label>
-                                <Input
-                                    type="number"
-                                    min={1}
-                                    value={autoFillTotalQuestions}
-                                    onChange={(event) => setAutoFillTotalQuestions(Math.max(1, Number(event.target.value) || 1))}
-                                    className="rounded-xl mt-1"
-                                />
-                            </div>
-
-                            <div className="lg:col-span-4">
-                                <Label className="text-xs">Add To Section</Label>
-                                <Select value={autoFillSectionId} onValueChange={setAutoFillSectionId}>
-                                    <SelectTrigger className="rounded-xl mt-1">
-                                        <SelectValue placeholder="Select section" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {managedSections.map((section) => (
-                                            <SelectItem key={section.id} value={section.id}>
-                                                {section.name}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-
-                            <div className="lg:col-span-5 flex items-end">
-                                <label className="inline-flex items-center gap-2 text-sm">
-                                    <input
-                                        type="checkbox"
-                                        checked={autoFillAvoidUsed}
-                                        onChange={(event) => setAutoFillAvoidUsed(event.target.checked)}
-                                    />
-                                    Avoid previously used questions (across educator tests)
-                                </label>
-                            </div>
-
-                            <div className="lg:col-span-12 rounded-xl border border-border p-3">
-                                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Difficulty Mix (%)</p>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                                    <div>
-                                        <Label className="text-xs">Easy</Label>
-                                        <Input
-                                            type="number"
-                                            min={0}
-                                            max={100}
-                                            value={autoFillDifficultyMix.easy}
-                                            onChange={(event) =>
-                                                setAutoFillDifficultyMix((prev) => ({ ...prev, easy: Math.max(0, Number(event.target.value) || 0) }))
-                                            }
-                                            className="rounded-xl mt-1"
-                                        />
-                                    </div>
-                                    <div>
-                                        <Label className="text-xs">Medium</Label>
-                                        <Input
-                                            type="number"
-                                            min={0}
-                                            max={100}
-                                            value={autoFillDifficultyMix.medium}
-                                            onChange={(event) =>
-                                                setAutoFillDifficultyMix((prev) => ({ ...prev, medium: Math.max(0, Number(event.target.value) || 0) }))
-                                            }
-                                            className="rounded-xl mt-1"
-                                        />
-                                    </div>
-                                    <div>
-                                        <Label className="text-xs">Hard</Label>
-                                        <Input
-                                            type="number"
-                                            min={0}
-                                            max={100}
-                                            value={autoFillDifficultyMix.hard}
-                                            onChange={(event) =>
-                                                setAutoFillDifficultyMix((prev) => ({ ...prev, hard: Math.max(0, Number(event.target.value) || 0) }))
-                                            }
-                                            className="rounded-xl mt-1"
-                                        />
-                                    </div>
-                                </div>
-                                <p className="mt-2 text-xs text-muted-foreground">
-                                    Current total: {autoFillDifficultyMix.easy + autoFillDifficultyMix.medium + autoFillDifficultyMix.hard}%
-                                </p>
-                            </div>
-
-                            <div className="lg:col-span-6 rounded-xl border border-border p-3">
-                                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Topics Coverage</p>
-                                {autoFillTopics.length === 0 ? (
-                                    <p className="text-sm text-muted-foreground">No topic metadata available in question bank.</p>
+                        <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
+                            {/* Sections overview */}
+                            <div>
+                                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Sections</p>
+                                {autoImportSections.length === 0 ? (
+                                    <p className="text-sm text-muted-foreground py-6 text-center">No sections found in this test.</p>
                                 ) : (
-                                    <div className="max-h-48 overflow-auto space-y-1 pr-1">
-                                        {autoFillTopics.map((topic) => (
-                                            <label key={topic} className="flex items-center gap-2 text-sm">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={!!autoFillTopicSelected[topic]}
-                                                    onChange={(event) =>
-                                                        setAutoFillTopicSelected((prev) => ({ ...prev, [topic]: event.target.checked }))
-                                                    }
-                                                />
-                                                <span className="truncate">{topic}</span>
-                                            </label>
-                                        ))}
-                                    </div>
-                                )}
-                                <p className="mt-2 text-xs text-muted-foreground">Leave all unchecked to include all topics.</p>
-                            </div>
+                                    <div className="space-y-4">
+                                        {autoImportSections.map((section, sectionIndex) => (
+                                            <div
+                                                key={section.id}
+                                                className="rounded-xl border border-border bg-card p-4 space-y-3"
+                                            >
+                                                {/* Section name header */}
+                                                <div className="flex items-center justify-between">
+                                                    <Badge variant="secondary" className="text-sm font-semibold px-3 py-1">
+                                                        {section.name}
+                                                    </Badge>
+                                                    <span className="text-xs text-muted-foreground">
+                                                        Section {sectionIndex + 1} of {autoImportSections.length}
+                                                    </span>
+                                                </div>
 
-                            <div className="lg:col-span-6 rounded-xl border border-border p-3">
-                                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Subject Weightage (%)</p>
-                                {autoFillSubjects.length === 0 ? (
-                                    <p className="text-sm text-muted-foreground">No subject metadata available in question bank.</p>
-                                ) : (
-                                    <div className="max-h-48 overflow-auto space-y-2 pr-1">
-                                        {autoFillSubjects.map((subject) => (
-                                            <div key={subject} className="grid grid-cols-[1fr_96px] gap-2 items-center">
-                                                <span className="text-sm truncate">{subject}</span>
-                                                <Input
-                                                    type="number"
-                                                    min={0}
-                                                    max={100}
-                                                    value={autoFillSubjectWeight[subject] ?? 0}
-                                                    onChange={(event) => {
-                                                        const value = Math.max(0, Number(event.target.value) || 0);
-                                                        setAutoFillSubjectWeight((prev) => ({ ...prev, [subject]: value }));
-                                                    }}
-                                                    className="rounded-xl"
-                                                />
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                                <p className="mt-2 text-xs text-muted-foreground">Set to 0 to exclude a subject.</p>
-                            </div>
-                        </div>
+                                                {/* Topics */}
+                                                <div>
+                                                    <Label className="text-xs text-muted-foreground mb-1 block">Topics</Label>
+                                                    <TopicMultiSelect
+                                                        placeholder="Search and select topics..."
+                                                        selectedTopics={section.topics}
+                                                        setSelectedTopics={(nextTopics) => {
+                                                            setAutoImportSections((prev) =>
+                                                                prev.map((s) =>
+                                                                    s.id === section.id ? { ...s, topics: nextTopics } : s
+                                                                )
+                                                            );
+                                                        }}
+                                                        availableTopics={allAvailableTopics}
+                                                        className="rounded-xl"
+                                                    />
+                                                </div>
 
-                        <div className="flex gap-2 justify-end">
-                            <Button
-                                variant="outline"
-                                className="rounded-xl"
-                                onClick={() => setAutoFillOpen(false)}
-                                disabled={autoFillGenerating || autoFillApplying}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                className="rounded-xl"
-                                variant="outline"
-                                onClick={generateAutoFillDraft}
-                                disabled={questionBankLoading || autoFillGenerating || autoFillApplying}
-                            >
-                                {autoFillGenerating ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating...
-                                    </>
-                                ) : (
-                                    "Generate Draft"
-                                )}
-                            </Button>
-                        </div>
-
-                        <div className="rounded-xl border border-border overflow-hidden">
-                            <div className="p-3 flex items-center justify-between bg-muted/30">
-                                <p className="text-sm text-muted-foreground">
-                                    Generated: <span className="font-medium text-foreground">{autoFillDraftRows.length}</span>
-                                </p>
-                                <p className="text-sm">
-                                    Selected: <span className="font-semibold">{autoFillSelectedDraftIds.length}</span>
-                                </p>
-                            </div>
-
-                            <div className="max-h-[360px] overflow-auto">
-                                {autoFillDraftRows.length === 0 ? (
-                                    <div className="p-10 text-center text-muted-foreground">Generate draft questions to preview them here.</div>
-                                ) : (
-                                    <div className="divide-y divide-border">
-                                        {autoFillDraftRows.map((question) => (
-                                            <div key={question.id} className="p-3 flex gap-3 items-start">
-                                                <input
-                                                    type="checkbox"
-                                                    className="mt-1"
-                                                    checked={!!autoFillDraftSelected[question.id]}
-                                                    onChange={(event) =>
-                                                        setAutoFillDraftSelected((prev) => ({
-                                                            ...prev,
-                                                            [question.id]: event.target.checked,
-                                                        }))
-                                                    }
-                                                />
-
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                                                        <Badge variant="secondary" className="rounded-full">
-                                                            {(question.difficulty || "medium").toUpperCase()}
-                                                        </Badge>
-                                                        {question.subject ? <Badge variant="secondary" className="rounded-full">{question.subject}</Badge> : null}
-                                                        {question.topic ? <Badge variant="secondary" className="rounded-full">{question.topic}</Badge> : null}
+                                                {/* Question count + Difficulty row */}
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                    <div>
+                                                        <Label className="text-xs text-muted-foreground mb-1 block">Question Count</Label>
+                                                        <Input
+                                                            type="number"
+                                                            min={0}
+                                                            value={section.questionCount}
+                                                            onChange={(e) => {
+                                                                const val = Math.max(0, Number(e.target.value) || 0);
+                                                                setAutoImportSections((prev) =>
+                                                                    prev.map((s) =>
+                                                                        s.id === section.id ? { ...s, questionCount: val } : s
+                                                                    )
+                                                                );
+                                                            }}
+                                                            className="rounded-xl"
+                                                        />
                                                     </div>
-
-                                                    <div className="line-clamp-3">
-                                                        <HtmlView html={question.question || ""} className="text-sm break-words" />
+                                                    <div>
+                                                        <Label className="text-xs text-muted-foreground mb-1 block">
+                                                            Difficulty: <span className="font-semibold text-foreground">{getDifficultyLabel(section.difficulty)} ({section.difficulty.toFixed(2)})</span>
+                                                        </Label>
+                                                        <Slider
+                                                            min={0}
+                                                            max={1}
+                                                            step={0.01}
+                                                            value={[section.difficulty]}
+                                                            onValueChange={([val]) => {
+                                                                setAutoImportSections((prev) =>
+                                                                    prev.map((s) =>
+                                                                        s.id === section.id ? { ...s, difficulty: val } : s
+                                                                    )
+                                                                );
+                                                            }}
+                                                            className="mt-2"
+                                                        />
+                                                        <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
+                                                            <span>Easy</span>
+                                                            <span>Medium</span>
+                                                            <span>Hard</span>
+                                                        </div>
                                                     </div>
-                                                    <p className="mt-1 text-xs text-muted-foreground">Options: {question.options?.length || 0}</p>
                                                 </div>
                                             </div>
                                         ))}
                                     </div>
                                 )}
                             </div>
+
+                            {/* Admin import option */}
+                            <div className="rounded-xl border border-border bg-muted/20 p-4">
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={autoImportIncludeAdmin}
+                                        onChange={(e) => setAutoImportIncludeAdmin(e.target.checked)}
+                                        className="h-4 w-4 rounded"
+                                    />
+                                    <div>
+                                        <span className="text-sm font-medium">Include questions from Admin Question Bank</span>
+                                        <p className="text-xs text-muted-foreground mt-0.5">
+                                            {autoImportIncludeAdmin
+                                                ? "Using both educator + admin question banks"
+                                                : "Using only your educator question bank"}
+                                        </p>
+                                    </div>
+                                </label>
+                                {autoImportIncludeAdmin && adminQuestionBankLoading && (
+                                    <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                                        <Loader2 className="h-3 w-3 animate-spin" /> Loading admin question bank...
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Summary */}
+                            <div className="rounded-xl border border-border bg-muted/10 p-3">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Import Summary</p>
+                                <div className="flex flex-wrap gap-3 text-sm">
+                                    <span>Total questions: <strong>{autoImportSections.reduce((sum, s) => sum + s.questionCount, 0)}</strong></span>
+                                    <span>Sections: <strong>{autoImportSections.length}</strong></span>
+                                    <span>Educator bank: <strong>{questionBankRows.length}</strong> available</span>
+                                    {autoImportIncludeAdmin && (
+                                        <span>Admin bank: <strong>{adminQuestionBankRows.length}</strong> available</span>
+                                    )}
+                                </div>
+                            </div>
                         </div>
 
-                        <div className="flex gap-2 justify-end">
+                        {/* Action buttons */}
+                        <DialogFooter className="flex gap-2 justify-end pt-2 border-t">
                             <Button
                                 variant="outline"
                                 className="rounded-xl"
-                                onClick={() => {
-                                    const allChecked: Record<string, boolean> = {};
-                                    autoFillDraftRows.forEach((question) => {
-                                        allChecked[question.id] = true;
-                                    });
-                                    setAutoFillDraftSelected(allChecked);
-                                }}
-                                disabled={!autoFillDraftRows.length || autoFillApplying}
+                                onClick={() => setAutoFillOpen(false)}
+                                disabled={autoImportApplying}
                             >
-                                Select All
+                                Cancel
                             </Button>
                             <Button
                                 className="rounded-xl gradient-bg text-white"
-                                onClick={applyAutoFillDraft}
-                                disabled={autoFillApplying || autoFillSelectedDraftIds.length === 0}
+                                onClick={handleAutoImportConfirm}
+                                disabled={
+                                    autoImportApplying ||
+                                    questionBankLoading ||
+                                    (autoImportIncludeAdmin && adminQuestionBankLoading) ||
+                                    autoImportSections.every((s) => s.questionCount === 0 || s.topics.length === 0)
+                                }
                             >
-                                {autoFillApplying ? "Adding..." : "Add Selected as Draft"}
+                                {autoImportApplying ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Importing...
+                                    </>
+                                ) : (
+                                    "Confirm Import"
+                                )}
                             </Button>
-                        </div>
+                        </DialogFooter>
                     </DialogContent>
                 </Dialog>
+
 
                 <Dialog
                     open={questionBankOpen}

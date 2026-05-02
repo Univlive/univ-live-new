@@ -1,18 +1,16 @@
-import { useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, Loader2, Save } from "lucide-react";
-import { Switch } from "@/components/ui/switch";
-import { Slider } from "@/components/ui/slider";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Plus, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { addDoc, collection, serverTimestamp, updateDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import FloatingInput from "../ui/FloatingInput";
 import { TopicMultiSelect } from "@/components/ui/topic-multi-select";
+import SectionCard from "./SectionCard";
 
 function getDifficultyLabel(level: number): string {
   if (level <= 0.3) return "Easy";
@@ -35,12 +33,25 @@ function normalizeLegacyDifficulty(level?: string | number): number {
   return 0.5;
 }
 
+function clampDifficulty(level?: number) {
+  if (!Number.isFinite(Number(level))) return 0.5;
+  return Math.min(1, Math.max(0, Number(level)));
+}
+
+function getAverageDifficulty(sections: Array<{ difficultyLevel?: number }>, fallback = 0.5) {
+  if (sections.length === 0) return fallback;
+  const total = sections.reduce((acc, s) => acc + clampDifficulty(s.difficultyLevel ?? fallback), 0);
+  return total / sections.length;
+}
+
 type Section = {
   id: string;
   name: string;
   questionsCount: number;
   attemptlimit: number;
   durationMinutes?: number | null;
+  difficultyLevel?: number;
+  topics?: string[];
   markingScheme?: {
     correct: number;
     incorrect: number;
@@ -61,9 +72,6 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
   const [title, setTitle] = useState(templateToEdit?.title || "");
   const [description, setDescription] = useState(templateToEdit?.description || "");
   const [subject, setSubject] = useState(templateToEdit?.subject || "");
-  const [difficultyLevel, setDifficultyLevel] = useState<number>(
-    normalizeLegacyDifficulty(templateToEdit?.difficultyLevel ?? templateToEdit?.level)
-  );
   const [durationMinutes, setDurationMinutes] = useState<string>(
     templateToEdit?.durationMinutes?.toString() || "60"
   );
@@ -85,8 +93,10 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
   const [sections, setSections] = useState<Section[]>(
     templateToEdit?.sections?.length > 0
       ? templateToEdit.sections
-      : [{ id: "sec_1", name: "Section 1", questionsCount: 0, attemptlimit: 0 }]
+      : [{ id: "sec_1", name: "Section 1", questionsCount: 0, attemptlimit: 0, difficultyLevel: 0.5, topics: [] }]
   );
+
+  const computedDifficultyLevel = useMemo(() => getAverageDifficulty(sections, 0.5), [sections]);
 
   // Sync state when templateToEdit changes (Edit mode)
   useEffect(() => {
@@ -94,7 +104,7 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
     setTitle(templateToEdit?.title || "");
     setDescription(templateToEdit?.description || "");
     setSubject(templateToEdit?.subject || "");
-    setDifficultyLevel(normalizeLegacyDifficulty(templateToEdit?.difficultyLevel ?? templateToEdit?.level));
+    const baseDifficulty = normalizeLegacyDifficulty(templateToEdit?.difficultyLevel ?? templateToEdit?.level);
     setDurationMinutes(templateToEdit?.durationMinutes?.toString() || "60");
     setAttemptsAllowed(templateToEdit?.attemptsAllowed?.toString() || "3");
     setIsPublished(templateToEdit?.isPublished !== false);
@@ -109,22 +119,51 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
         ? templateToEdit.sections.map((s: any) => ({
           ...s,
           attemptlimit: s.attemptlimit ?? 0,
+          difficultyLevel: clampDifficulty(s?.difficultyLevel ?? normalizeLegacyDifficulty(s?.difficulty ?? s?.level ?? baseDifficulty)),
+          topics: Array.isArray(s?.topics) ? s.topics.map(String) : [],
         }))
-        : [{ id: "sec_1", name: "Section 1", questionsCount: 0, attemptlimit: 0 }]
+        : [{ id: "sec_1", name: "Section 1", questionsCount: 0, attemptlimit: 0, difficultyLevel: baseDifficulty, topics: [] }]
     );
   }, [open, templateToEdit]);
 
   const handleAddSection = () => {
-    setSections([...sections, { id: `sec_${Date.now()}`, name: `Section ${sections.length + 1}`, questionsCount: 0, attemptlimit: 0 }]);
+    setSections([
+      ...sections,
+      {
+        id: `sec_${Date.now()}`,
+        name: `Section ${sections.length + 1}`,
+        questionsCount: 0,
+        attemptlimit: 0,
+        difficultyLevel: computedDifficultyLevel,
+        topics: [],
+      },
+    ]);
   };
 
   const handleRemoveSection = (index: number) => {
     setSections(sections.filter((_, i) => i !== index));
   };
 
-  const handleSectionChange = (index: number, field: keyof Section, value: any) => {
+  const handleSectionEdit = (index: number, payload: {
+    name: string;
+    questionsCount: number;
+    attemptLimit?: number | null;
+    durationMinutes?: number | null;
+    difficultyLevel: number;
+    topics: string[];
+    markingScheme: Section["markingScheme"];
+  }) => {
     const newSections = [...sections];
-    newSections[index] = { ...newSections[index], [field]: value };
+    newSections[index] = {
+      ...newSections[index],
+      name: payload.name,
+      questionsCount: payload.questionsCount,
+      attemptlimit: payload.attemptLimit == null ? 0 : payload.attemptLimit,
+      durationMinutes: payload.durationMinutes ?? null,
+      difficultyLevel: clampDifficulty(payload.difficultyLevel),
+      topics: payload.topics || [],
+      markingScheme: payload.markingScheme,
+    };
     setSections(newSections);
   };
 
@@ -146,8 +185,8 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
         title: title.trim(),
         description: description.trim(),
         subject: subject.trim(),
-        level: getDifficultyLabel(difficultyLevel),
-        difficultyLevel,
+        level: getDifficultyLabel(computedDifficultyLevel),
+        difficultyLevel: computedDifficultyLevel,
         durationMinutes: Number(durationMinutes) || 0,
         attemptsAllowed: Number(attemptsAllowed) || 3,
         isPublished,
@@ -169,6 +208,8 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
             questionsCount: totalQ,
             attemptlimit: attemptLimit,
             durationMinutes: s.durationMinutes ? Number(s.durationMinutes) : null,
+            difficultyLevel: clampDifficulty(s.difficultyLevel),
+            topics: Array.isArray(s.topics) ? s.topics : [],
             markingScheme: s.markingScheme ? {
               correct: Number(s.markingScheme.correct),
               incorrect: Number(s.markingScheme.incorrect),
@@ -231,19 +272,9 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="space-y-2">
-              <Label>Difficulty Level</Label>
-              <div className="flex items-center gap-4">
-                <Slider
-                  value={[difficultyLevel]}
-                  onValueChange={(v) => setDifficultyLevel(v[0])}
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  className="flex-1 mt-1"
-                />
-              </div>
-              <span className={`text-sm font-semibold min-w-[70px] mt-1 text-right ${getDifficultyColor(difficultyLevel)}`}>
-                {difficultyLevel.toFixed(2)} — {getDifficultyLabel(difficultyLevel)}
+              <Label>Template Difficulty (avg of sections)</Label>
+              <span className={`text-sm font-semibold min-w-[70px] mt-1 text-right ${getDifficultyColor(computedDifficultyLevel)}`}>
+                {computedDifficultyLevel.toFixed(2)} — {getDifficultyLabel(computedDifficultyLevel)}
               </span>
             </div>
             <div className="space-y-2">
@@ -302,8 +333,26 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
             </div>
 
             {/* You can add Sections Here... This contains List of Sections added in the template */}
-            {sections.map((sec, index) => (
-              <div key={index} className="flex flex-col gap-3 p-3 bg-muted/10 border rounded-xl">
+
+            {/* This is Section List */}
+            {sections.map((sec,index)=>{
+              return <SectionCard 
+                key={index} 
+                sectionId={sec.id} 
+                sectionName={sec.name} 
+                questionCount={sec.questionsCount} 
+                attemptLimit={sec.attemptlimit}
+                durationMinutes={sec.durationMinutes}
+                sectionDifficulty={sec.difficultyLevel}
+                sectionTopics={sec.topics}
+                markingScheme={sec.markingScheme}
+                defaultMarkingScheme={markingScheme}
+                onEdit={(payload) => handleSectionEdit(index, payload)}
+                onRemove={() => handleRemoveSection(index)}
+              />
+            })}
+            {/* {sections.map((sec, index) => ( */}
+              {/* <div key={index} className="flex flex-col gap-3 p-3 bg-muted/10 border rounded-xl border-2 border-black">
                 <div className="flex items-end gap-3 flex-wrap">
                   <div className="flex-1 min-w-[150px] space-y-2">
                     <Label>Section Name</Label>
@@ -342,11 +391,11 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   )}
-                </div>
+                </div>  */}
 
                 {/* Section Marking Scheme Override */}
 
-                {sec.markingScheme && (
+                {/* {sec.markingScheme && (
                   <div className="flex items-center gap-4 bg-background p-2 rounded-lg border text-xs">
                     <div className="flex items-center gap-3">
                       <div className="flex items-center gap-1.5">
@@ -369,9 +418,9 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
                       </div>
                     </div>
                   </div>
-                )}
-              </div>
-            ))}
+                )}  */}
+              {/* </div> */}
+            {/* ))}  */}
           </div>
 
           <div className="space-y-2">
