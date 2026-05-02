@@ -13,6 +13,7 @@ import {
   Moon,
   Shield,
   ChevronLeft,
+  ChevronRight,
   FileText,
   Tag,
   Layers,
@@ -80,6 +81,7 @@ export default function AdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { isAdmin, loading } = useAdminCheck();
 
   // Protect admin routes
@@ -97,19 +99,28 @@ export default function AdminLayout() {
     );
   }
 
-  const Sidebar = ({ mobile = false }: { mobile?: boolean }) => (
+  const Sidebar = ({ mobile = false, collapsed = false }: { mobile?: boolean; collapsed?: boolean }) => (
     <div className={cn("flex flex-col h-full", mobile ? "pt-4" : "")}>
       {/* Logo */}
-      <div className="p-6 border-b border-border">
-        <Link to="/admin" className="flex items-center gap-3">
+      <div className={cn("p-6 border-b border-border", collapsed && !mobile && "px-3")}>
+        <div className={cn("flex items-center", collapsed && !mobile ? "justify-center" : "justify-between")}>
+        <Link to="/admin" className={cn("flex items-center gap-3", collapsed && !mobile && "justify-center")}>
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-orange-500 flex items-center justify-center">
             <Shield className="h-6 w-6 text-white" />
           </div>
+          {!collapsed && (
           <div>
             <h1 className="font-bold text-lg text-foreground">Admin Panel</h1>
             <p className="text-xs text-muted-foreground">Internal</p>
           </div>
+          )}
         </Link>
+        {!mobile && (
+          <Button variant="ghost" size="icon" onClick={() => setSidebarCollapsed((prev) => !prev)}>
+            {collapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronLeft className="h-5 w-5" />}
+          </Button>
+        )}
+        </div>
       </div>
 
       {/* Navigation */}
@@ -126,13 +137,15 @@ export default function AdminLayout() {
               onClick={() => mobile && setMobileMenuOpen(false)}
               className={cn(
                 "flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200",
+                collapsed && !mobile && "justify-center px-2",
                 isActive
                   ? "bg-primary/10 text-primary"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
               )}
+              title={collapsed && !mobile ? item.label : undefined}
             >
               <item.icon className="h-5 w-5" />
-              {item.label}
+              {(!collapsed || mobile) && item.label}
             </Link>
           );
         })}
@@ -142,11 +155,12 @@ export default function AdminLayout() {
       <div className="p-4 border-t border-border">
         <Button
           variant="ghost"
-          className="w-full justify-start gap-3 text-muted-foreground hover:text-destructive"
+          className={cn("w-full gap-3 text-muted-foreground hover:text-destructive", collapsed && !mobile ? "justify-center px-0" : "justify-start")}
           onClick={() => navigate("/login")}
+          title={collapsed && !mobile ? "Logout" : undefined}
         >
           <LogOut className="h-5 w-5" />
-          Logout
+          {(!collapsed || mobile) && "Logout"}
         </Button>
       </div>
     </div>
@@ -155,8 +169,8 @@ export default function AdminLayout() {
   return (
     <div className="min-h-screen bg-background">
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-64 lg:flex-col border-r border-border bg-card">
-        <Sidebar />
+      <aside className={cn("hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:flex-col border-r border-border bg-card transition-all duration-300", sidebarCollapsed ? "lg:w-20" : "lg:w-64")}>
+        <Sidebar collapsed={sidebarCollapsed} />
       </aside>
 
       {/* Mobile Header */}
@@ -186,7 +200,7 @@ export default function AdminLayout() {
       </header>
 
       {/* Main Content */}
-      <main className="lg:pl-64">
+      <main className={cn("transition-all duration-300", sidebarCollapsed ? "lg:pl-20" : "lg:pl-64")}>
         {/* Desktop Top Bar */}
         <div className="hidden lg:flex h-16 items-center justify-between border-b border-border bg-card/50 backdrop-blur-sm px-6 sticky top-0 z-40">
           <div className="flex items-center gap-4">

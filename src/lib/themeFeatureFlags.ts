@@ -1,4 +1,4 @@
-type ThemeId = "theme1" | "theme2" | "theme3";
+type ThemeId = "theme1" | "theme2" | "theme3" | "builder";
 
 const FALSE_LIKE_VALUES = new Set(["0", "false", "off", "no", "disabled"]);
 
@@ -19,12 +19,13 @@ export const themeFeatureFlags = {
 };
 
 function isKnownThemeId(value: unknown): value is ThemeId {
-  return value === "theme1" || value === "theme2" || value === "theme3";
+  return value === "theme1" || value === "theme2" || value === "theme3" || value === "builder";
 }
 
 export function isThemeUnlocked(themeId: ThemeId): boolean {
   if (themeId === "theme1") return themeFeatureFlags.theme1Unlocked;
   if (themeId === "theme3") return themeFeatureFlags.theme3Unlocked;
+  // "builder" and "theme2" are always available
   return true;
 }
 

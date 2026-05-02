@@ -4,6 +4,7 @@ import { useTenant } from "@/contexts/TenantProvider";
 import Theme1Home from "@/themes/coaching/theme1/TenantHome";
 import Theme2Home from "@/themes/coaching/theme2/TenantHome";
 import Theme3Home from "@/themes/coaching/theme3/TenantHome";
+import BuilderThemeHome from "@/themes/coaching/builder/TenantHome";
 
 export default function TenantHome() {
   const { tenant, loading } = useTenant();
@@ -27,6 +28,12 @@ export default function TenantHome() {
         </div>
       </div>
     );
+  }
+
+  const homepageSource = tenant?.websiteConfig?.homepageSource;
+  const hasPublishedBuilder = Boolean(tenant?.builderConfig?.sections?.length) && Boolean((tenant as any)?.builderConfig?.publishedAt);
+  if (homepageSource === "builder" || hasPublishedBuilder) {
+    return <BuilderThemeHome />;
   }
 
   const themeId = tenant?.websiteConfig?.themeId || "theme1";

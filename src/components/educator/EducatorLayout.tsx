@@ -11,6 +11,7 @@ import {
   LogOut,
   Menu,
   X,
+  ChevronLeft,
   ChevronRight,
   GitBranch,
   BookOpen,
@@ -54,6 +55,7 @@ function initials(name: string) {
 
 export default function EducatorLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const location = useLocation();
   const navigate = useNavigate();
@@ -157,15 +159,19 @@ export default function EducatorLayout() {
 
       <aside
         className={cn(
-          "fixed left-0 top-0 z-50 h-screen w-64 bg-card border-r border-border transition-transform duration-300 lg:translate-x-0 lg:static lg:top-0",
+          "fixed left-0 top-0 z-50 h-screen w-64 bg-card border-r border-border transition-all duration-300 lg:translate-x-0 lg:static lg:top-0",
+          sidebarCollapsed ? "lg:w-20" : "lg:w-64",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
         <div className="flex flex-col h-full">
           <div className="h-16 flex items-center justify-between px-4 border-b border-border">
-            <Link to="/" className="flex items-center gap-2">
+            <Link to="/" className={cn("flex items-center gap-2", sidebarCollapsed && "lg:justify-center lg:w-full")}>
               <img src={univLogo} alt="UNIV.LIVE" className="h-8 w-auto" />
             </Link>
+            <Button variant="ghost" size="icon" className="hidden lg:inline-flex" onClick={() => setSidebarCollapsed((prev) => !prev)}>
+              {sidebarCollapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronLeft className="h-5 w-5" />}
+            </Button>
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(false)}>
               <X className="h-5 w-5" />
             </Button>
@@ -181,8 +187,10 @@ export default function EducatorLayout() {
                   onClick={() => setSidebarOpen(false)}
                   className={cn(
                     "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 group relative overflow-hidden",
+                    sidebarCollapsed && "lg:justify-center lg:px-2",
                     active ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted"
                   )}
+                  title={sidebarCollapsed ? item.label : undefined}
                 >
                   {active && (
                     <motion.div
@@ -192,8 +200,8 @@ export default function EducatorLayout() {
                     />
                   )}
                   <item.icon className={cn("h-5 w-5 relative z-10", active && "text-white")} />
-                  <span className="relative z-10">{item.label}</span>
-                  {item.badge ? (
+                  {!sidebarCollapsed && <span className="relative z-10">{item.label}</span>}
+                  {!sidebarCollapsed && item.badge ? (
                     <Badge variant="secondary" className={cn("ml-auto relative z-10 text-xs", active && "bg-white/20 text-white")}>
                       {item.badge}
                     </Badge>
@@ -204,9 +212,14 @@ export default function EducatorLayout() {
           </nav>
 
           <div className="p-4 border-t border-border mt-auto">
-            <Button variant="ghost" className="w-full justify-start text-muted-foreground hover:text-destructive" onClick={handleLogout}>
-              <LogOut className="h-5 w-5 mr-3" />
-              Logout
+            <Button
+              variant="ghost"
+              className={cn("w-full text-muted-foreground hover:text-destructive", sidebarCollapsed ? "justify-center px-0" : "justify-start")}
+              onClick={handleLogout}
+              title={sidebarCollapsed ? "Logout" : undefined}
+            >
+              <LogOut className={cn("h-5 w-5", !sidebarCollapsed && "mr-3")} />
+              {!sidebarCollapsed && "Logout"}
             </Button>
           </div>
         </div>

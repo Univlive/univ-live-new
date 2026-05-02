@@ -13,6 +13,12 @@ export type TenantProfile = {
   contact?: { phone?: string; email?: string; address?: string };
   socials?: Record<string, string | null>;
   websiteConfig?: any;
+  builderConfig?: {
+    sections: any[];
+    themeKey: string;
+    instituteName: string;
+    publishedAt?: number;
+  };
   testDefaults?: {
     attemptsAllowed?: number;
   };
@@ -69,6 +75,7 @@ async function fetchTenantProfile(tenantSlug: string | null): Promise<TenantProf
     },
     socials: websiteConfig?.socials || data?.socials,
     websiteConfig,
+    builderConfig: data?.builderConfig || null,
     testDefaults: data?.testDefaults || {},
   };
 }

@@ -17,6 +17,7 @@ import {
   Bell,
   Moon,
   Sun,
+  ChevronLeft,
   ChevronRight,
   Search,
   BookOpen,
@@ -75,6 +76,7 @@ function safeStr(v: any, fallback = "") {
 
 export default function StudentLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
@@ -233,7 +235,8 @@ export default function StudentLayout() {
       {/* Sidebar: sticky + no scroll */}
       <aside
         className={cn(
-          "fixed left-0 top-0 z-50 h-screen w-64 bg-card border-r border-border transition-transform duration-300 lg:translate-x-0 lg:static",
+          "fixed left-0 top-0 z-50 h-screen w-64 bg-card border-r border-border transition-all duration-300 lg:translate-x-0 lg:static",
+          sidebarCollapsed ? "lg:w-20" : "lg:w-64",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
@@ -244,6 +247,9 @@ export default function StudentLayout() {
               
               {/* <span className="font-display font-bold text-lg tracking-tight">Student Portal</span> */}
             </div>
+            <Button variant="ghost" size="icon" className="hidden lg:inline-flex" onClick={() => setSidebarCollapsed((prev) => !prev)}>
+              {sidebarCollapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronLeft className="h-5 w-5" />}
+            </Button>
 
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(false)}>
               <X className="h-5 w-5" />
@@ -251,7 +257,7 @@ export default function StudentLayout() {
           </div>
 
           {/* Student Info */}
-          <div className="p-4 border-b border-border shrink-0">
+          <div className={cn("p-4 border-b border-border shrink-0", sidebarCollapsed && "lg:hidden")}>
             <div className="flex items-center gap-3 p-3 rounded-xl bg-pastel-mint">
               <Avatar className="h-10 w-10 border-2 border-primary/20">
                 <AvatarImage src={avatarUrl} />
@@ -275,8 +281,10 @@ export default function StudentLayout() {
                   onClick={() => setSidebarOpen(false)}
                   className={cn(
                     "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group relative overflow-hidden",
+                    sidebarCollapsed && "lg:justify-center lg:px-2",
                     active ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted"
                   )}
+                  title={sidebarCollapsed ? item.label : undefined}
                 >
                   {active && (
                     <motion.div
@@ -286,11 +294,11 @@ export default function StudentLayout() {
                     />
                   )}
                   <item.icon className={cn("h-5 w-5 relative z-10", active && "text-white")} />
-                  <span className="relative z-10">{item.label}</span>
+                  {!sidebarCollapsed && <span className="relative z-10">{item.label}</span>}
                   {item.badge != null && (
                     <Badge
                       variant="secondary"
-                      className={cn("ml-auto relative z-10 text-xs", active && "bg-white/20 text-white")}
+                      className={cn("ml-auto relative z-10 text-xs", active && "bg-white/20 text-white", sidebarCollapsed && "lg:hidden")}
                     >
                       {item.badge}
                     </Badge>
@@ -306,11 +314,12 @@ export default function StudentLayout() {
           <div className="p-4 border-t border-border shrink-0">
             <Button
               variant="ghost"
-              className="w-full justify-start text-muted-foreground hover:text-destructive rounded-xl"
+              className={cn("w-full text-muted-foreground hover:text-destructive rounded-xl", sidebarCollapsed ? "justify-center px-0" : "justify-start")}
               onClick={handleLogout}
+              title={sidebarCollapsed ? "Logout" : undefined}
             >
-              <LogOut className="h-5 w-5 mr-3" />
-              Logout
+              <LogOut className={cn("h-5 w-5", !sidebarCollapsed && "mr-3")} />
+              {!sidebarCollapsed && "Logout"}
             </Button>
           </div>
         </div>
