@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   collection,
   doc,
@@ -129,6 +130,7 @@ async function postWithToken(firebaseUser: any, path: string, body: Record<strin
 
 export default function SeatManagement() {
   const { firebaseUser } = useAuth();
+  const [searchParams] = useSearchParams();
 
   // Institute selector
   const [allInstitutes, setAllInstitutes] = useState<InstituteOption[]>([]);
@@ -182,9 +184,9 @@ export default function SeatManagement() {
 
   // Division controls
   const [maxBranchesInput, setMaxBranchesInput] = useState(5);
-  const [allowedSubjectIds, setAllowedSubjectIds] = useState<string[]>([]);
+  const [allowedCourseIds, setAllowedCourseIds] = useState<string[]>([]);
   const [savingDivision, setSavingDivision] = useState(false);
-  const [allSubjects, setAllSubjects] = useState<{ id: string; name: string }[]>([]);
+  const [allCourses, setAllCourses] = useState<{ id: string; name: string }[]>([]);
 
   // AI config
   const [chatTokenLimit, setChatTokenLimit] = useState(100000);
@@ -207,7 +209,7 @@ export default function SeatManagement() {
     );
   }, [allInstitutes, comboSearch]);
 
-  // Load all institutes on mount
+  // Load all institutes on mount; pre-select educator from ?educatorId param
   useEffect(() => {
     setLoadingInstitutes(true);
     getDocs(query(collection(db, "users"), where("role", "==", "EDUCATOR")))
@@ -224,6 +226,8 @@ export default function SeatManagement() {
         });
         list.sort((a, b) => a.displayName.localeCompare(b.displayName));
         setAllInstitutes(list);
+        const paramId = searchParams.get("educatorId");
+        if (paramId) setTargetId(paramId);
       })
       .finally(() => setLoadingInstitutes(false));
   }, []);
@@ -239,10 +243,10 @@ export default function SeatManagement() {
     });
   }, []);
 
-  // Load global subjects
+  // Load global courses
   useEffect(() => {
-    getDocs(collection(db, "subjects")).then((snap) =>
-      setAllSubjects(snap.docs.map((d) => ({ id: d.id, name: (d.data() as any).name })))
+    getDocs(collection(db, "courses")).then((snap) =>
+      setAllCourses(snap.docs.map((d) => ({ id: d.id, name: (d.data() as any).name })))
     );
   }, []);
 
@@ -250,7 +254,7 @@ export default function SeatManagement() {
   useEffect(() => {
     if (!educator) return;
     setMaxBranchesInput(educator.maxBranches ?? 5);
-    setAllowedSubjectIds(educator.allowedSubjectIds ?? []);
+    setAllowedCourseIds((educator as any).allowedCourseIds ?? []);
     setChatTokenLimit((educator as any).chatDailyTokenLimit ?? 100000);
     setDppDailyLimit((educator as any).dppDailyLimit ?? 3);
   }, [educator]);
@@ -480,7 +484,7 @@ export default function SeatManagement() {
     try {
       await updateDoc(doc(db, "educators", targetId), {
         maxBranches: maxBranchesInput,
-        allowedSubjectIds,
+        allowedCourseIds,
         updatedAt: serverTimestamp(),
       });
       toast.success("Division controls saved");
@@ -823,23 +827,23 @@ export default function SeatManagement() {
                 <Input type="number" min={1} value={maxBranchesInput} onChange={(e) => setMaxBranchesInput(Number(e.target.value))} className="max-w-xs mt-1" />
               </div>
               <div>
-                <Label className="text-sm text-muted-foreground block mb-2">Allowed Subjects (empty = all)</Label>
+                <Label className="text-sm text-muted-foreground block mb-2">Allowed Courses (empty = all)</Label>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {allSubjects.map((s) => (
-                    <label key={s.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted px-2 py-1 rounded text-sm">
+                  {allCourses.map((c) => (
+                    <label key={c.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted px-2 py-1 rounded text-sm">
                       <input
                         type="checkbox"
-                        checked={allowedSubjectIds.includes(s.id)}
+                        checked={allowedCourseIds.includes(c.id)}
                         onChange={(e) =>
-                          setAllowedSubjectIds((prev) =>
-                            e.target.checked ? [...prev, s.id] : prev.filter((x) => x !== s.id)
+                          setAllowedCourseIds((prev) =>
+                            e.target.checked ? [...prev, c.id] : prev.filter((x) => x !== c.id)
                           )
                         }
                       />
-                      {s.name}
+                      {c.name}
                     </label>
                   ))}
-                  {allSubjects.length === 0 && <p className="text-sm text-muted-foreground col-span-3">No subjects defined yet.</p>}
+                  {allCourses.length === 0 && <p className="text-sm text-muted-foreground col-span-3">No courses defined yet.</p>}
                 </div>
               </div>
               <Button onClick={saveDivisionControls} disabled={savingDivision}>

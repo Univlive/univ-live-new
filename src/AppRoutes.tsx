@@ -25,6 +25,7 @@ import AdminTestManager from "./pages/AdminTestManager";
 
 // Admin pages you added in /pages/admin
 import AdminDashboard from "@/pages/admin/Dashboard";
+import AdminAnalytics from "@/pages/admin/Analytics";
 import AdminQuestions from "@/pages/admin/Questions";
 import AdminTestBank from "@/pages/admin/TestBank";
 import AdminTestForm from "@/pages/admin/TestForm";
@@ -47,6 +48,7 @@ import StudentChatbot from "@/pages/student/StudentChatbot";
 // Educator Dashboard
 import EducatorLayout from "@/components/educator/EducatorLayout";
 import EducatorDashboard from "@/pages/educator/Dashboard";
+import EducatorAnalytics from "@/pages/educator/Analytics";
 import Learners from "@/pages/educator/Learners";
 import LearnerDetails from "@/pages/educator/LearnerDetails";
 import TestSeries from "@/pages/educator/TestSeries/TestSeries";
@@ -58,7 +60,9 @@ import Billing from "@/pages/educator/Billing";
 import Settings from "@/pages/educator/Settings";
 import Divisions from "@/pages/educator/Divisions";
 import Join from "@/pages/Join";
+import Impersonate from "@/pages/Impersonate";
 import EducatorQuestionBank from "@/pages/educator/QuestionBank";
+import InstituteBuilder from "@/pages/educator/InstituteBuilder";
 
 // Student Dashboard
 import StudentLayout from "@/pages/student/StudentLayout";
@@ -78,7 +82,8 @@ export default function AppRoutes() {
 
   return (
     <Routes>
-      {/* --- PUBLIC INVITE ROUTE --- */}
+      {/* --- PUBLIC ROUTES --- */}
+      <Route path="/impersonate" element={<Impersonate />} />
       <Route path="/join/:token" element={<Join />} />
 
       {/* --- SHARED STUDENT ROUTES (Available on both Tenant and Main Platform) --- */}
@@ -135,6 +140,8 @@ export default function AppRoutes() {
             <Route path="divisions" element={<Divisions />} />
             <Route path="content" element={<EducatorContent />} />
             <Route path="dpp" element={<DppGenerator />} />
+            <Route path="analytics" element={<EducatorAnalytics />} />
+            <Route path="website-builder" element={<InstituteBuilder />} />
           </Route>
 
           <Route path="*" element={<NotFound />} />
@@ -162,6 +169,7 @@ export default function AppRoutes() {
         >
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<AdminDashboard />} />
+          <Route path="analytics" element={<AdminAnalytics />} />
 
           {/* Keeping your current lovable routes to avoid changing your files */}
           <Route path="tests" element={<AdminTestBank />} />
@@ -204,6 +212,8 @@ export default function AppRoutes() {
             <Route path="divisions" element={<Divisions />} />
             <Route path="content" element={<EducatorContent />} />
             <Route path="dpp" element={<DppGenerator />} />
+            <Route path="analytics" element={<EducatorAnalytics />} />
+            <Route path="website-builder" element={<InstituteBuilder />} />
           </Route>
 
           <Route path="*" element={<NotFound />} />

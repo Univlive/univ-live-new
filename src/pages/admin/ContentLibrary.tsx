@@ -42,7 +42,8 @@ import {
 } from "@/components/ui/table";
 import { uploadToImageKit, getContentUploadLimit } from "@/lib/imagekitUpload";
 
-type Subject = { id: string; name: string };
+type Course = { id: string; name: string };
+type Subject = { id: string; name: string; courseId?: string };
 type ContentItem = {
   id: string;
   type: "book" | "note";
@@ -69,10 +70,12 @@ export default function ContentLibrary() {
   const { profile } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const [courses, setCourses] = useState<Course[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [items, setItems] = useState<ContentItem[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [filterCourse, setFilterCourse] = useState("all");
   const [filterSubject, setFilterSubject] = useState("all");
   const [filterType, setFilterType] = useState("all");
 
@@ -84,13 +87,17 @@ export default function ContentLibrary() {
   // Form state
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [uploadCourseId, setUploadCourseId] = useState("");
   const [subjectId, setSubjectId] = useState("");
   const [type, setType] = useState<"book" | "note">("book");
   const [file, setFile] = useState<File | null>(null);
 
   useEffect(() => {
+    getDocs(query(collection(db, "courses"), orderBy("name"))).then((snap) => {
+      setCourses(snap.docs.map((d) => ({ id: d.id, name: d.data().name as string })));
+    });
     getDocs(query(collection(db, "subjects"), orderBy("name"))).then((snap) => {
-      setSubjects(snap.docs.map((d) => ({ id: d.id, name: d.data().name as string })));
+      setSubjects(snap.docs.map((d) => ({ id: d.id, name: d.data().name as string, courseId: d.data().courseId as string | undefined })));
     });
 
     const unsub = onSnapshot(
@@ -133,6 +140,7 @@ export default function ContentLibrary() {
   function openUploadDialog() {
     setTitle("");
     setDescription("");
+    setUploadCourseId("");
     setSubjectId("");
     setType("book");
     setFile(null);
@@ -190,7 +198,23 @@ export default function ContentLibrary() {
     }
   }
 
+  // Subjects visible in filter dropdown (scoped to selected course)
+  const visibleSubjects = filterCourse === "all"
+    ? subjects
+    : subjects.filter((s) => s.courseId === filterCourse);
+
+  // Subjects available in upload dialog (scoped to selected upload course)
+  const uploadSubjects = uploadCourseId
+    ? subjects.filter((s) => s.courseId === uploadCourseId)
+    : subjects;
+
+  // IDs of subjects under the selected filter course (for course-level filtering)
+  const courseSubjectIds = filterCourse === "all"
+    ? null
+    : new Set(subjects.filter((s) => s.courseId === filterCourse).map((s) => s.id));
+
   const filtered = items.filter((i) => {
+    if (courseSubjectIds && !courseSubjectIds.has(i.subjectId)) return false;
     if (filterSubject !== "all" && i.subjectId !== filterSubject) return false;
     if (filterType !== "all" && i.type !== filterType) return false;
     return true;
@@ -216,20 +240,32 @@ export default function ContentLibrary() {
 
       {/* Filters */}
       <div className="flex gap-3 flex-wrap">
+        <Select value={filterCourse} onValueChange={(v) => { setFilterCourse(v); setFilterSubject("all"); }}>
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="All Courses" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Courses</SelectItem>
+            {courses.map((c) => (
+              <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
         <Select value={filterSubject} onValueChange={setFilterSubject}>
-          <SelectTrigger className="w-48">
+          <SelectTrigger className="w-44">
             <SelectValue placeholder="All Subjects" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Subjects</SelectItem>
-            {subjects.map((s) => (
+            {visibleSubjects.map((s) => (
               <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
             ))}
           </SelectContent>
         </Select>
 
         <Select value={filterType} onValueChange={setFilterType}>
-          <SelectTrigger className="w-40">
+          <SelectTrigger className="w-36">
             <SelectValue placeholder="All Types" />
           </SelectTrigger>
           <SelectContent>
@@ -313,13 +349,27 @@ export default function ContentLibrary() {
             </div>
 
             <div className="space-y-1">
-              <Label>Subject</Label>
-              <Select value={subjectId} onValueChange={setSubjectId}>
+              <Label>Course</Label>
+              <Select value={uploadCourseId} onValueChange={(v) => { setUploadCourseId(v); setSubjectId(""); }}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select subject" />
+                  <SelectValue placeholder="Select course" />
                 </SelectTrigger>
                 <SelectContent>
-                  {subjects.map((s) => (
+                  {courses.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label>Subject</Label>
+              <Select value={subjectId} onValueChange={setSubjectId} disabled={uploadSubjects.length === 0}>
+                <SelectTrigger>
+                  <SelectValue placeholder={uploadSubjects.length === 0 ? "Select a course first" : "Select subject"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {uploadSubjects.map((s) => (
                     <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                   ))}
                 </SelectContent>

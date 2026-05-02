@@ -24,8 +24,10 @@ import {
   Facebook,
   Globe,
   Mail,
-  Phone
+  Phone,
+  Wand2,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -96,6 +98,7 @@ type AvailableTest = {
 
 export default function WebsiteSettings() {
   const { firebaseUser } = useAuth();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -429,6 +432,14 @@ export default function WebsiteSettings() {
                   <span className="font-semibold text-white">https://{tenant.tenantSlug}.univ.live</span>
                 </p>
                 <div className="flex flex-wrap gap-3 mt-4">
+                  <Button
+                    size="sm"
+                    className="bg-white/20 hover:bg-white/30 text-white border-0"
+                    onClick={() => navigate("/educator/website-builder")}
+                  >
+                    <Wand2 className="mr-2 h-4 w-4" />
+                    Open Website Builder
+                  </Button>
                   <Button
                     size="sm"
                     className="bg-white/20 hover:bg-white/30 text-white border-0"

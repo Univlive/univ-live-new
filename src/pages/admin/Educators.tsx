@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { collection, doc, getDoc, getDocs, query, updateDoc, where, orderBy, Timestamp } from "firebase/firestore";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { collection, getDocs, query, where, orderBy, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthProvider";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Check, Copy, Loader2, Plus, Users, Mail, ExternalLink, BookOpen, Bot } from "lucide-react";
+import { Check, Copy, Loader2, Plus, Users, Mail, ExternalLink, BookOpen, Settings, Search } from "lucide-react";
 import { toast } from "sonner";
 
 type Educator = {
@@ -40,6 +41,7 @@ type Test = {
 
 export default function AdminEducators() {
   const { firebaseUser } = useAuth();
+  const navigate = useNavigate();
 
   const [educators, setEducators] = useState<Educator[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,7 +58,7 @@ export default function AdminEducators() {
   const [credCopied, setCredCopied] = useState(false);
 
   const [selectedEducator, setSelectedEducator] = useState<Educator | null>(null);
-  
+
   const [students, setStudents] = useState<Student[]>([]);
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [studentsOpen, setStudentsOpen] = useState(false);
@@ -65,9 +67,18 @@ export default function AdminEducators() {
   const [loadingTests, setLoadingTests] = useState(false);
   const [testsOpen, setTestsOpen] = useState(false);
 
-  const [chatLimitOpen, setChatLimitOpen] = useState(false);
-  const [chatLimitValue, setChatLimitValue] = useState("100000");
-  const [savingLimit, setSavingLimit] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const filteredEducators = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    if (!q) return educators;
+    return educators.filter(
+      (e) =>
+        e.displayName.toLowerCase().includes(q) ||
+        e.email.toLowerCase().includes(q) ||
+        (e.tenantSlug || "").toLowerCase().includes(q)
+    );
+  }, [educators, search]);
 
   async function loadEducators() {
     setLoading(true);
@@ -137,34 +148,6 @@ export default function AdminEducators() {
     }
   }
 
-  async function openChatLimit(edu: Educator) {
-    setSelectedEducator(edu);
-    try {
-      const snap = await getDoc(doc(db, "educators", edu.uid));
-      const limit = (snap.exists() ? snap.data()?.chatDailyTokenLimit : undefined) ?? 100000;
-      setChatLimitValue(String(limit));
-    } catch {
-      setChatLimitValue("100000");
-    }
-    setChatLimitOpen(true);
-  }
-
-  async function saveChatLimit() {
-    if (!selectedEducator) return;
-    const val = parseInt(chatLimitValue, 10);
-    if (isNaN(val) || val < 0) return toast.error("Enter a valid number");
-    setSavingLimit(true);
-    try {
-      await updateDoc(doc(db, "educators", selectedEducator.uid), { chatDailyTokenLimit: val });
-      toast.success("Chat limit updated");
-      setChatLimitOpen(false);
-    } catch (e: any) {
-      toast.error(e.message || "Failed to update");
-    } finally {
-      setSavingLimit(false);
-    }
-  }
-
   async function viewTests(edu: Educator) {
     setSelectedEducator(edu);
     setTestsOpen(true);
@@ -219,6 +202,26 @@ export default function AdminEducators() {
     setCreated(null); setCredCopied(false);
   }
 
+  async function handleImpersonate(uid: string, name: string) {
+    if (!firebaseUser) return;
+    try {
+      const token = await firebaseUser.getIdToken();
+      const base = import.meta.env.VITE_MONKEY_KING_API_URL || "";
+      const res = await fetch(`${base}/api/admin/impersonate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ target_uid: uid }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.detail || "Failed");
+      const key = `imp_${Date.now()}`;
+      localStorage.setItem(key, JSON.stringify({ token: data.custom_token, name, expires: Date.now() + 60000 }));
+      window.open(`/impersonate?k=${key}`, "_blank");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to impersonate");
+    }
+  }
+
   function copyCredentials() {
     if (!created) return;
     navigator.clipboard.writeText(`Email: ${created.email}\nPassword: ${created.password}\nPortal: https://${created.tenantSlug}.univ.live`);
@@ -253,6 +256,16 @@ export default function AdminEducators() {
         </div>
       </div>
 
+      <div className="relative max-w-sm">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name, email or slug…"
+          className="pl-9"
+        />
+      </div>
+
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -273,14 +286,14 @@ export default function AdminEducators() {
                     <p className="mt-2 text-muted-foreground">Loading educators...</p>
                   </TableCell>
                 </TableRow>
-              ) : educators.length === 0 ? (
+              ) : filteredEducators.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
-                    No educators found.
+                    {search ? "No educators match your search." : "No educators found."}
                   </TableCell>
                 </TableRow>
               ) : (
-                educators.map((edu) => (
+                filteredEducators.map((edu) => (
                   <TableRow key={edu.uid}>
                     <TableCell>
                       <div className="flex flex-col">
@@ -322,8 +335,11 @@ export default function AdminEducators() {
                         <Button variant="ghost" size="sm" onClick={() => viewTests(edu)}>
                           Tests
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => openChatLimit(edu)}>
-                          <Bot className="mr-1 h-3 w-3" /> Chat Limit
+                        <Button variant="ghost" size="sm" onClick={() => navigate(`/admin/seat-management?educatorId=${edu.uid}`)}>
+                          <Settings className="mr-1 h-3 w-3" /> Config
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleImpersonate(edu.uid, edu.displayName)}>
+                          Login as
                         </Button>
                       </div>
                     </TableCell>
@@ -362,6 +378,7 @@ export default function AdminEducators() {
                     <TableHead>Email / Credentials</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Enrolled On</TableHead>
+                    <TableHead />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -381,6 +398,11 @@ export default function AdminEducators() {
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {fmtTs(s.joinedAt)}
+                      </TableCell>
+                      <TableCell>
+                        <Button variant="ghost" size="sm" onClick={() => handleImpersonate(s.uid, s.name)}>
+                          Login as
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -511,39 +533,6 @@ export default function AdminEducators() {
         </DialogContent>
       </Dialog>
 
-      {/* Chat Token Limit Dialog */}
-      <Dialog open={chatLimitOpen} onOpenChange={setChatLimitOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Bot className="h-5 w-5" />
-              AI Chat Daily Limit — {selectedEducator?.displayName}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 pt-2">
-            <div className="space-y-1">
-              <Label>Daily token limit</Label>
-              <Input
-                type="number"
-                min={0}
-                value={chatLimitValue}
-                onChange={(e) => setChatLimitValue(e.target.value)}
-                placeholder="e.g. 100000"
-              />
-              <p className="text-xs text-muted-foreground">
-                Shared across all students in this institute per day. Resets at midnight.
-              </p>
-            </div>
-            <div className="flex gap-2 justify-end">
-              <Button variant="outline" onClick={() => setChatLimitOpen(false)}>Cancel</Button>
-              <Button onClick={saveChatLimit} disabled={savingLimit}>
-                {savingLimit && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Save
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

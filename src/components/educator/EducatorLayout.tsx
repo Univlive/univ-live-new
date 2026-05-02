@@ -15,6 +15,9 @@ import {
   GitBranch,
   BookOpen,
   Zap,
+  Database,
+  BarChart3,
+  Wand2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -34,6 +37,7 @@ import { useAuth } from "@/contexts/AuthProvider";
 import { signOut } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
+import ImpersonationBanner from "@/components/ImpersonationBanner";
 
 type SidebarItem = {
   icon: any;
@@ -89,10 +93,13 @@ export default function EducatorLayout() {
   const sidebarItems = useMemo<SidebarItem[]>(
     () => [
       { icon: LayoutDashboard, label: "Dashboard", href: "/educator/dashboard" },
+      { icon: BarChart3, label: "Analytics", href: "/educator/analytics" },
       { icon: GitBranch, label: "Student Management", href: "/educator/divisions" },
       { icon: FileText, label: "Test Series", href: "/educator/test-series" },
+      { icon: Database, label: "Question Bank", href: "/educator/question-bank" },
       { icon: Zap, label: "DPP Generator", href: "/educator/dpp" },
       { icon: BookOpen, label: "Content", href: "/educator/content" },
+      { icon: Wand2, label: "Website Builder", href: "/educator/website-builder" },
       { icon: CreditCard, label: "Billing & Plan", href: "/educator/billing" },
     ],
     []
@@ -133,7 +140,9 @@ export default function EducatorLayout() {
   };
 
   return (
-    <div className="h-screen bg-background flex overflow-hidden">
+    <div className="h-screen bg-background flex flex-col overflow-hidden">
+      <ImpersonationBanner />
+      <div className="flex flex-1 overflow-hidden">
       <AnimatePresence>
         {sidebarOpen && (
           <motion.div
@@ -269,6 +278,7 @@ export default function EducatorLayout() {
             <Outlet />
           </motion.div>
         </main>
+      </div>
       </div>
     </div>
   );

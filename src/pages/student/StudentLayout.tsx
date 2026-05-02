@@ -49,6 +49,7 @@ import {
   where,
 } from "firebase/firestore";
 import { getAuth, signOut } from "firebase/auth";
+import ImpersonationBanner from "@/components/ImpersonationBanner";
 
 type UserDoc = {
   displayName?: string;
@@ -213,7 +214,9 @@ export default function StudentLayout() {
 
   // Root fixed height + overflow hidden => only main scrolls
   return (
-    <div className="h-screen bg-background flex overflow-hidden">
+    <div className="h-screen bg-background flex flex-col overflow-hidden">
+      <ImpersonationBanner />
+      <div className="flex flex-1 overflow-hidden">
       {/* Mobile Overlay */}
       <AnimatePresence>
         {sidebarOpen && (
@@ -418,6 +421,7 @@ export default function StudentLayout() {
             <Outlet />
           </motion.div>
         </main>
+      </div>
       </div>
     </div>
   );

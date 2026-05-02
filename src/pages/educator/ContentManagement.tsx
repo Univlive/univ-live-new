@@ -10,6 +10,7 @@ import {
   orderBy,
   query,
   Timestamp,
+  where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthProvider";
@@ -113,7 +114,7 @@ export default function ContentManagement() {
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
-  const [allowedSubjectIds, setAllowedSubjectIds] = useState<string[]>([]);
+  const [allowedCourseIds, setAllowedCourseIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploadLimitMB, setUploadLimitMB] = useState(20);
 
@@ -143,7 +144,7 @@ export default function ContentManagement() {
 
     getDoc(doc(db, "educators", educatorId)).then((snap) => {
       if (snap.exists()) {
-        setAllowedSubjectIds(snap.data().allowedSubjectIds ?? []);
+        setAllowedCourseIds(snap.data().allowedCourseIds ?? []);
       }
     });
 
@@ -200,14 +201,20 @@ export default function ContentManagement() {
   }, [educatorId, selectedBranchId, selectedCourseId]);
 
   async function openImport() {
-    if (allowedSubjectIds.length === 0) {
-      return toast.error("No subjects assigned to your account");
+    const libSnap = await getDocs(query(collection(db, "admin_library"), orderBy("createdAt", "desc")));
+    const all = libSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AdminLibraryItem, "id">) }));
+
+    if (allowedCourseIds.length === 0) {
+      // No restriction — show everything
+      setAdminItems(all);
+    } else {
+      // Resolve subjects that belong to the educator's allowed courses
+      const subjectSnap = await getDocs(
+        query(collection(db, "subjects"), where("courseId", "in", allowedCourseIds))
+      );
+      const allowedSubjectIds = subjectSnap.docs.map((d) => d.id);
+      setAdminItems(all.filter((i) => allowedSubjectIds.includes(i.subjectId)));
     }
-    const snap = await getDocs(
-      query(collection(db, "admin_library"), orderBy("createdAt", "desc"))
-    );
-    const all = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AdminLibraryItem, "id">) }));
-    setAdminItems(all.filter((i) => allowedSubjectIds.includes(i.subjectId)));
     setImportOpen(true);
   }
 
@@ -500,7 +507,7 @@ export default function ContentManagement() {
           </DialogHeader>
           {adminItems.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">
-              No admin content available for your subjects
+              No admin content available for your assigned courses
             </p>
           ) : (
             <Table>

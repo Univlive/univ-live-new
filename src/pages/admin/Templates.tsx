@@ -82,7 +82,7 @@ function fmtDate(ts?: Timestamp | null) {
 }
 
 export default function Templates() {
-	// const navigate = useNavigate();
+	const navigate = useNavigate();
 	const { profile, loading: authLoading } = useAuth();
 
 	const [loading, setLoading] = useState(true);
@@ -298,13 +298,17 @@ export default function Templates() {
 					<p className="text-muted-foreground text-sm">Create and publish test templates available for educators</p>
 				</div>
 
-				{/* Create Template Button Top Right one */}
-				<Button className="gradient-bg text-white" onClick={() => {
-					setTemplateToEdit(null);
-					setModalOpen(true);
-				}}>
-					<Plus className="h-4 w-4 mr-2" /> Create Template
-				</Button>
+				<div className="flex items-center gap-2">
+					<Button variant="outline" onClick={() => navigate("/admin/dpp-template")}>
+						DPP Template
+					</Button>
+					<Button className="gradient-bg text-white" onClick={() => {
+						setTemplateToEdit(null);
+						setModalOpen(true);
+					}}>
+						<Plus className="h-4 w-4 mr-2" /> Create Template
+					</Button>
+				</div>
 			</div>
 
 			<div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

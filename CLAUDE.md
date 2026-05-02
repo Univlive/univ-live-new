@@ -47,7 +47,8 @@ Multi-tenant SaaS platform for coaching institutes. Built with React + TypeScrip
 
 ### Main Domain
 - `/` — marketing landing page
-- `/admin` → `/admin/login` → admin dashboard
+- `/admin` → `/admin/login` → admin dashboard (revenue, educators, students, tests taken, active trials)
+- `/admin/analytics` — platform activity: 7-day attempts chart, today's engagement, recent activity feed
 - `/admin/educators` — educator management (create educators here)
 - `/admin/plans`, `/admin/coupons`, `/admin/payment-logs`, `/admin/seats`, `/admin/subjects`
 - `/admin/content` — Admin content library (books/notes per subject)
@@ -57,8 +58,11 @@ Multi-tenant SaaS platform for coaching institutes. Built with React + TypeScrip
 - `/login` — educator + student login
 - `/signup` — student signup via invite token
 - `/educator/*` — educator portal (dashboard, learners, billing, tests, content, etc.)
+- `/educator/dashboard` — focused: students count, live tests, avg score, active codes; quick actions
+- `/educator/analytics` — deep analytics: student growth, attempts chart, top performers, subject heatmap (existing Analytics.tsx, now routed)
 - `/educator/content` — per-course content management; import from admin library
 - `/student/*` — student portal (dashboard, tests, results, rankings, content)
+- `/student/dashboard` — live tests grid, resume in-progress, rank + avg score, leaderboard preview (top 5), score trend
 - `/student/content` — view books/notes for enrolled course
 
 ## Multi-Tenant Theming
