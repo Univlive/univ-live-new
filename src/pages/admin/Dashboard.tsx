@@ -20,6 +20,7 @@ import { toast } from "sonner";
 
 import { useAuth } from "@/contexts/AuthProvider";
 import { db } from "@/lib/firebase";
+import { resolveAttemptScore } from "@/lib/attemptScore";
 import {
   Timestamp,
   collection,
@@ -156,11 +157,8 @@ export default function AdminDashboard() {
         const a = d.data() as any;
         const testTitle = String(a?.testTitle || "Test");
         const status = String(a?.status || "submitted");
-        const score = a?.score != null ? Number(a.score) : null;
-        const maxScore = a?.maxScore != null ? Number(a.maxScore) : null;
-
-        const scoreText =
-          score != null && maxScore != null ? ` • Score ${score}/${maxScore}` : score != null ? ` • Score ${score}` : "";
+        const { score, maxScore } = resolveAttemptScore(a);
+        const scoreText = maxScore > 0 ? ` • Score ${score}/${maxScore}` : score !== 0 ? ` • Score ${score}` : "";
 
         return {
           id: d.id,

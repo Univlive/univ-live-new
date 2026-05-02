@@ -28,6 +28,9 @@ type AttemptDoc = {
   maxScore?: number;
   accuracy?: number; // may be 0-1 OR 0-100 depending on earlier writes
   timeTakenSec?: number;
+  correctCount?: number;
+  incorrectCount?: number;
+  unansweredCount?: number;
 
   rank?: number;
   totalParticipants?: number;
@@ -113,14 +116,22 @@ export default function StudentAttempts() {
 
           const status = mapStatus(data.status, startedAtMs, durationSec);
 
+          const correctCount = Number(data.correctCount ?? 0);
+          const incorrectCount = Number(data.incorrectCount ?? 0);
+          const unansweredCount = Number(data.unansweredCount ?? 0);
+          const hasCountData = correctCount > 0 || incorrectCount > 0 || unansweredCount > 0;
+          const totalQuestions = hasCountData ? correctCount + incorrectCount + unansweredCount : 0;
+          const score = hasCountData ? correctCount * 5 - incorrectCount * 1 : Number(data.score ?? 0);
+          const maxScore = hasCountData ? totalQuestions * 5 : Number(data.maxScore ?? 0);
+
           return {
             id: d.id,
             testId: String(data.testId || ""),
             testTitle: String(data.testTitle || "Untitled Test"),
             subject: String(data.subject || "General"),
 
-            score: Number(data.score ?? 0),
-            maxScore: Number(data.maxScore ?? 0),
+            score,
+            maxScore,
 
             accuracy: normalizeAccuracyPercent(data.accuracy),
 

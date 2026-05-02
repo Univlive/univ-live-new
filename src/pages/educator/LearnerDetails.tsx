@@ -26,6 +26,7 @@ import { useAuth } from "@/contexts/AuthProvider";
 import { db } from "@/lib/firebase";
 import { collection, doc, getDoc, onSnapshot, query, updateDoc, where } from "firebase/firestore";
 import { toast } from "sonner";
+import { resolveAttemptScore } from "@/lib/attemptScore";
 
 type LearnerDoc = {
   uid?: string;
@@ -341,28 +342,28 @@ export default function LearnerDetails() {
     const completed = attempts.filter((a) => isCompletedStatus(a.status));
     const classCompleted = classAttempts.filter((a) => isCompletedStatus(a.status));
 
-    const completedScores = completed.map((a) => safeNum(a.score, 0));
+    const completedScores = completed.map((a) => resolveAttemptScore(a).score);
     const avgStudentScore = completedScores.length ? average(completedScores) : 0;
     const bestScore = completedScores.length ? Math.max(...completedScores) : 0;
     const avgStudentTime = completed.length ? average(completed.map((a) => getAttemptTimeSeconds(a))) : 0;
-    const classAvgScore = classCompleted.length ? average(classCompleted.map((a) => safeNum(a.score, 0))) : 0;
+    const classAvgScore = classCompleted.length ? average(classCompleted.map((a) => resolveAttemptScore(a).score)) : 0;
 
     const sortedCompleted = [...completed].sort(
       (a, b) => toMillis(a.submittedAt || a.createdAt) - toMillis(b.submittedAt || b.createdAt)
     );
-    const firstScore = sortedCompleted.length ? safeNum(sortedCompleted[0].score, 0) : 0;
-    const lastScore = sortedCompleted.length ? safeNum(sortedCompleted[sortedCompleted.length - 1].score, 0) : 0;
+    const firstScore = sortedCompleted.length ? resolveAttemptScore(sortedCompleted[0]).score : 0;
+    const lastScore = sortedCompleted.length ? resolveAttemptScore(sortedCompleted[sortedCompleted.length - 1]).score : 0;
 
     const scoreTrend = sortedCompleted.slice(-12).map((a) => ({
       date: formatShortDate(toMillis(a.submittedAt || a.createdAt)),
-      score: safeNum(a.score, 0),
+      score: resolveAttemptScore(a).score,
     }));
 
     const subjectAgg = new Map<string, { sum: number; count: number }>();
     for (const a of completed) {
       const subject = String(a.subject || "General").trim() || "General";
       const existing = subjectAgg.get(subject) || { sum: 0, count: 0 };
-      existing.sum += safeNum(a.score, 0);
+      existing.sum += resolveAttemptScore(a).score;
       existing.count += 1;
       subjectAgg.set(subject, existing);
     }
@@ -386,7 +387,7 @@ export default function LearnerDetails() {
         title: String(a.testTitle || a.testId || "Test"),
         subject: String(a.subject || "General"),
         status: String(a.status || "unknown"),
-        scoreLabel: isCompletedStatus(a.status) ? `${safeNum(a.score, 0)}/${safeNum(a.maxScore, 0)}` : "In progress",
+        scoreLabel: isCompletedStatus(a.status) ? (() => { const { score, maxScore } = resolveAttemptScore(a); return `${score}/${maxScore}`; })() : "In progress",
         timeLabel: isCompletedStatus(a.status) ? formatMinutes(getAttemptTimeSeconds(a)) : "-",
         dateLabel: formatShortDateTime(toMillis(a.submittedAt || a.createdAt)),
       }));

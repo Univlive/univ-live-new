@@ -21,6 +21,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthProvider";
 import { useTenant } from "@/contexts/TenantProvider";
 import { db } from "@/lib/firebase";
+import { resolveAttemptScore } from "@/lib/attemptScore";
 
 import {
   collection,
@@ -96,8 +97,7 @@ function normalizeStatus(raw: any): AttemptStatus {
 }
 
 function mapAttemptRow(id: string, a: any): AttemptRow {
-  const score = safeNum(a?.score, 0);
-  const maxScore = safeNum(a?.maxScore, 0);
+  const { score, maxScore } = resolveAttemptScore(a);
 
   const accuracy =
     a?.accuracy != null
@@ -196,7 +196,7 @@ export default function StudentDashboard() {
         const a = d.data() as any;
         const sid = String(a?.studentId || "");
         if (!sid) return;
-        const sc = safeNum(a?.score, 0);
+        const sc = resolveAttemptScore(a).score;
         best[sid] = Math.max(best[sid] || 0, sc);
       });
 

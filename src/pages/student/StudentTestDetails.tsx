@@ -16,6 +16,7 @@ import { useAuth } from "@/contexts/AuthProvider";
 import { useTenant } from "@/contexts/TenantProvider";
 import { db } from "@/lib/firebase";
 import { logError } from "@/lib/errorLogger";
+import { resolveAttemptScore } from "@/lib/attemptScore";
 import {
   Timestamp,
   collection,
@@ -294,8 +295,7 @@ export default function StudentTestDetails() {
       (snap) => {
         const rows: AttemptRow[] = snap.docs.map((d) => {
           const a = d.data() as any;
-          const score = safeNum(a?.score, 0);
-          const maxScore = safeNum(a?.maxScore, 0);
+          const { score, maxScore } = resolveAttemptScore(a);
           const accuracyPct = a?.accuracy != null
             ? (() => {
                 const n = Number(a.accuracy);

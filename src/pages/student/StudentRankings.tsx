@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthProvider";
 import { useTenant } from "@/contexts/TenantProvider";
 import { db } from "@/lib/firebase";
+import { resolveAttemptScore } from "@/lib/attemptScore";
 import {
   Timestamp,
   collection,
@@ -107,8 +108,7 @@ function computeRankings(attempts: AttemptDoc[]) {
     const uid = a.studentId;
     if (!uid) continue;
 
-    const s = safeNumber(a.score, 0);
-    const m = safeNumber(a.maxScore, 0);
+    const { score: s, maxScore: m } = resolveAttemptScore(a);
     const p = pct(s, m);
     const t = safeNumber(a.timeTakenSec || a.timeSpent, 999999);
     const acc = a.accuracy != null ? normalizeAccuracyPercent(a.accuracy) : Math.round(p);

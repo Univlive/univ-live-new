@@ -38,6 +38,7 @@ import { Button } from "@/components/ui/button";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthProvider";
 import { buildTenantUrl } from "@/lib/tenant";
+import { resolveAttemptScore } from "@/lib/attemptScore";
 
 type StudentDoc = {
   id: string;
@@ -498,7 +499,7 @@ export default function EducatorDashboard() {
       const key = startOfDay(new Date(ms)).toISOString();
       if (!bucket[key]) return;
       bucket[key].attempts += 1;
-      if (isAttemptCompleted(attempt.status)) bucket[key].scores.push(safeNum(attempt.score, 0));
+      if (isAttemptCompleted(attempt.status)) bucket[key].scores.push(resolveAttemptScore(attempt).score);
     });
 
     return attemptsDays.map((date) => {
@@ -517,8 +518,7 @@ export default function EducatorDashboard() {
 
     completedAttempts.forEach((attempt) => {
       const subject = String(attempt.subject || "General");
-      const sc = safeNum(attempt.score, 0);
-      const mx = safeNum(attempt.maxScore, 0);
+      const { score: sc, maxScore: mx } = resolveAttemptScore(attempt);
       const pct = mx > 0 ? Math.round((sc / mx) * 100) : 0;
       if (!bucket[subject]) bucket[subject] = { weak: 0, moderate: 0, strong: 0 };
       if (pct < 40) bucket[subject].weak += 1;
@@ -547,7 +547,7 @@ export default function EducatorDashboard() {
       const label = String(attempt.testTitle || attempt.subject || "Untitled Test");
       if (!bucket[label]) bucket[label] = { attempts: 0, scores: [] };
       bucket[label].attempts += 1;
-      bucket[label].scores.push(safeNum(attempt.score, 0));
+      bucket[label].scores.push(resolveAttemptScore(attempt).score);
     });
 
     return Object.entries(bucket)
@@ -645,8 +645,7 @@ export default function EducatorDashboard() {
       const studentId = attempt.studentId;
       if (!studentId) return;
 
-      const score = safeNum(attempt.score, 0);
-      const maxScore = safeNum(attempt.maxScore, 0);
+      const { score, maxScore } = resolveAttemptScore(attempt);
       const accuracy =
         attempt.accuracy != null
           ? safeNum(attempt.accuracy, 0)
