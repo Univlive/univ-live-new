@@ -53,6 +53,7 @@ import {
   orderBy,
   query,
   runTransaction,
+  where,
   serverTimestamp,
   updateDoc,
   writeBatch,
@@ -265,6 +266,9 @@ export default function Questions() {
   const [formMarks, setFormMarks] = useState<string>("");
   const [formNegMarks, setFormNegMarks] = useState<string>("");
   const [formActive, setFormActive] = useState(true);
+  const [editingOriginalScoring, setEditingOriginalScoring] = useState<{
+    correctOption?: number; marks?: number; negativeMarks?: number;
+  } | null>(null);
 
   // bulk import dialog
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -621,6 +625,7 @@ export default function Questions() {
 
   function resetEditor() {
     setEditingId(null);
+    setEditingOriginalScoring(null);
     setFormQuestion("");
     setFormOptions(["", "", "", ""]);
     setFormCorrect(0);
@@ -631,6 +636,60 @@ export default function Questions() {
     setFormMarks(selectedTest?.positiveMarks != null ? String(selectedTest.positiveMarks) : "");
     setFormNegMarks(selectedTest?.negativeMarks != null ? String(selectedTest.negativeMarks) : "");
     setFormActive(true);
+  }
+
+  function scoreResponses(
+    qs: { correctOption?: number; correctAnswer?: any; marks?: number; positiveMarks?: number; negativeMarks?: number; type?: string; options?: string[] }[],
+    responses: Record<string, { answer?: string | null }>
+  ) {
+    let score = 0, maxScore = 0, correctCount = 0, incorrectCount = 0;
+    for (const q of qs) {
+      const pos = safeNum(q.marks ?? q.positiveMarks, 5);
+      const neg = Math.abs(safeNum(q.negativeMarks, 1));
+      maxScore += pos;
+      const userAnswer = (responses[(q as any).id] as any)?.answer ?? null;
+      if (userAnswer === null || userAnswer === undefined || String(userAnswer).trim() === "") continue;
+      let isCorrect = false;
+      if (q.type === "integer") {
+        isCorrect = String(userAnswer).trim() === String(q.correctAnswer ?? "").trim();
+      } else {
+        isCorrect = String(userAnswer) === String(q.correctOption ?? 0);
+      }
+      if (isCorrect) { score += pos; correctCount += 1; }
+      else { score -= neg; incorrectCount += 1; }
+    }
+    const attempted = correctCount + incorrectCount;
+    const accuracy = attempted > 0 ? correctCount / attempted : 0;
+    return { score, maxScore, accuracy, correctCount, incorrectCount };
+  }
+
+  async function recalculateAttemptsForTest(testId: string) {
+    const qSnap = await getDocs(collection(db, "test_series", testId, "questions"));
+    const qs = qSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+    if (!qs.length) return;
+
+    const aSnap = await getDocs(
+      query(collection(db, "attempts"), where("testId", "==", testId))
+    );
+    // Filter to submitted/completed in JS to avoid needing a composite Firestore index
+    const submittedDocs = aSnap.docs.filter((d) => {
+      const s = String(d.data().status || "").toLowerCase();
+      return ["submitted", "completed", "finished", "done"].includes(s);
+    });
+    if (!submittedDocs.length) return;
+
+    const chunks: (typeof aSnap.docs)[] = [];
+    for (let i = 0; i < submittedDocs.length; i += 490) chunks.push(submittedDocs.slice(i, i + 490));
+
+    for (const chunk of chunks) {
+      const b = writeBatch(db);
+      for (const aDoc of chunk) {
+        const responses = (aDoc.data().responses as Record<string, { answer?: string | null }>) || {};
+        const { score, maxScore, accuracy, correctCount, incorrectCount } = scoreResponses(qs, responses);
+        b.update(aDoc.ref, { score, maxScore, accuracy, correctCount, incorrectCount, marksRecalculatedAt: serverTimestamp() });
+      }
+      await b.commit();
+    }
   }
 
   function getNextQuestionOrder() {
@@ -709,6 +768,7 @@ export default function Questions() {
     setFormMarks(q.marks != null ? String(q.marks) : (selectedTest?.positiveMarks != null ? String(selectedTest.positiveMarks) : ""));
     setFormNegMarks(q.negativeMarks != null ? String(q.negativeMarks) : (selectedTest?.negativeMarks != null ? String(selectedTest.negativeMarks) : ""));
     setFormActive(q.isActive !== false);
+    setEditingOriginalScoring({ correctOption: q.correctOption, marks: q.marks, negativeMarks: q.negativeMarks });
     setEditorOpen(true);
   }
 
@@ -780,6 +840,18 @@ export default function Questions() {
         });
 
         toast({ title: "Question updated", description: "Changes saved successfully." });
+
+        const scoringChanged =
+          formCorrect !== editingOriginalScoring?.correctOption ||
+          safeNum(formMarks, -1) !== safeNum(String(editingOriginalScoring?.marks ?? ""), -1) ||
+          safeNum(formNegMarks, -1) !== safeNum(String(editingOriginalScoring?.negativeMarks ?? ""), -1);
+
+        if (scoringChanged) {
+          recalculateAttemptsForTest(selectedTestId).catch((err) => {
+            console.error("Recalculation failed:", err);
+            toast({ title: "Score recalculation failed", description: String(err?.message || err), variant: "destructive" });
+          });
+        }
       }
 
       setEditorOpen(false);
