@@ -155,9 +155,12 @@ export default function Login() {
           console.error("[Login] Sync error:", apiErr);
         }
 
+        // --- Single Session Logic for Students ---
+        // Write to Firestore first, then localStorage — avoids the race where
+        // onSnapshot fires before the Firestore write and sees a mismatch.
         const sid = generateSessionId();
-        setLocalSessionId(sid);
         await syncSessionWithFirestore(cred.user.uid, sid);
+        setLocalSessionId(sid);
 
         toast.success("Welcome back!");
         await refreshProfile();

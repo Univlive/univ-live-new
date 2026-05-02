@@ -67,14 +67,17 @@ import { uploadToImageKit } from "@/lib/imagekitUpload";
 
 // Firebase
 import {
+    CollectionReference,
     addDoc,
     collection,
     deleteDoc,
     doc,
     getDocs,
     onSnapshot,
+    query,
     serverTimestamp,
     updateDoc,
+    where,
     writeBatch,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -686,6 +689,9 @@ const QuestionsManager = ({
     const [formMarks, setFormMarks] = useState("");
     const [formNegMarks, setFormNegMarks] = useState("");
     const [formActive, setFormActive] = useState(true);
+    const [editingOriginalScoring, setEditingOriginalScoring] = useState<{
+        correctOption?: number; marks?: number; negativeMarks?: number;
+    } | null>(null);
     const [editorSnapshot, setEditorSnapshot] = useState<EditorDraftSnapshot | null>(null);
     const [unsavedConfirmOpen, setUnsavedConfirmOpen] = useState(false);
     const [pendingEditorAction, setPendingEditorAction] = useState<PendingEditorAction | null>(null);
@@ -1172,6 +1178,7 @@ const QuestionsManager = ({
         setFormMarks("");
         setFormNegMarks("");
         setFormActive(true);
+        setEditingOriginalScoring(null);
         setEditorSnapshot(null);
     }
 
@@ -1213,6 +1220,7 @@ const QuestionsManager = ({
         setFormMarks(q.marks != null ? String(q.marks) : "");
         setFormNegMarks(q.negativeMarks != null ? String(q.negativeMarks) : "");
         setFormActive(isQuestionPublished(q.isActive));
+        setEditingOriginalScoring({ correctOption: q.correctOption, marks: q.marks, negativeMarks: q.negativeMarks });
         setEditorSnapshot(buildSnapshotFromQuestion(q));
         setEditorOpen(true);
     }
@@ -1492,6 +1500,58 @@ const QuestionsManager = ({
         }
     }
 
+    function safeNum(v: any, fb = 0) {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : fb;
+    }
+
+    function scoreResponses(
+        qs: { correctOption?: number; correctAnswer?: any; marks?: number; positiveMarks?: number; negativeMarks?: number; type?: string }[],
+        responses: Record<string, { answer?: string | null }>
+    ) {
+        let score = 0, maxScore = 0, correctCount = 0, incorrectCount = 0;
+        for (const q of qs) {
+            const pos = safeNum((q as any).marks ?? (q as any).positiveMarks, 5);
+            const neg = Math.abs(safeNum((q as any).negativeMarks, 1));
+            maxScore += pos;
+            const userAnswer = (responses[(q as any).id] as any)?.answer ?? null;
+            if (userAnswer === null || userAnswer === undefined || String(userAnswer).trim() === "") continue;
+            const isCorrect = (q as any).type === "integer"
+                ? String(userAnswer).trim() === String((q as any).correctAnswer ?? "").trim()
+                : String(userAnswer) === String(q.correctOption ?? 0);
+            if (isCorrect) { score += pos; correctCount += 1; }
+            else { score -= neg; incorrectCount += 1; }
+        }
+        const attempted = correctCount + incorrectCount;
+        return { score, maxScore, accuracy: attempted > 0 ? correctCount / attempted : 0, correctCount, incorrectCount };
+    }
+
+    async function recalculateAttemptsForTest(tid: string, questionsCol: CollectionReference) {
+        const qSnap = await getDocs(questionsCol);
+        const qs = qSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        if (!qs.length) return;
+
+        const aSnap = await getDocs(query(collection(db, "attempts"), where("testId", "==", tid)));
+        const submittedDocs = aSnap.docs.filter((d) => {
+            const s = String(d.data().status || "").toLowerCase();
+            return ["submitted", "completed", "finished", "done"].includes(s);
+        });
+        if (!submittedDocs.length) return;
+
+        const chunks: (typeof aSnap.docs)[] = [];
+        for (let i = 0; i < submittedDocs.length; i += 490) chunks.push(submittedDocs.slice(i, i + 490));
+
+        for (const chunk of chunks) {
+            const b = writeBatch(db);
+            for (const aDoc of chunk) {
+                const responses = (aDoc.data().responses as Record<string, { answer?: string | null }>) || {};
+                const { score, maxScore, accuracy, correctCount, incorrectCount } = scoreResponses(qs, responses);
+                b.update(aDoc.ref, { score, maxScore, accuracy, correctCount, incorrectCount, marksRecalculatedAt: serverTimestamp() });
+            }
+            await b.commit();
+        }
+    }
+
     async function saveQuestion(): Promise<boolean> {
         if (readOnly) {
             toast.info("This test is read-only.");
@@ -1600,6 +1660,18 @@ const QuestionsManager = ({
                 );
 
                 toast.success("Question updated");
+
+                const scoringChanged =
+                    formCorrect !== editingOriginalScoring?.correctOption ||
+                    safeNum(formMarks, -1) !== safeNum(String(editingOriginalScoring?.marks ?? ""), -1) ||
+                    safeNum(formNegMarks, -1) !== safeNum(String(editingOriginalScoring?.negativeMarks ?? ""), -1);
+
+                if (scoringChanged) {
+                    recalculateAttemptsForTest(testId, qCol).catch((err) => {
+                        console.error("Recalculation failed:", err);
+                        toast.error(`Score recalculation failed: ${err?.message || err}`);
+                    });
+                }
             }
             await syncTestQuestionCount();
             setEditorOpen(false);

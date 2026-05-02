@@ -398,11 +398,9 @@ export default function StudentResults() {
 
         setSectionScores(derived.sectionScores);
 
-        setComputedScore(typeof a.score === "number" ? a.score : derived.score);
-        setComputedMaxScore(typeof a.maxScore === "number" ? a.maxScore : derived.maxScore);
-
-        const storedAcc = typeof a.accuracy === "number" ? normalizeAccuracyPercent(a.accuracy) : null;
-        setComputedAccuracyPct(storedAcc ?? derived.accuracyPct);
+        setComputedScore(derived.score);
+        setComputedMaxScore(derived.maxScore);
+        setComputedAccuracyPct(derived.accuracyPct);
 
         // Trigger AI analysis if not already completed
         if (isAiPerformanceAnalysisEnabled && (!a.aiReviewStatus || a.aiReviewStatus === "queued") && !a.aiReview) {
