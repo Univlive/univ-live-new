@@ -72,6 +72,9 @@ type AttemptDoc = {
   score?: number;
   maxScore?: number;
   accuracy?: number;
+  correctCount?: number;
+  incorrectCount?: number;
+  unansweredCount?: number;
   timeTakenSec?: number;
   aiReviewStatus?: "queued" | "in-progress" | "completed" | "failed";
 };
@@ -645,13 +648,7 @@ export default function EducatorDashboard() {
       const studentId = attempt.studentId;
       if (!studentId) return;
 
-      const { score, maxScore } = resolveAttemptScore(attempt);
-      const accuracy =
-        attempt.accuracy != null
-          ? safeNum(attempt.accuracy, 0)
-          : maxScore > 0
-            ? (score / maxScore) * 100
-            : 0;
+      const { score, maxScore, accuracy } = resolveAttemptScore(attempt);
       const attemptMs = toMillis(attempt.submittedAt || attempt.updatedAt || attempt.createdAt) || 0;
 
       if (!byStudent[studentId]) {

@@ -295,14 +295,7 @@ export default function StudentTestDetails() {
       (snap) => {
         const rows: AttemptRow[] = snap.docs.map((d) => {
           const a = d.data() as any;
-          const { score, maxScore } = resolveAttemptScore(a);
-          const accuracyPct = a?.accuracy != null
-            ? (() => {
-                const n = Number(a.accuracy);
-                const pct = Number.isFinite(n) ? (n <= 1.01 ? n * 100 : n) : accuracyFrom(score, maxScore);
-                return Math.max(0, Math.min(100, Math.round(pct)));
-              })()
-            : accuracyFrom(score, maxScore);
+          const { score, maxScore, accuracy: accuracyPct } = resolveAttemptScore(a);
 
           const createdAtMs = toMillis(a?.submittedAt || a?.createdAt);
 

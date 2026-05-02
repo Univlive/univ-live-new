@@ -49,6 +49,9 @@ type AttemptDoc = {
   score?: number;
   maxScore?: number;
   accuracy?: number; // 0..1 or 0..100
+  correctCount?: number;
+  incorrectCount?: number;
+  unansweredCount?: number;
   timeTakenSec?: number;
   timeSpent?: number;
 
@@ -108,10 +111,9 @@ function computeRankings(attempts: AttemptDoc[]) {
     const uid = a.studentId;
     if (!uid) continue;
 
-    const { score: s, maxScore: m } = resolveAttemptScore(a);
+    const { score: s, maxScore: m, accuracy: acc } = resolveAttemptScore(a);
     const p = pct(s, m);
     const t = safeNumber(a.timeTakenSec || a.timeSpent, 999999);
-    const acc = a.accuracy != null ? normalizeAccuracyPercent(a.accuracy) : Math.round(p);
 
     const current = best[uid];
     if (!current || p > current.percent || (p === current.percent && s > current.score) || (p === current.percent && s === current.score && t < current.time)) {

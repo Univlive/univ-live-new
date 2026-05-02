@@ -97,21 +97,7 @@ function normalizeStatus(raw: any): AttemptStatus {
 }
 
 function mapAttemptRow(id: string, a: any): AttemptRow {
-  const { score, maxScore } = resolveAttemptScore(a);
-
-  const accuracy =
-    a?.accuracy != null
-      ? (() => {
-          const n = Number(a.accuracy);
-          const pct =
-            Number.isFinite(n)
-              ? n <= 1.01
-                ? n * 100
-                : n
-              : accuracyFrom(score, maxScore);
-          return Math.max(0, Math.min(100, Math.round(pct)));
-        })()
-      : accuracyFrom(score, maxScore);
+  const { score, maxScore, accuracy } = resolveAttemptScore(a);
 
   const createdAtMs = toMillis(a?.createdAt);
   const startedAtMs = toMillis(a?.startedAt || a?.createdAt);

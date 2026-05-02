@@ -7,7 +7,8 @@ export function resolveAttemptScore(data: {
   correctCount?: any;
   incorrectCount?: any;
   unansweredCount?: any;
-}): { score: number; maxScore: number } {
+  accuracy?: any;
+}): { score: number; maxScore: number; accuracy: number } {
   const correctCount = Number(data.correctCount ?? 0);
   const incorrectCount = Number(data.incorrectCount ?? 0);
   const unansweredCount = Number(data.unansweredCount ?? 0);
@@ -15,14 +16,25 @@ export function resolveAttemptScore(data: {
 
   if (hasCountData) {
     const totalQuestions = correctCount + incorrectCount + unansweredCount;
-    return {
-      score: correctCount * CORRECT_MARKS - incorrectCount * INCORRECT_MARKS,
-      maxScore: totalQuestions * CORRECT_MARKS,
-    };
+    const score = correctCount * CORRECT_MARKS - incorrectCount * INCORRECT_MARKS;
+    const maxScore = totalQuestions * CORRECT_MARKS;
+    const accuracy = Math.round((correctCount / Math.max(1, totalQuestions)) * 100);
+    return { score, maxScore, accuracy };
   }
 
-  return {
-    score: Number(data.score ?? 0),
-    maxScore: Number(data.maxScore ?? 0),
-  };
+  const score = Number(data.score ?? 0);
+  const maxScore = Number(data.maxScore ?? 0);
+
+  let accuracy = 0;
+  if (data.accuracy != null) {
+    const n = Number(data.accuracy);
+    if (Number.isFinite(n)) {
+      accuracy = Math.max(0, Math.min(100, Math.round(n <= 1.01 ? n * 100 : n)));
+    }
+  }
+  if (!accuracy && maxScore > 0) {
+    accuracy = Math.max(0, Math.min(100, Math.round((score / maxScore) * 100)));
+  }
+
+  return { score, maxScore, accuracy };
 }

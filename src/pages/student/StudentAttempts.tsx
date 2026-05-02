@@ -133,7 +133,9 @@ export default function StudentAttempts() {
             score,
             maxScore,
 
-            accuracy: normalizeAccuracyPercent(data.accuracy),
+            accuracy: hasCountData
+              ? Math.round((correctCount / Math.max(1, totalQuestions)) * 100)
+              : normalizeAccuracyPercent(data.accuracy),
 
             // AttemptTable expects seconds
             timeSpent: Number(data.timeTakenSec ?? 0),
