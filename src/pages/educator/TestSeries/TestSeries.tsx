@@ -909,7 +909,7 @@ export default function TestSeries() {
         </div>
 
 
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2 w-full">
           <div className="relative w-full sm:w-[320px]">
             <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
             <Input
@@ -920,14 +920,14 @@ export default function TestSeries() {
             />
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             {/* CreateEducatorTemplate is opened programmatically from the template dropdown */}
             <CreateEducatorTemplate open={createTemplateOpen} onOpenChange={(open) => {
               setCreateTemplateOpen(open);
               // Re-open create test dialog after template creation completes
               if (!open) setCreateOpen(true);
             }} />
-            <Button className="gradient-bg text-white shadow-lg" onClick={() => setCreateOpen(true)}>
+            <Button className="gradient-bg text-white shadow-lg w-full sm:w-auto" onClick={() => setCreateOpen(true)}>
               <Plus className="mr-2 h-4 w-4" /> Create Custom Test
             </Button>
           </div>
@@ -941,8 +941,9 @@ export default function TestSeries() {
       </div>
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
-        <div className="w-full flex flex-row justify-between">
-          <TabsList className="rounded-xl">
+        <div className="w-full flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div className="w-full overflow-x-auto">
+          <TabsList className="rounded-xl inline-flex min-w-max">
             <TabsTrigger value="library" className="rounded-xl">
               Your Library
             </TabsTrigger>
@@ -950,6 +951,7 @@ export default function TestSeries() {
               Admin Bank
             </TabsTrigger>
           </TabsList>
+          </div>
 
           <NewFolderButton {...folderState} />
         </div>

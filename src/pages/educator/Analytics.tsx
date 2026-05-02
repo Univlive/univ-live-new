@@ -870,7 +870,26 @@ export default function Analytics() {
                   <CardTitle className="text-sm">Selected Student Summary</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {selectedLearner ? (
+                  {selectedStudentId === "__all__" ? (
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+                      <div className="rounded-lg bg-muted/40 p-3">
+                        <p className="text-muted-foreground">Total Students</p>
+                        <p className="font-semibold text-lg">{formatCompactInt(totalStudents)}</p>
+                      </div>
+                      <div className="rounded-lg bg-muted/40 p-3">
+                        <p className="text-muted-foreground">Total Attempts</p>
+                        <p className="font-semibold text-lg">{formatCompactInt(totalAttempts)}</p>
+                      </div>
+                      <div className="rounded-lg bg-muted/40 p-3">
+                        <p className="text-muted-foreground">Avg Score</p>
+                        <p className="font-semibold text-lg">{avgScore}</p>
+                      </div>
+                      <div className="rounded-lg bg-muted/40 p-3">
+                        <p className="text-muted-foreground">Completion Rate</p>
+                        <p className="font-semibold text-lg">{completionRate}%</p>
+                      </div>
+                    </div>
+                  ) : selectedLearner ? (
                     <div className="flex flex-col md:flex-row md:items-center gap-4 justify-between">
                       <div className="flex items-center gap-3 min-w-0">
                         <Avatar className="h-12 w-12">

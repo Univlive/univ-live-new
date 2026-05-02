@@ -142,7 +142,7 @@ export default function EducatorLayout() {
   };
 
   return (
-    <div className="h-screen bg-background flex flex-col overflow-hidden">
+    <div className="min-h-screen h-[100dvh] bg-background flex flex-col overflow-hidden">
       <ImpersonationBanner />
       <div className="flex flex-1 overflow-hidden">
       <AnimatePresence>
@@ -159,7 +159,7 @@ export default function EducatorLayout() {
 
       <aside
         className={cn(
-          "fixed left-0 top-0 z-50 h-screen w-64 bg-card border-r border-border transition-all duration-300 lg:translate-x-0 lg:static lg:top-0",
+          "fixed left-0 top-0 z-50 h-[100dvh] w-64 bg-card border-r border-border transition-all duration-300 lg:translate-x-0 lg:static lg:top-0",
           sidebarCollapsed ? "lg:w-20" : "lg:w-64",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}

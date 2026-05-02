@@ -140,20 +140,44 @@
 @layer base {
   * {
     @apply border-border;
+    min-width: 0;
   }
 
   html {
     scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
   }
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    overflow-x: hidden;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  @supports (min-height: 100dvh) {
+    html,
+    body,
+    #root {
+      min-height: 100dvh;
+    }
   }
 
   h1, h2, h3, h4, h5, h6 {
     @apply font-bold tracking-tight;
     line-height: 1.1;
+  }
+
+  img,
+  video,
+  canvas,
+  svg {
+    max-width: 100%;
   }
 }
 

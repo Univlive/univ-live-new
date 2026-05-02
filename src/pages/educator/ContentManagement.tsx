@@ -335,7 +335,7 @@ export default function ContentManagement() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Content</h1>
         <p className="text-sm text-muted-foreground">Manage books and notes per course</p>
@@ -351,7 +351,7 @@ export default function ContentManagement() {
             value={selectedBranchId}
             onValueChange={(v) => { setSelectedBranchId(v); setSelectedCourseId(""); }}
           >
-            <SelectTrigger className="w-48">
+            <SelectTrigger className="w-full sm:w-48">
               <SelectValue placeholder="Branch" />
             </SelectTrigger>
             <SelectContent>
@@ -366,7 +366,7 @@ export default function ContentManagement() {
             onValueChange={setSelectedCourseId}
             disabled={!selectedBranchId}
           >
-            <SelectTrigger className="w-48">
+            <SelectTrigger className="w-full sm:w-48">
               <SelectValue placeholder="Course" />
             </SelectTrigger>
             <SelectContent>
@@ -383,11 +383,11 @@ export default function ContentManagement() {
       {/* Content list */}
       {selectedCourseId && (
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <CardTitle className="text-base">
               Content — {selectedCourse?.name}
             </CardTitle>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
               <Button variant="outline" size="sm" onClick={openImport}>
                 <Library className="mr-2 h-4 w-4" /> Import from Library
               </Button>
@@ -404,6 +404,7 @@ export default function ContentManagement() {
             ) : content.length === 0 ? (
               <div className="text-center py-10 text-muted-foreground">No content yet</div>
             ) : (
+              <div className="w-full overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -450,6 +451,7 @@ export default function ContentManagement() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -510,6 +512,7 @@ export default function ContentManagement() {
               No admin content available for your assigned courses
             </p>
           ) : (
+            <div className="w-full overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -543,6 +546,7 @@ export default function ContentManagement() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </DialogContent>
       </Dialog>

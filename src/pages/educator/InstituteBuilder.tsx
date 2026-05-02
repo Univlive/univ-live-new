@@ -556,8 +556,8 @@ function CanvasDropZone({ children }: { children: React.ReactNode }) {
 }
 
 // ── Left Sidebar ─────────────────────────────────────────────
-function LeftSidebar({ sections, onAdd, selectedId, onSelectSection, onDeleteSection, themeKey, setThemeKey, instituteName, setInstituteName, collapsed, onToggleCollapse }: {
-  sections: Section[]; onAdd: (type: string) => void; selectedId: string | null; onSelectSection: (id: string) => void; onDeleteSection: (id: string) => void; themeKey: ThemeKey; setThemeKey: (k: ThemeKey) => void; instituteName: string; setInstituteName: (n: string) => void; collapsed: boolean; onToggleCollapse: () => void;
+function LeftSidebar({ sections, onAdd, selectedId, onSelectSection, onDeleteSection, themeKey, setThemeKey, instituteName, setInstituteName, collapsed, onToggleCollapse, mobile = false }: {
+  sections: Section[]; onAdd: (type: string) => void; selectedId: string | null; onSelectSection: (id: string) => void; onDeleteSection: (id: string) => void; themeKey: ThemeKey; setThemeKey: (k: ThemeKey) => void; instituteName: string; setInstituteName: (n: string) => void; collapsed: boolean; onToggleCollapse: () => void; mobile?: boolean;
 }) {
   const [tab, setTab] = useState<"components" | "layers" | "settings">("components");
   const [search, setSearch] = useState("");
@@ -566,7 +566,7 @@ function LeftSidebar({ sections, onAdd, selectedId, onSelectSection, onDeleteSec
     ? Object.entries(COMPONENT_REGISTRY).filter(([, v]) => v.label.toLowerCase().includes(search.toLowerCase()))
     : null;
 
-  if (collapsed) {
+  if (collapsed && !mobile) {
     const iconKeys = COMPONENT_GROUPS.flatMap(g => g.keys);
     return (
       <div style={{ width: 72, background: "#fff", borderRight: "1px solid rgba(0,0,0,0.07)", display: "flex", flexDirection: "column", flexShrink: 0, overflow: "hidden" }}>
@@ -601,7 +601,7 @@ function LeftSidebar({ sections, onAdd, selectedId, onSelectSection, onDeleteSec
   }
 
   return (
-    <div style={{ width: 260, background: "#fff", borderRight: "1px solid rgba(0,0,0,0.07)", display: "flex", flexDirection: "column", flexShrink: 0, overflow: "hidden" }}>
+    <div style={{ width: mobile ? "100%" : 260, background: "#fff", borderRight: "1px solid rgba(0,0,0,0.07)", display: "flex", flexDirection: "column", flexShrink: 0, overflow: "hidden" }}>
       <div style={{ display: "flex", borderBottom: "1px solid rgba(0,0,0,0.07)", flexShrink: 0 }}>
         {([{ id: "components", label: "Add", icon: "＋" }, { id: "layers", label: "Layers", icon: "≡" }, { id: "settings", label: "Site", icon: "⚙" }] as const).map(t2 => (
           <button key={t2.id} onClick={() => setTab(t2.id)} style={{ flex: 1, padding: "10px 4px", border: "none", background: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, color: tab === t2.id ? "#6366f1" : "rgba(0,0,0,0.35)", borderBottom: tab === t2.id ? "2px solid #6366f1" : "2px solid transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
@@ -670,12 +670,13 @@ function LeftSidebar({ sections, onAdd, selectedId, onSelectSection, onDeleteSec
 }
 
 // ── Right Panel ──────────────────────────────────────────────
-function RightPanel({ section, onUpdate, onUpdateArrayItem, onReplaceData, uid }: {
+function RightPanel({ section, onUpdate, onUpdateArrayItem, onReplaceData, uid, mobile = false }: {
   section: Section | null;
   onUpdate: (key: string, value: string) => void;
   onUpdateArrayItem: (arrayKey: string, index: number, subKey: string, value: string) => void;
   onReplaceData: (data: Record<string, any>) => void;
   uid: string | null;
+  mobile?: boolean;
 }) {
   const [uploading, setUploading] = useState<Record<string, boolean>>({});
 
@@ -698,7 +699,7 @@ function RightPanel({ section, onUpdate, onUpdateArrayItem, onReplaceData, uid }
 
   if (!section) {
     return (
-      <div style={{ width: 260, background: "#fff", borderLeft: "1px solid rgba(0,0,0,0.07)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+      <div style={{ width: mobile ? "100%" : 260, background: "#fff", borderLeft: "1px solid rgba(0,0,0,0.07)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
         <div style={{ textAlign: "center", padding: 24, color: "rgba(0,0,0,0.3)" }}>
           <div style={{ fontSize: 32, marginBottom: 8 }}>👆</div>
           <div style={{ fontSize: 13 }}>Click a section<br />to edit its content</div>
@@ -789,7 +790,7 @@ function RightPanel({ section, onUpdate, onUpdateArrayItem, onReplaceData, uid }
   }
 
   return (
-    <div style={{ width: 260, background: "#fff", borderLeft: "1px solid rgba(0,0,0,0.07)", display: "flex", flexDirection: "column", flexShrink: 0, overflow: "hidden" }}>
+    <div style={{ width: mobile ? "100%" : 260, background: "#fff", borderLeft: "1px solid rgba(0,0,0,0.07)", display: "flex", flexDirection: "column", flexShrink: 0, overflow: "hidden" }}>
       <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(0,0,0,0.07)", display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ fontSize: 18 }}>{reg?.icon}</span>
         <span style={{ fontSize: 13, fontWeight: 600, color: "#1a1a2e" }}>{reg?.label}</span>
@@ -928,6 +929,8 @@ export default function InstituteBuilder() {
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<"canvas" | "sections" | "editor">("canvas");
   const saveTimeout = useRef<ReturnType<typeof setTimeout>>();
 
   const theme = THEME_PRESETS[themeKey];
@@ -964,6 +967,21 @@ export default function InstituteBuilder() {
   }, [sections, themeKey, instituteName, uid, loaded]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  useEffect(() => {
+    const updateViewportState = () => {
+      const mobile = window.innerWidth < 1024;
+      setIsMobileViewport(mobile);
+      if (!mobile) setMobilePanel("canvas");
+    };
+    updateViewportState();
+    window.addEventListener("resize", updateViewportState);
+    return () => window.removeEventListener("resize", updateViewportState);
+  }, []);
+
+  useEffect(() => {
+    if (isMobileViewport && selectedId) setMobilePanel("editor");
+  }, [isMobileViewport, selectedId]);
 
   function addSection(type: string, afterId?: string | null) {
     const reg = COMPONENT_REGISTRY[type];
@@ -1116,10 +1134,10 @@ export default function InstituteBuilder() {
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className="-m-4 lg:-m-6" style={{ height: "calc(100vh - 64px)", display: "flex", flexDirection: "column", overflow: "hidden", background: "#f0f0f5" }}>
+      <div className="-m-4 lg:-m-6" style={{ height: "calc(100dvh - 64px)", minHeight: "calc(100vh - 64px)", display: "flex", flexDirection: "column", overflow: "hidden", background: "#f0f0f5" }}>
 
         {/* Top Bar */}
-        <div style={{ height: 52, background: "#fff", borderBottom: "1px solid rgba(0,0,0,0.08)", display: "flex", alignItems: "center", padding: "0 16px", gap: 12, flexShrink: 0 }}>
+        <div style={{ minHeight: 52, background: "#fff", borderBottom: "1px solid rgba(0,0,0,0.08)", display: "flex", alignItems: "center", flexWrap: "wrap", padding: "8px 12px", gap: 8, flexShrink: 0 }}>
           <button onClick={() => navigate("/educator/website-settings")} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.1)", background: "none", cursor: "pointer", fontSize: 12, color: "rgba(0,0,0,0.5)" }}>
             <ArrowLeft size={14} /> Back
           </button>
@@ -1152,6 +1170,13 @@ export default function InstituteBuilder() {
           )}
 
           <div style={{ width: 20, height: 20, borderRadius: "50%", background: theme.primary, border: "2px solid rgba(0,0,0,0.12)", flexShrink: 0 }} />
+          {isMobileViewport && !previewMode && (
+            <>
+              <button onClick={() => setMobilePanel("sections")} style={{ background: mobilePanel === "sections" ? "#4f46e5" : "#fff", color: mobilePanel === "sections" ? "#fff" : "#111827", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8, padding: "7px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Sections</button>
+              <button onClick={() => setMobilePanel("editor")} style={{ background: mobilePanel === "editor" ? "#4f46e5" : "#fff", color: mobilePanel === "editor" ? "#fff" : "#111827", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8, padding: "7px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Editor</button>
+              <button onClick={() => setMobilePanel("canvas")} style={{ background: mobilePanel === "canvas" ? "#4f46e5" : "#fff", color: mobilePanel === "canvas" ? "#fff" : "#111827", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8, padding: "7px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Canvas</button>
+            </>
+          )}
           <button
             onClick={() => setShowResetModal(true)}
             disabled={sections.length === 0}
@@ -1177,7 +1202,7 @@ export default function InstituteBuilder() {
         {/* Body */}
         <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
           {/* Left Sidebar — hidden in preview */}
-          {!previewMode && (
+          {!previewMode && (!isMobileViewport || mobilePanel === "sections") && (
             <LeftSidebar
               sections={sections}
               onAdd={type => addSection(type, selectedId)}
@@ -1190,11 +1215,12 @@ export default function InstituteBuilder() {
               setInstituteName={setInstituteName}
               collapsed={leftPanelCollapsed}
               onToggleCollapse={() => setLeftPanelCollapsed(prev => !prev)}
+              mobile={isMobileViewport}
             />
           )}
 
           {/* Canvas */}
-          <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+          <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", display: !isMobileViewport || previewMode || mobilePanel === "canvas" ? "block" : "none" }}>
             {previewMode && previewDevice === "mobile" ? (
               <div style={{ display: "flex", justifyContent: "center", padding: "24px 16px", minHeight: "100%" }}>
                 <div style={{ width: 390, flexShrink: 0, borderRadius: 36, overflow: "hidden", boxShadow: "0 0 0 10px #1a1a2e, 0 30px 80px rgba(0,0,0,0.4)", position: "relative" }}>
@@ -1209,8 +1235,8 @@ export default function InstituteBuilder() {
           </div>
 
           {/* Right Panel — hidden in preview */}
-          {!previewMode && (
-            <RightPanel section={selectedSection} onUpdate={updateSectionData} onUpdateArrayItem={updateSectionArrayItem} onReplaceData={replaceSectionData} uid={uid} />
+          {!previewMode && (!isMobileViewport || mobilePanel === "editor") && (
+            <RightPanel section={selectedSection} onUpdate={updateSectionData} onUpdateArrayItem={updateSectionArrayItem} onReplaceData={replaceSectionData} uid={uid} mobile={isMobileViewport} />
           )}
         </div>
       </div>

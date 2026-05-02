@@ -376,12 +376,12 @@ export default function Divisions() {
   return (
     <div className="space-y-6">
       <div>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold">Student Management</h1>
             <p className="text-muted-foreground text-sm">Manage branches, courses, batches, and enrolled learners</p>
           </div>
-          <Button variant="outline" onClick={() => navigate("/educator/learners")}>
+          <Button className="w-full sm:w-auto" variant="outline" onClick={() => navigate("/educator/learners")}>
             <Users className="h-4 w-4 mr-2" />
             Learners &amp; Invites
           </Button>
@@ -389,7 +389,8 @@ export default function Divisions() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
+        <div className="w-full overflow-x-auto">
+        <TabsList className="inline-flex min-w-max">
           <TabsTrigger value="branches">Branches ({branches.length}/{maxBranches})</TabsTrigger>
           <TabsTrigger value="courses">Courses ({courses.length})</TabsTrigger>
           <TabsTrigger value="batches">Batches ({batches.length})</TabsTrigger>
@@ -397,6 +398,7 @@ export default function Divisions() {
             <Users className="h-3 w-3" />Learners
           </TabsTrigger>
         </TabsList>
+        </div>
 
         {/* Branches Tab */}
         <TabsContent value="branches" className="space-y-4">
@@ -442,6 +444,7 @@ export default function Divisions() {
           </div>
           <Card>
             <CardContent className="p-0">
+              <div className="w-full overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -480,6 +483,7 @@ export default function Divisions() {
                   )}
                 </TableBody>
               </Table>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -493,6 +497,7 @@ export default function Divisions() {
           </div>
           <Card>
             <CardContent className="p-0">
+              <div className="w-full overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -554,6 +559,7 @@ export default function Divisions() {
                   )}
                 </TableBody>
               </Table>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -615,6 +621,7 @@ export default function Divisions() {
           ) : (
             <Card>
               <CardContent className="p-0">
+                <div className="w-full overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -648,6 +655,7 @@ export default function Divisions() {
                     )}
                   </TableBody>
                 </Table>
+                </div>
               </CardContent>
             </Card>
           )}
@@ -656,7 +664,7 @@ export default function Divisions() {
 
       {/* Branch Dialog */}
       <Dialog open={branchDialog} onOpenChange={setBranchDialog}>
-        <DialogContent>
+        <DialogContent className="max-w-[95vw] sm:max-w-lg">
           <DialogHeader><DialogTitle>{editingBranch ? "Edit Branch" : "New Branch"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1">
@@ -679,7 +687,7 @@ export default function Divisions() {
 
       {/* Course Dialog */}
       <Dialog open={courseDialog} onOpenChange={setCourseDialog}>
-        <DialogContent>
+        <DialogContent className="max-w-[95vw] sm:max-w-lg">
           <DialogHeader><DialogTitle>{editingCourse ? "Edit Course" : "New Course"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1">
@@ -716,7 +724,7 @@ export default function Divisions() {
 
       {/* Batch Dialog */}
       <Dialog open={batchDialog} onOpenChange={setBatchDialog}>
-        <DialogContent>
+        <DialogContent className="max-w-[95vw] sm:max-w-lg">
           <DialogHeader><DialogTitle>{editingBatch ? "Edit Batch" : "New Batch"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1">
@@ -756,7 +764,7 @@ export default function Divisions() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label>Start Date</Label>
                 <Input type="date" value={batchStartDate} onChange={(e) => setBatchStartDate(e.target.value)} />

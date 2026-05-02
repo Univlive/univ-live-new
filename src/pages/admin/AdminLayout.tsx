@@ -167,7 +167,7 @@ export default function AdminLayout() {
   );
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen h-[100dvh] bg-background">
       {/* Desktop Sidebar */}
       <aside className={cn("hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:flex-col border-r border-border bg-card transition-all duration-300", sidebarCollapsed ? "lg:w-20" : "lg:w-64")}>
         <Sidebar collapsed={sidebarCollapsed} />
