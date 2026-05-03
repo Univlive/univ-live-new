@@ -88,7 +88,7 @@ export default function Signup() {
               displayName: name,
               email,
               educatorId: tenant.educatorId,
-              tenantSlug, // legacy
+              tenantSlug,
               enrolledTenants: arrayUnion(tenantSlug),
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
@@ -101,28 +101,31 @@ export default function Signup() {
             await registerStudentForTenant(token, tenantSlug);
           } catch (apiErr: any) {
             console.error("[Signup] Sync error:", apiErr);
-            if (apiErr.message.includes("<!DOCTYPE html>")) {
-              console.warn("API server not detected. Please ensure 'vercel dev' is running.");
-            }
           }
 
-          // --- Single Session Logic for Students ---
           const sid = generateSessionId();
-          await syncSessionWithFirestore(cred.user.uid, sid);
           setLocalSessionId(sid);
+          await syncSessionWithFirestore(cred.user.uid, sid);
 
           toast.success("Account created!");
           nav("/student");
           return;
         } catch (err: any) {
-          // if email exists, try "join" by signing in
           if (err?.code === "auth/email-already-in-use") {
             try {
               const cred2 = await signInWithEmailAndPassword(auth, email, password);
+              const snap = await getDoc(doc(db, "users", cred2.user.uid));
+              const existingRole = String(snap.data()?.role || "").toUpperCase();
+
+              if (existingRole && existingRole !== "STUDENT") {
+                toast.error(`This email is already registered as ${existingRole}. Please use a different email.`);
+                await auth.signOut();
+                return;
+              }
+
               await setDoc(
                 doc(db, "users", cred2.user.uid),
                 {
-                  role: "STUDENT",
                   tenantSlug,
                   enrolledTenants: arrayUnion(tenantSlug),
                   updatedAt: serverTimestamp(),
@@ -137,16 +140,19 @@ export default function Signup() {
                 console.error("[Signup] Sync error (re-join):", apiErr);
               }
 
-              // --- Single Session Logic for Students ---
               const sid = generateSessionId();
-              await syncSessionWithFirestore(cred2.user.uid, sid);
               setLocalSessionId(sid);
+              await syncSessionWithFirestore(cred2.user.uid, sid);
 
               toast.success("Signed in and enrolled!");
               nav("/student");
               return;
-            } catch {
-              toast.error("Account already exists. Please login instead.");
+            } catch (innerErr: any) {
+              if (innerErr?.code === "auth/invalid-credential") {
+                toast.error("Wrong password. Please login instead.");
+              } else if (!innerErr?.code) {
+                throw innerErr;
+              }
               return;
             }
           }
@@ -164,7 +170,16 @@ export default function Signup() {
       if (!slug) throw new Error("Please enter a valid tenant slug");
       if (!(await checkSlugAvailable(slug))) throw new Error("Tenant slug already taken");
 
-      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      let cred;
+      try {
+        cred = await createUserWithEmailAndPassword(auth, email, password);
+      } catch (err: any) {
+        if (err?.code === "auth/email-already-in-use") {
+          toast.error("This email already has an account. Please login instead.");
+          return;
+        }
+        throw err;
+      }
       await updateProfile(cred.user, { displayName: name });
 
       const uid = cred.user.uid;
