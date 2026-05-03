@@ -1,4 +1,5 @@
 import  Layout  from "@widgets/layout/Layout";
+import SEO from "@shared/components/SEO";
 import { motion } from "framer-motion";
 import { Mail, Phone, Clock } from "lucide-react";
 import { ButtonWithIcon } from "@shared/ui/button";
@@ -30,6 +31,11 @@ const Contact = () => {
 
   return (
     <Layout>
+      <SEO
+        title="Contact Us — Univ.live AI Test Series Platform"
+        description="Get in touch with Univ.live. Book a demo, ask about pricing, or get support for setting up your coaching institute's AI-powered test series platform."
+        canonical="https://univlive.tech/contact"
+      />
       <section className="section-padding section-1">
         <div className="container-main">
           <motion.div

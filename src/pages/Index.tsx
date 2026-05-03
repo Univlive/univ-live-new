@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import SEO from "@shared/components/SEO";
 import logo from "@/assets/univ-logo.png";
 
 const PRIMARY = "#6C47FF";
@@ -737,6 +738,11 @@ function LandingFooter() {
 export default function Index() {
   return (
     <>
+      <SEO
+        title="Univ.live — AI Test Series Platform for Coaching Institutes | JEE, NEET, CUET & More"
+        description="Launch your AI-powered test series platform in minutes. Univ.live supports JEE, NEET, CUET, CBSE, State Board and all exam types — objective & subjective. Built for coaching institutes."
+        canonical="https://univlive.tech/"
+      />
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Inter:wght@400;500;600&display=swap');
         @keyframes spin { to { transform: rotate(360deg); } }

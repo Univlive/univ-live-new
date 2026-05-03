@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import Navbar from "@widgets/layout/Navbar";
+import SEO from "@shared/components/SEO";
 import Footer from "@widgets/layout/Footer";
 import { UserPlus, Palette, Wand2, Clock, Rocket, Settings, ArrowRight } from "lucide-react";
 import { Button } from "@shared/ui/button";
@@ -47,6 +48,11 @@ const steps = [
 export default function HowItWorks() {
   return (
     <div className="min-h-screen bg-background">
+      <SEO
+        title="How It Works — Launch Any Test Series in Minutes | Univ.live"
+        description="See how Univ.live works: set up your coaching portal, create test series for JEE, NEET, CUET, CBSE and more, and track student performance — all in minutes with AI."
+        canonical="https://univlive.tech/how-it-works"
+      />
       <Navbar />
       
       <main className="pt-24 pb-20">

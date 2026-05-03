@@ -1,4 +1,5 @@
 import  Layout  from "@widgets/layout/Layout";
+import SEO from "@shared/components/SEO";
 import { motion } from "framer-motion";
 import { FileText, Users, Brain, Headphones, Gift, CheckCircle } from "lucide-react";
 
@@ -38,6 +39,11 @@ const features = [
 const Features = () => {
   return (
     <Layout>
+      <SEO
+        title="Features — AI-Powered Test Series & Coaching Management | Univ.live"
+        description="Explore Univ.live features: AI question import, objective & subjective tests, student analytics, AI chatbot tutor, rankings, and support for JEE, NEET, CUET, CBSE and all exams."
+        canonical="https://univlive.tech/features"
+      />
       <section className="section-padding section-1">
         <div className="container-main">
           <motion.div
