@@ -1,0 +1,36 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Inter:wght@400;500;600&display=swap');
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.submit-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .hero-grid { grid-template-columns: 1fr !important; gap: 40px !important; }
+  .hero-right { display: none !important; }
+  .widget-grid { grid-template-columns: 1fr !important; gap: 40px !important; }
+  .desktop-nav { display: none !important; }
+  .mobile-menu-btn { display: flex !important; }
+}
+
+@media (max-width: 1024px) {
+  .feature-card { width: calc(50% - 10px) !important; }
+}
+
+@media (max-width: 600px) {
+  .feature-card { width: 100% !important; }
+  .hero-cta { flex-direction: column !important; }
+  .hero-cta a { width: 100% !important; justify-content: center !important; }
+  .comparison-grid { grid-template-columns: 1.5fr 1fr 1fr !important; font-size: 12px !important; }
+  .comparison-cell { padding: 10px 10px !important; font-size: 12px !important; }
+  .testimonial-card { padding: 28px 22px !important; }
+}

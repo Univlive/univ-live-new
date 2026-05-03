@@ -38,36 +38,8 @@ import { Button } from "@shared/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@shared/ui/accordion";
 import { Avatar, AvatarFallback, AvatarImage } from "@shared/ui/avatar";
 
-type StatItem = { label: string; value: string; icon?: string };
-type AchievementItem = { title: string; description: string; icon?: string };
-type FacultyItem = { name: string; subject?: string; designation?: string; experience?: string; bio?: string; image?: string };
-type TestimonialItem = { name: string; course?: string; rating?: number; text: string; avatar?: string };
-type FAQItem = { question: string; answer: string };
-
-type TestSeries = {
-  id: string;
-  title: string;
-  description: string;
-  price: string | number;
-  coverImage?: string;
-  subject?: string;
-  difficulty?: string;
-  testsCount?: number;
-  durationMinutes?: number;
-};
-
-function initials(name: string) {
-  return (name || "U")
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((x) => x[0]?.toUpperCase())
-    .join("");
-}
-
-function isTruthyUrl(v: any) {
-  return typeof v === "string" && v.trim().length > 0;
-}
+import { initials, isTruthyUrl } from "@/themes/coaching/shared/themeUtils";
+import type { StatItem, AchievementItem, FacultyItem, TestimonialItem, FAQItem, TestSeries } from "@/themes/coaching/shared/themeTypes";
 
 export default function TenantHomeTheme2() {
   const { tenant, loading } = useTenant();

@@ -1,12 +1,14 @@
 import { motion } from "framer-motion";
-import Navbar from "@widgets/layout/Navbar";
+import Layout from "@widgets/layout/Layout";
 import SEO from "@shared/components/SEO";
-import Footer from "@widgets/layout/Footer";
 import { UserPlus, Palette, Wand2, Clock, Rocket, Settings, ArrowRight } from "lucide-react";
 import { Button } from "@shared/ui/button";
 import { Link } from "react-router-dom";
+import type { LucideIcon } from "lucide-react";
 
-const steps = [
+type Step = { icon: LucideIcon; title: string; description: string; duration: string };
+
+const steps: Step[] = [
   {
     icon: UserPlus,
     title: "Create Your Account",
@@ -47,15 +49,13 @@ const steps = [
 
 export default function HowItWorks() {
   return (
-    <div className="min-h-screen bg-background">
+    <Layout>
       <SEO
         title="How It Works — Launch Any Test Series in Minutes | Univ.live"
         description="See how Univ.live works: set up your coaching portal, create test series for JEE, NEET, CUET, CBSE and more, and track student performance — all in minutes with AI."
         canonical="https://univlive.tech/how-it-works"
       />
-      <Navbar />
-      
-      <main className="pt-24 pb-20">
+      <div className="pb-20">
         {/* Hero */}
         <section className="container mx-auto px-4 lg:px-8 py-16 text-center">
           <motion.div
@@ -88,17 +88,12 @@ export default function HowItWorks() {
                 transition={{ duration: 0.5, delay: index * 0.1 }}
                 className="relative pl-12 lg:pl-16 pb-12 last:pb-0"
               >
-                {/* Timeline Line */}
                 {index < steps.length - 1 && (
                   <div className="absolute left-[18px] lg:left-[22px] top-12 bottom-0 w-0.5 bg-gradient-to-b from-brand-start to-brand-end" />
                 )}
-
-                {/* Icon */}
                 <div className="absolute left-0 w-10 h-10 lg:w-12 lg:h-12 rounded-xl gradient-bg flex items-center justify-center shadow-glow">
                   <step.icon className="w-5 h-5 lg:w-6 lg:h-6 text-white" />
                 </div>
-
-                {/* Content */}
                 <div className="bg-card rounded-2xl p-6 lg:p-8 border border-border/50 shadow-card hover:shadow-card-hover transition-all">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-xl font-display font-bold">{step.title}</h3>
@@ -132,9 +127,7 @@ export default function HowItWorks() {
             </Button>
           </motion.div>
         </section>
-      </main>
-
-      <Footer />
-    </div>
+      </div>
+    </Layout>
   );
 }

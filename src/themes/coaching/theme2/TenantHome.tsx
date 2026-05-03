@@ -1,5 +1,5 @@
 // src/themes/coaching/theme2/TenantHome.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -33,61 +33,19 @@ import {
 
 import { useTenant } from "@app/providers/TenantProvider";
 import { useFavicon } from "@shared/hooks/useFavicon";
-import { db } from "@shared/lib/firebase";
-import { collection, documentId, getDocs, limit, orderBy, query, where } from "firebase/firestore";
 
 import { Button } from "@shared/ui/button";
 import { Card, CardContent } from "@shared/ui/card";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@shared/ui/accordion";
 import { Avatar, AvatarFallback, AvatarImage } from "@shared/ui/avatar";
 
-type StatItem = { label: string; value: string; icon?: string };
-type AchievementItem = { title: string; description: string; icon?: string };
-type FacultyItem = { name: string; subject?: string; designation?: string; experience?: string; bio?: string; image?: string };
-type TestimonialItem = { name: string; course?: string; rating?: number; text: string; avatar?: string };
-type FAQItem = { question: string; answer: string };
-
-type TestSeries = {
-  id: string;
-  title: string;
-  description: string;
-  price: string | number;
-  coverImage?: string;
-  subject?: string;
-  difficulty?: string;
-  testsCount?: number;
-  durationMinutes?: number;
-};
-
-
-type SubjectCard = {
-  title: string;
-  totalTests: number;
-  freeTests: number;
-};
-
-function initials(name: string) {
-  return (name || "U")
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((x) => x[0]?.toUpperCase())
-    .join("");
-}
-
-function isTruthyUrl(v: any) {
-  return typeof v === "string" && v.trim().length > 0;
-}
+import { initials, isTruthyUrl } from "@/themes/coaching/shared/themeUtils";
+import type { StatItem, AchievementItem, FacultyItem, TestimonialItem, FAQItem } from "@/themes/coaching/shared/themeTypes";
 
 export default function TenantHomeTheme2() {
   const { tenant, loading } = useTenant();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const [featured, setFeatured] = useState<TestSeries[]>([]);
-  const [loadingFeatured, setLoadingFeatured] = useState(true);
-
-  const [subjectCards, setSubjectCards] = useState<SubjectCard[]>([]);
-  const [loadingSubjects, setLoadingSubjects] = useState(true);
 
   if (loading) {
     return (
@@ -113,12 +71,6 @@ export default function TenantHomeTheme2() {
 
   const config = tenant.websiteConfig || {};
 
-
-  const selectedTheme2Subjects: string[] = Array.isArray(config.theme2SelectedSubjects)
-    ? config.theme2SelectedSubjects
-    : [];
-
-  const selectedTheme2SubjectsKey = selectedTheme2Subjects.join("|");
 
   const coachingName = config.coachingName || tenant.coachingName || "Your Institute";
   const tagline = config.tagline || tenant.tagline || "Learn smarter. Score higher.";
@@ -162,121 +114,10 @@ export default function TenantHomeTheme2() {
     return cleaned;
   }, [config.socials]);
 
-  const educatorId = tenant.educatorId;
-  const featuredIds: string[] = Array.isArray(config.featuredTestIds) ? config.featuredTestIds : [];
-  const featuredKey = featuredIds.join(",");
-
-  useEffect(() => {
-    if (!educatorId) return;
-
-    async function loadFeatured() {
-      setLoadingFeatured(true);
-      try {
-        let qRef;
-
-        if (featuredIds.length > 0) {
-          const safeIds = featuredIds.slice(0, 10);
-          qRef = query(
-            collection(db, "educators", educatorId, "my_tests"),
-            where(documentId(), "in", safeIds)
-          );
-        } else {
-          qRef = query(
-            collection(db, "educators", educatorId, "my_tests"),
-            orderBy("createdAt", "desc"),
-            limit(4)
-          );
-        }
-
-        const snap = await getDocs(qRef);
-        const rows = snap.docs.map((d) => ({
-          id: d.id,
-          ...(d.data() as any),
-        })) as TestSeries[];
-
-        setFeatured(rows);
-      } catch {
-        setFeatured([]);
-      } finally {
-        setLoadingFeatured(false);
-      }
-    }
-
-    loadFeatured();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [educatorId, featuredKey]);
-
-
-  useEffect(() => {
-      if (!educatorId) return;
-
-      async function loadSubjectCards() {
-        setLoadingSubjects(true);
-
-        try {
-          const snap = await getDocs(
-            collection(db, "educators", educatorId, "my_tests")
-          );
-
-          const map = new Map<string, SubjectCard>();
-
-          snap.docs.forEach((docSnap) => {
-            const row = docSnap.data() as any;
-            const subject = String(row?.subject || "").trim() || "General Test";
-
-            const current = map.get(subject) || {
-              title: subject,
-              totalTests: 0,
-              freeTests: 0,
-            };
-
-            current.totalTests += 1;
-
-            const price = row?.price;
-            const isFree =
-              price === "Included" ||
-              price === "Free" ||
-              price === 0 ||
-              price === "0" ||
-              price === null ||
-              price === undefined;
-
-            if (isFree) current.freeTests += 1;
-
-            map.set(subject, current);
-          });
-
-          let rows = Array.from(map.values()).sort((a, b) => b.totalTests - a.totalTests);
-
-          if (selectedTheme2Subjects.length > 0) {
-            rows = rows
-              .filter((item) => selectedTheme2Subjects.includes(item.title))
-              .sort(
-                (a, b) =>
-                  selectedTheme2Subjects.indexOf(a.title) -
-                  selectedTheme2Subjects.indexOf(b.title)
-              );
-          } else {
-            rows = rows.slice(0, 6);
-          }
-
-          setSubjectCards(rows);
-        } catch (error) {
-          console.error("Failed to load Theme 2 subjects:", error);
-          setSubjectCards([]);
-        } finally {
-          setLoadingSubjects(false);
-        }
-      }
-
-      loadSubjectCards();
-    }, [educatorId, selectedTheme2SubjectsKey]);
-
   // Updated Navigation
   const navLinks = [
     { label: "Home", href: "#top" },
     { label: "Features", href: "#features" },
-    { label: "Test Series", href: "#tests" },
     { label: "Contact Us", href: "#contact" },
   ];
 
@@ -427,8 +268,8 @@ export default function TenantHomeTheme2() {
               </div>
 
               <h1 className="text-3xl sm:text-5xl lg:text-[64px] font-extrabold tracking-tighter text-zinc-950 leading-[1.05] mb-6">
-                Your CUET Preparation<br/>
-                <span className="text-zinc-500">Starts With {coachingName}</span>
+                Ace Your Exams<br/>
+                <span className="text-zinc-500">with {coachingName}</span>
               </h1>
 
               <div className="flex flex-col sm:flex-row gap-4 mb-10">
@@ -506,7 +347,7 @@ export default function TenantHomeTheme2() {
               </div>
               <h3 className="text-xl font-bold text-zinc-950 mb-3">Real Exam–Like Test Experience</h3>
               <p className="text-zinc-500 leading-relaxed text-sm sm:text-base">
-                Feels exactly like the actual CUET exam with authentic interface, timer, and navigation. Get comfortable before the real deal.
+                Feels exactly like the actual exam with authentic interface, timer, and navigation. Get comfortable before the real deal.
               </p>
             </motion.div>
 
@@ -576,63 +417,6 @@ export default function TenantHomeTheme2() {
         </div>
       </section>
 
-      {/* TEST SERIES SECTION */}
-      <section id="tests" className="py-16 sm:py-20 lg:py-24 bg-white border-t border-zinc-100">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          
-          {/* NEW: OUR TESTS (CUET Style Subject Cards) */}
-          <div className="mb-12 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-            <div>
-              <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-zinc-950 mb-4">
-                Our Tests
-              </h2>
-              <p className="text-zinc-500">Master every subject with dedicated mock tests.</p>
-            </div>
-            <Link to="/login?role=student" className="shrink-0">
-              <Button className="rounded-full bg-zinc-950 text-white hover:bg-zinc-800 px-8 py-6 text-base font-semibold shadow-sm">
-                Get Started
-              </Button>
-            </Link>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {subjectCards.map((subject, idx) => (
-              <motion.div
-                key={idx}
-                initial={{ opacity: 0, y: 15 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.4, delay: idx * 0.05 }}
-                className="bg-white border border-zinc-200 rounded-[2rem] p-5 sm:p-6 shadow-[0_4px_20px_rgb(0,0,0,0.03)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] transition-all duration-300 relative overflow-hidden group"
-              >
-                {/* NTA logo */}
-                <div className="absolute right-6 top-6 h-12 w-12 bg-white rounded-full flex items-center justify-center border-2 border-zinc-100 shadow-sm overflow-hidden p-1 z-10">
-                   <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQs7iboUwzXcYfbV94AQ5DctkCyCVqRc-0zwA&s" alt="NTA Logo" className="w-full h-full object-contain" />
-                </div>
-
-                <div className="pr-14 sm:pr-16 mb-8">
-                  <h3 className="text-xl font-bold text-zinc-950 mb-2">{subject.title}</h3>
-                  <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                    <span className="text-sm font-medium text-zinc-500">{subject.totalTests} Total Tests</span>
-                    <span className="bg-green-600 text-white text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm relative sm:after:content-[''] sm:after:absolute sm:after:right-[-6px] sm:after:top-0 sm:after:border-t-[8px] sm:after:border-b-[8px] sm:after:border-l-[6px] sm:after:border-t-transparent sm:after:border-b-transparent sm:after:border-l-green-600">
-                      Expert-Curated Test(s)
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <div className="bg-[#FAFAFA] border border-zinc-200 text-zinc-600 text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5">
-                    <FileText className="h-3 w-3" /> English
-                  </div>
-                  
-                </div>
-              </motion.div>
-            ))}
-          </div>
-
-        </div>
-      </section>
-
       {/* UPDATED TESTIMONIALS */}
       <section id="reviews" className="py-16 sm:py-20 lg:py-24 bg-[#FAFAFA]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -649,7 +433,7 @@ export default function TenantHomeTheme2() {
 
           <div className="grid md:grid-cols-3 gap-6">
             {(testimonials.length ? testimonials : [
-              { name: "Jason", text: "I've taken dozens of courses, but this is the only one that made improvement feel doable.", rating: 5, course: "CUET Mock Package" },
+              { name: "Jason", text: "I've taken dozens of courses, but this is the only one that made improvement feel doable.", rating: 5, course: "Mock Test Package" },
               { name: "Laolu", text: "So clear and structured. I finally understood where to start and felt confident.", rating: 5, course: "Subject Test Series" },
               { name: "Danielle", text: "No fluff, just step-by-step guidance. This removed every excuse I had for waiting.", rating: 5, course: "Full Analytics Plan" }
             ]).slice(0, 3).map((t, idx) => (
