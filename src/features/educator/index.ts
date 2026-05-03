@@ -1,0 +1,15 @@
+export { default as AccessCodes } from "./AccessCodes";
+export { default as EducatorAnalytics } from "./Analytics";
+export { default as Billing } from "./Billing";
+export { default as EducatorContent } from "./ContentManagement";
+export { default as EducatorDashboard } from "./Dashboard";
+export { default as Divisions } from "./Divisions";
+export { default as DppGenerator } from "./DppGenerator";
+export { default as InstituteBuilder } from "./InstituteBuilder";
+export { default as LearnerDetails } from "./LearnerDetails";
+export { default as Learners } from "./Learners";
+export { default as Messages } from "./Messages";
+export { default as EducatorQuestionBank } from "./QuestionBank";
+export { default as Settings } from "./Settings";
+export { default as WebsiteSettings } from "./WebsiteSettings";
+export { TestSeries, ManageQuestionsPage } from "./test-series";

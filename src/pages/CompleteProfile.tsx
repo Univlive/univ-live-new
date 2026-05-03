@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Home, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { auth, db } from "@/lib/firebase";
+import { auth, db } from "@shared/lib/firebase";
 import {
   GoogleAuthProvider,
   onAuthStateChanged,
@@ -17,11 +17,11 @@ import {
   setDoc,
 } from "firebase/firestore";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { useTenant } from "@/contexts/TenantProvider";
-import { buildTenantUrl } from "@/lib/tenant";
+import { Button } from "@shared/ui/button";
+import { Input } from "@shared/ui/input";
+import { Label } from "@shared/ui/label";
+import { useTenant } from "@app/providers/TenantProvider";
+import { buildTenantUrl } from "@shared/lib/tenant";
 
 type RoleUI = "student" | "educator";
 

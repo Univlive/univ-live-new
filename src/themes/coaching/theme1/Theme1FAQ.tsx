@@ -1,12 +1,12 @@
 import { motion } from "framer-motion";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@shared/ui/badge";
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
-} from "@/components/ui/accordion";
-import { useTenant } from "@/contexts/TenantProvider";
+} from "@shared/ui/accordion";
+import { useTenant } from "@app/providers/TenantProvider";
 
 interface FAQItem {
   question: string;

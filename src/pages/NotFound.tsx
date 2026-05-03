@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { useEffect } from "react";
-import { ButtonWithIcon } from "@/components/ui/button";
+import { ButtonWithIcon } from "@shared/ui/button";
 
 const NotFound = () => {
   const location = useLocation();

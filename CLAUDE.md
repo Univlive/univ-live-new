@@ -30,12 +30,16 @@ Multi-tenant SaaS platform for coaching institutes. Built with React + TypeScrip
 | File | Purpose |
 |------|---------|
 | `src/AppRoutes.tsx` | Central routing; tenant vs main domain split |
-| `src/components/auth/RequireRole.tsx` | Route-level role guard |
-| `src/components/routes/StudentRoute.tsx` | Student route protection |
-| `src/contexts/` | AuthContext, TenantContext |
-| `src/lib/studentRegistration.ts` | POST `/api/tenant/register-student` on login |
-| `src/lib/firebase.ts` | Firebase client init |
-| `src/services/` | Auth service, tenant service |
+| `src/app/routes/` | Modular route files (admin, educator, student, public) |
+| `src/app/providers/` | AuthProvider, TenantProvider (contexts) |
+| `src/shared/auth/RequireRole.tsx` | Route-level role guard |
+| `src/shared/routes/StudentRoute.tsx` | Student route protection |
+| `src/shared/lib/studentRegistration.ts` | POST `/api/tenant/register-student` on login |
+| `src/shared/lib/firebase.ts` | Firebase client init |
+| `src/shared/services/` | Auth service, tenant service |
+| `src/features/educator/` | All educator portal pages + components |
+| `src/features/student/` | All student portal pages + components + types |
+| `src/features/admin/` | All admin panel pages + components |
 | `api/_lib/` | Shared Vercel function utils (Firebase admin, Razorpay, Gemini, Discord logging) |
 | `api/tenant/` | Tenant slug lookup, student registration |
 | `api/billing/` | Razorpay seat assign/revoke/update |

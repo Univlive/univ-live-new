@@ -16,9 +16,9 @@ import {
   MessageCircle,
 } from "lucide-react";
 
-import { useTenant } from "@/contexts/TenantProvider";
-import { useFavicon } from "@/hooks/useFavicon";
-import { Button } from "@/components/ui/button";
+import { useTenant } from "@app/providers/TenantProvider";
+import { useFavicon } from "@shared/hooks/useFavicon";
+import { Button } from "@shared/ui/button";
 
 interface Theme1LayoutProps {
   children?: React.ReactNode;

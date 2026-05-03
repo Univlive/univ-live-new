@@ -1,222 +1,37 @@
 import React from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
-import { useTenant } from "@/contexts/TenantProvider";
+import { Route, Routes } from "react-router-dom";
 
-// Route Guards
-import RequireRole from "@/components/auth/RequireRole";
-import StudentRoute from "@/components/routes/StudentRoute"; // <--- IMPORT THIS
-
-// Tenant / Public Pages edit uh
-import TenantHome from "@/themes/coaching/TenantHome";
+import { useTenant } from "@app/providers/TenantProvider";
+import AdminTestManager from "@/pages/AdminTestManager";
+import AdminQuestions from "@features/admin/Questions";
 import TenantCourses from "@/themes/coaching/theme1/TenantCourses";
-import Login from "@/pages/Login";
-import Signup from "@/pages/Signup";
-import NotFound from "@/pages/NotFound";
+import TenantHome from "@/themes/coaching/TenantHome";
 
-// Platform Pages (Univ.Live main site)
-import Index from "@/pages/Index";
-import HowItWorks from "@/pages/HowItWorks";
-import Pricing from "@/pages/Pricing";
-import Contact from "@/pages/Contact";
-import Features from "@/pages/Features";
-import CompleteProfile from "@/pages/CompleteProfile";
-
-import AdminTestManager from "./pages/AdminTestManager";
-
-// Admin pages you added in /pages/admin
-import AdminDashboard from "@/pages/admin/Dashboard";
-import AdminAnalytics from "@/pages/admin/Analytics";
-import AdminQuestions from "@/pages/admin/Questions";
-import AdminTestBank from "@/pages/admin/TestBank";
-import AdminTestForm from "@/pages/admin/TestForm";
-import AdminLayout from "./pages/admin/AdminLayout";
-import AdminQuestionBank from "@/pages/admin/QuestionBank";
-import AdminSeatManagement from "@/pages/admin/SeatManagement";
-import AdminTemplates from "@/pages/admin/Templates";
-import AdminEducators from "@/pages/admin/Educators";
-import AdminPlanManagement from "@/pages/admin/PlanManagement";
-import AdminSubjectManagement from "@/pages/admin/SubjectManagement";
-import AdminCouponManagement from "@/pages/admin/CouponManagement";
-import AdminPaymentLogs from "@/pages/admin/PaymentLogs";
-import AdminContentLibrary from "@/pages/admin/ContentLibrary";
-import AdminDppTemplate from "@/pages/admin/DppTemplate";
-import EducatorContent from "@/pages/educator/ContentManagement";
-import DppGenerator from "@/pages/educator/DppGenerator";
-import StudentContent from "@/pages/student/StudentContent";
-import StudentChatbot from "@/pages/student/StudentChatbot";
-
-// Educator Dashboard
-import EducatorLayout from "@/components/educator/EducatorLayout";
-import EducatorDashboard from "@/pages/educator/Dashboard";
-import EducatorAnalytics from "@/pages/educator/Analytics";
-import Learners from "@/pages/educator/Learners";
-import LearnerDetails from "@/pages/educator/LearnerDetails";
-import TestSeries from "@/pages/educator/TestSeries/TestSeries";
-import ManageQuestionsPage from "@/pages/educator/TestSeries/ManageQuestionsPage";
-import AccessCodes from "@/pages/educator/AccessCodes";
-import Messages from "@/pages/educator/Messages";
-import WebsiteSettings from "@/pages/educator/WebsiteSettings";
-import Billing from "@/pages/educator/Billing";
-import Settings from "@/pages/educator/Settings";
-import Divisions from "@/pages/educator/Divisions";
-import Join from "@/pages/Join";
-import Impersonate from "@/pages/Impersonate";
-import EducatorQuestionBank from "@/pages/educator/QuestionBank";
-import InstituteBuilder from "@/pages/educator/InstituteBuilder";
-
-// Student Dashboard
-import StudentLayout from "@/pages/student/StudentLayout";
-import StudentDashboard from "@/pages/student/StudentDashboard";
-import StudentTests from "@/pages/student/StudentTests";
-import StudentTestDetails from "@/pages/student/StudentTestDetails";
-import StudentCBTAttempt from "@/pages/student/StudentCBTAttempt";
-import StudentAttempts from "@/pages/student/StudentAttempts";
-import StudentAttemptDetails from "@/pages/student/StudentAttemptDetails";
-import StudentResults from "@/pages/student/StudentResults";
-import StudentRankings from "@/pages/student/StudentRankings";
-import StudentMessages from "@/pages/student/StudentMessages";
-import StudentSettings from "@/pages/student/StudentSettings";
+import { getAdminRoutes } from "@app/routes/adminRoutes";
+import { getEducatorRoutes } from "@app/routes/educatorRoutes";
+import { getSharedPublicRoutes, getMainDomainPublicRoutes, getTenantDomainPublicRoutes, getAdminRedirectRoute } from "@app/routes/publicRoutes";
+import { getStudentRoutes } from "@app/routes/studentRoutes";
 
 export default function AppRoutes() {
   const { isTenantDomain } = useTenant();
 
   return (
     <Routes>
-      {/* --- PUBLIC ROUTES --- */}
-      <Route path="/impersonate" element={<Impersonate />} />
-      <Route path="/join/:token" element={<Join />} />
-
-      {/* --- SHARED STUDENT ROUTES (Available on both Tenant and Main Platform) --- */}
-      <Route path="/student" element={<StudentRoute />}>
-        <Route element={<StudentLayout />}>
-          <Route index element={<StudentDashboard />} />
-          <Route path="dashboard" element={<StudentDashboard />} />
-          <Route path="tests" element={<StudentTests />} />
-          <Route path="tests/:testId" element={<StudentTestDetails />} />
-          <Route path="tests/:testId/attempt" element={<StudentCBTAttempt />} />
-          <Route path="attempts" element={<StudentAttempts />} />
-          <Route path="attempts/:attemptId" element={<StudentAttemptDetails />} />
-          <Route path="results/:attemptId" element={<StudentResults />} />
-          <Route path="rankings" element={<StudentRankings />} />
-          <Route path="messages" element={<StudentMessages />} />
-          <Route path="settings" element={<StudentSettings />} />
-          <Route path="content" element={<StudentContent />} />
-          <Route path="chatbot" element={<StudentChatbot />} />
-        </Route>
-      </Route>
+      {getSharedPublicRoutes()}
+      {getStudentRoutes()}
 
       {isTenantDomain ? (
         <>
-          {/* --- Public Routes (Open to everyone) --- */}
-          <Route path="/" element={<TenantHome />} />
+          {getTenantDomainPublicRoutes(<TenantHome />, <TenantCourses />)}
           <Route path="/admin-test" element={<AdminTestManager />} />
           <Route path="/admin-test/questions/:testId" element={<AdminQuestions />} />
-          <Route path="/courses" element={<TenantCourses />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/complete-profile" element={<CompleteProfile />} />
-
-          {/* --- PROTECTED EDUCATOR ROUTES (Tenant Admin) --- */}
-          <Route
-            path="/educator"
-            element={
-              <RequireRole allow={["EDUCATOR", "ADMIN"]} redirectTo="/login">
-                <EducatorLayout />
-              </RequireRole>
-            }
-          >
-            <Route index element={<EducatorDashboard />} />
-            <Route path="dashboard" element={<EducatorDashboard />} />
-            <Route path="learners" element={<Learners />} />
-            <Route path="learners/:learnerId" element={<LearnerDetails />} />
-            <Route path="test-series" element={<TestSeries />} />
-            <Route path="test-series/:testId/questions" element={<ManageQuestionsPage />} />
-            <Route path="question-bank" element={<EducatorQuestionBank />} />
-            <Route path="access-codes" element={<AccessCodes />} />
-            <Route path="messages" element={<Messages />} />
-            <Route path="website-settings" element={<WebsiteSettings />} />
-            <Route path="billing" element={<Billing />} />
-            <Route path="settings" element={<Settings />} />
-            <Route path="divisions" element={<Divisions />} />
-            <Route path="content" element={<EducatorContent />} />
-            <Route path="dpp" element={<DppGenerator />} />
-            <Route path="analytics" element={<EducatorAnalytics />} />
-            <Route path="website-builder" element={<InstituteBuilder />} />
-          </Route>
-
-          <Route path="*" element={<NotFound />} />
+          {getEducatorRoutes()}
         </>
       ) : (
         <>
-          <Route path="/" element={<Index />} />
-          <Route path="/how-it-works" element={<HowItWorks />} />
-          <Route path="/pricing" element={<Pricing />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/admin/login" element={<Login />} />
-          <Route path="/contact" element={<Contact />} />
-          <Route path="/features" element={<Features />} />
-          <Route path="/complete-profile" element={<CompleteProfile />} />
-
-
-          {/* Admin Panel */}
-        <Route
-          path="/admin"
-          element={
-            <RequireRole allow={["ADMIN"]} redirectTo="/admin/login">
-              <AdminLayout />
-            </RequireRole>
-          }
-        >
-          <Route index element={<Navigate to="dashboard" replace />} />
-          <Route path="dashboard" element={<AdminDashboard />} />
-          <Route path="analytics" element={<AdminAnalytics />} />
-
-          {/* Keeping your current lovable routes to avoid changing your files */}
-          <Route path="tests" element={<AdminTestBank />} />
-          <Route path="tests/new" element={<AdminTestForm />} />
-          <Route path="tests/edit/:id" element={<AdminTestForm />} />
-          <Route path="questions/:testId" element={<AdminQuestions />} />
-          <Route path="templates" element={<AdminTemplates />} />
-          <Route path="question-bank" element={<AdminQuestionBank />} />
-          <Route path="seat-management" element={<AdminSeatManagement />} />
-          <Route path="educators" element={<AdminEducators />} />
-          <Route path="plans" element={<AdminPlanManagement />} />
-          <Route path="subjects" element={<AdminSubjectManagement />} />
-          <Route path="content" element={<AdminContentLibrary />} />
-          <Route path="dpp-template" element={<AdminDppTemplate />} />
-          <Route path="coupons" element={<AdminCouponManagement />} />
-          <Route path="payment-logs" element={<AdminPaymentLogs />} />
-        </Route>
-
-          {/* Main Platform Educator Dashboard */}
-          <Route
-            path="/educator"
-            element={
-              <RequireRole allow={["EDUCATOR", "ADMIN"]} redirectTo="/login">
-                <EducatorLayout />
-              </RequireRole>
-            }
-          >
-            <Route index element={<EducatorDashboard />} />
-            <Route path="dashboard" element={<EducatorDashboard />} />
-            <Route path="learners" element={<Learners />} />
-            <Route path="learners/:learnerId" element={<LearnerDetails />} />
-            <Route path="test-series" element={<TestSeries />} />
-            <Route path="test-series/:testId/questions" element={<ManageQuestionsPage />} />
-            <Route path="question-bank" element={<EducatorQuestionBank />} />
-            <Route path="access-codes" element={<AccessCodes />} />
-            <Route path="messages" element={<Messages />} />
-            <Route path="website-settings" element={<WebsiteSettings />} />
-            <Route path="billing" element={<Billing />} />
-            <Route path="settings" element={<Settings />} />
-            <Route path="divisions" element={<Divisions />} />
-            <Route path="content" element={<EducatorContent />} />
-            <Route path="dpp" element={<DppGenerator />} />
-            <Route path="analytics" element={<EducatorAnalytics />} />
-            <Route path="website-builder" element={<InstituteBuilder />} />
-          </Route>
-
-          <Route path="*" element={<NotFound />} />
+          {getMainDomainPublicRoutes()}
+          {getAdminRoutes(getAdminRedirectRoute())}
+          {getEducatorRoutes()}
         </>
       )}
     </Routes>

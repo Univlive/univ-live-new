@@ -1,0 +1,16 @@
+export { default as AdminLayout } from "./AdminLayout";
+export { default as AdminAnalytics } from "./Analytics";
+export { default as AdminContentLibrary } from "./ContentLibrary";
+export { default as AdminCouponManagement } from "./CouponManagement";
+export { default as AdminDashboard } from "./Dashboard";
+export { default as AdminDppTemplate } from "./DppTemplate";
+export { default as AdminEducators } from "./Educators";
+export { default as AdminPaymentLogs } from "./PaymentLogs";
+export { default as AdminPlanManagement } from "./PlanManagement";
+export { default as AdminQuestionBank } from "./QuestionBank";
+export { default as AdminQuestions } from "./Questions";
+export { default as AdminSeatManagement } from "./SeatManagement";
+export { default as AdminSubjectManagement } from "./SubjectManagement";
+export { default as AdminTemplates } from "./Templates";
+export { default as AdminTestBank } from "./TestBank";
+export { default as AdminTestForm } from "./TestForm";

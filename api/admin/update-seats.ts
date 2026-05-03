@@ -4,9 +4,8 @@ import { requireUser } from "../_lib/requireUser.js";
 import { notifyDiscord } from "../_lib/discordLogger.js";
 
 /**
- * Admin-only: Set/override an educator's total seat limit.
- * - Updates educators/{educatorId}.seatLimit + lastSeatTransaction*
- * - Appends educators/{educatorId}/seatTransactions/{autoId}
+ * Admin-only: Set/override an educator's total seat limit and optionally apply
+ * feature defaults from a plan.
  *
  * Body:
  *  - educatorId?: string
@@ -14,6 +13,7 @@ import { notifyDiscord } from "../_lib/discordLogger.js";
  *  - newSeatLimit: number
  *  - transactionId: string
  *  - note?: string
+ *  - planId?: string  — if provided, reads plans/{planId}.featureDefaults and applies to educator
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
@@ -23,6 +23,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const educatorIdRaw = String(req.body?.educatorId || "").trim();
     const tenantSlugRaw = String(req.body?.tenantSlug || "").trim().toLowerCase();
+    const planIdRaw = String(req.body?.planId || "").trim();
 
     const newSeatLimitNum = Number(req.body?.newSeatLimit);
     const transactionId = String(req.body?.transactionId || "").trim();
@@ -38,7 +39,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     let educatorId = educatorIdRaw;
 
-    // Resolve via tenant slug if educatorId not provided
     if (!educatorId && tenantSlugRaw) {
       const tenantSnap = await db.doc(`tenants/${tenantSlugRaw}`).get();
       if (!tenantSnap.exists) return res.status(404).json({ error: "Tenant not found" });
@@ -55,7 +55,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const newSeatLimit = Math.floor(newSeatLimitNum);
     const delta = newSeatLimit - prevSeatLimit;
 
-    // Don't allow admin to reduce below currently used active seats
     let used = 0;
     try {
       const agg = await db
@@ -78,6 +77,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    // Resolve plan feature defaults if planId provided
+    let featureUpdate: Record<string, unknown> = {};
+    let appliedPlanName: string | null = null;
+
+    if (planIdRaw) {
+      const planSnap = await db.doc(`plans/${planIdRaw}`).get();
+      if (!planSnap.exists) return res.status(404).json({ error: "Plan not found" });
+      const planData = planSnap.data() as any;
+      const fd = planData?.featureDefaults;
+      appliedPlanName = planData?.name || planIdRaw;
+
+      if (fd) {
+        featureUpdate = {
+          "features.contentLibrary": Boolean(fd.contentLibrary),
+          "features.chatbot": Boolean(fd.chatbot),
+          "features.dpp": Boolean(fd.dpp),
+          ...(fd.chatbot && typeof fd.chatDailyTokenLimit === "number"
+            ? { chatDailyTokenLimit: Math.max(0, Math.floor(fd.chatDailyTokenLimit)) }
+            : {}),
+          ...(fd.dpp && typeof fd.dppDailyLimit === "number"
+            ? { dppDailyLimit: Math.max(0, Math.floor(fd.dppDailyLimit)) }
+            : {}),
+        };
+      }
+    }
+
     const txRef = db.collection(`educators/${educatorId}/seatTransactions`).doc();
 
     const batch = db.batch();
@@ -94,9 +119,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         lastSeatTransactionAt: admin.firestore.FieldValue.serverTimestamp(),
         lastSeatTransactionDelta: delta,
         lastSeatTransactionNote: note || null,
-
-        // Handy for UI/debug
         lastSeatTransactionUsedSeats: used,
+
+        ...(planIdRaw ? { lastPlanId: planIdRaw } : {}),
+        ...featureUpdate,
       },
       { merge: true }
     );
@@ -111,6 +137,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedBy: adminUser.uid,
       updatedByEmail: adminUser.email || null,
+      ...(planIdRaw ? { planId: planIdRaw, planName: appliedPlanName } : {}),
+      ...(Object.keys(featureUpdate).length > 0 ? { featuresApplied: featureUpdate } : {}),
     });
 
     await batch.commit();
@@ -124,6 +152,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       delta,
       transactionId,
       txDocId: txRef.id,
+      ...(appliedPlanName ? { planApplied: appliedPlanName, featuresApplied: featureUpdate } : {}),
     });
   } catch (e: any) {
     console.error(e);

@@ -30,13 +30,13 @@ import {
   ChevronRight
 } from "lucide-react";
 
-import { useTenant } from "@/contexts/TenantProvider";
-import { db } from "@/lib/firebase";
+import { useTenant } from "@app/providers/TenantProvider";
+import { db } from "@shared/lib/firebase";
 import { collection, documentId, getDocs, limit, orderBy, query, where } from "firebase/firestore";
 
-import { Button } from "@/components/ui/button";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@shared/ui/button";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@shared/ui/accordion";
+import { Avatar, AvatarFallback, AvatarImage } from "@shared/ui/avatar";
 
 type StatItem = { label: string; value: string; icon?: string };
 type AchievementItem = { title: string; description: string; icon?: string };

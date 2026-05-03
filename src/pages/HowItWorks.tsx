@@ -1,8 +1,8 @@
 import { motion } from "framer-motion";
-import Navbar from "@/components/layout/Navbar";
-import Footer from "@/components/layout/Footer";
+import Navbar from "@widgets/layout/Navbar";
+import Footer from "@widgets/layout/Footer";
 import { UserPlus, Palette, Wand2, Clock, Rocket, Settings, ArrowRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@shared/ui/button";
 import { Link } from "react-router-dom";
 
 const steps = [

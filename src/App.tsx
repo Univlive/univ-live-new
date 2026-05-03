@@ -1,14 +1,14 @@
 // src/App.tsx
 import React from "react";
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toaster } from "@shared/ui/toaster";
+import { Toaster as Sonner } from "@shared/ui/sonner";
+import { TooltipProvider } from "@shared/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { BrowserRouter } from "react-router-dom";
 
-import { AuthProvider } from "@/contexts/AuthProvider";
-import { TenantProvider } from "@/contexts/TenantProvider";
+import { AuthProvider } from "@app/providers/AuthProvider";
+import { TenantProvider } from "@app/providers/TenantProvider";
 
 import AppRoutes from "@/AppRoutes"; // we'll create this as a small inner module below
 

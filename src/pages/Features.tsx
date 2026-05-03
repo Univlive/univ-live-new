@@ -1,4 +1,4 @@
-import  Layout  from "@/components/layout/Layout";
+import  Layout  from "@widgets/layout/Layout";
 import { motion } from "framer-motion";
 import { FileText, Users, Brain, Headphones, Gift, CheckCircle } from "lucide-react";
 

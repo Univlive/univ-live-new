@@ -2,17 +2,17 @@ import { useMemo, useState, useEffect } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Eye, EyeOff, Loader2, Home } from "lucide-react";
 import { toast } from "sonner";
-import { useTenant } from "@/contexts/TenantProvider";
+import { useTenant } from "@app/providers/TenantProvider";
 
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { arrayUnion, doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { registerStudentForTenant } from "@/lib/studentRegistration";
+import { auth, db } from "@shared/lib/firebase";
+import { Button } from "@shared/ui/button";
+import { Input } from "@shared/ui/input";
+import { Label } from "@shared/ui/label";
+import { registerStudentForTenant } from "@shared/lib/studentRegistration";
 import logo from "../assets/univ-logo.png";
-import { generateSessionId, setLocalSessionId, syncSessionWithFirestore } from "@/lib/session";
+import { generateSessionId, setLocalSessionId, syncSessionWithFirestore } from "@shared/lib/session";
 
 type RoleUI = "student" | "educator";
 

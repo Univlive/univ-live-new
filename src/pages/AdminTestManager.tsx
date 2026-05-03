@@ -3,14 +3,14 @@ import { useNavigate } from "react-router-dom";
 import { 
   Plus, Trash2, List, Loader2
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
+import { Button } from "@shared/ui/button";
+import { Input } from "@shared/ui/input";
+import { Textarea } from "@shared/ui/textarea";
+import { Card, CardContent, CardHeader, CardTitle } from "@shared/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@shared/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@shared/ui/select";
+import { Badge } from "@shared/ui/badge";
+import { Label } from "@shared/ui/label";
 import { toast } from "sonner";
 
 // Firebase
@@ -18,7 +18,7 @@ import {
   collection, addDoc, updateDoc, doc, deleteDoc,
   onSnapshot, query, where, serverTimestamp
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { db } from "@shared/lib/firebase";
 
 export default function AdminTestManager() {
   const navigate = useNavigate();

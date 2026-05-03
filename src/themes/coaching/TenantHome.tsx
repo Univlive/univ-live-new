@@ -1,5 +1,5 @@
 import React from "react";
-import { useTenant } from "@/contexts/TenantProvider";
+import { useTenant } from "@app/providers/TenantProvider";
 
 import Theme1Home from "@/themes/coaching/theme1/TenantHome";
 import Theme2Home from "@/themes/coaching/theme2/TenantHome";
@@ -36,7 +36,7 @@ export default function TenantHome() {
     return <BuilderThemeHome />;
   }
 
-  const themeId = tenant?.websiteConfig?.themeId || "theme1";
+  const themeId = tenant?.websiteConfig?.themeId || "theme2";
 
   switch (themeId) {
     case "theme2":

@@ -1,9 +1,9 @@
-import  Layout  from "@/components/layout/Layout";
+import  Layout  from "@widgets/layout/Layout";
 import { motion } from "framer-motion";
 import { Mail, Phone, Clock } from "lucide-react";
-import { ButtonWithIcon } from "@/components/ui/button";
+import { ButtonWithIcon } from "@shared/ui/button";
 import { useState } from "react";
-import { useToast } from "@/hooks/use-toast";
+import { useToast } from "@shared/hooks/use-toast";
 
 const Contact = () => {
   const { toast } = useToast();

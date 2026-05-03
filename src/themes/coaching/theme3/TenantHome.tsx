@@ -29,14 +29,14 @@ import {
   BookOpen
 } from "lucide-react";
 
-import { useTenant } from "@/contexts/TenantProvider";
-import { useFavicon } from "@/hooks/useFavicon";
-import { db } from "@/lib/firebase";
+import { useTenant } from "@app/providers/TenantProvider";
+import { useFavicon } from "@shared/hooks/useFavicon";
+import { db } from "@shared/lib/firebase";
 import { collection, documentId, getDocs, limit, orderBy, query, where } from "firebase/firestore";
 
-import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@shared/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@shared/ui/avatar";
+import { Badge } from "@shared/ui/badge";
 
 type FacultyItem = { name: string; subject?: string; designation?: string; experience?: string; bio?: string; image?: string };
 type TestimonialItem = { name: string; course?: string; rating?: number; text: string; avatar?: string };

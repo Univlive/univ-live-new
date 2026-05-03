@@ -4,8 +4,8 @@
 // in the Website Builder (InstituteBuilder.tsx). Reads builderConfig from
 // the educators/{uid} Firestore document via TenantProvider.
 
-import { useTenant } from "@/contexts/TenantProvider";
-import { useFavicon } from "@/hooks/useFavicon";
+import { useTenant } from "@app/providers/TenantProvider";
+import { useFavicon } from "@shared/hooks/useFavicon";
 import { Link } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 
@@ -70,7 +70,7 @@ export default function BuilderThemeHome() {
           to="/login"
           className="mt-4 inline-flex items-center gap-2 rounded-full bg-indigo-600 text-white px-6 py-2.5 text-sm font-semibold hover:bg-indigo-700 transition-colors"
         >
-          Student Login
+          Login
         </Link>
       </div>
     );
