@@ -3,7 +3,7 @@ import { ArrowRight, Sparkles } from "lucide-react";
 import { motion } from "framer-motion";
 
 // Toggle this to show/hide the announcement bar
-export const SHOW_ANNOUNCEMENT = true;
+export const SHOW_ANNOUNCEMENT = false;
 
 // Announcement content - easy to update
 const ANNOUNCEMENT = {

@@ -28,7 +28,6 @@ export function getMainDomainPublicRoutes() {
       <Route path="/" element={<Index />} />
       <Route path="/how-it-works" element={<HowItWorks />} />
       <Route path="/pricing" element={<Pricing />} />
-      <Route path="/login" element={<Login />} />
       <Route path="/admin/login" element={<Login />} />
       <Route path="/contact" element={<Contact />} />
       <Route path="/features" element={<Features />} />

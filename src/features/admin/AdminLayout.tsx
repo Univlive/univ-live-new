@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { signOut } from "firebase/auth";
+import { auth } from "@shared/lib/firebase";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -156,7 +158,7 @@ export default function AdminLayout() {
         <Button
           variant="ghost"
           className={cn("w-full gap-3 text-muted-foreground hover:text-destructive", collapsed && !mobile ? "justify-center px-0" : "justify-start")}
-          onClick={() => navigate("/login")}
+          onClick={() => signOut(auth).then(() => navigate("/admin/login"))}
           title={collapsed && !mobile ? "Logout" : undefined}
         >
           <LogOut className="h-5 w-5" />
