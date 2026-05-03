@@ -60,7 +60,9 @@ export default function Login() {
     if (!firebaseUser || !profile) return;
 
     const r = String(profile.role || "").toUpperCase();
-    if (r === "EDUCATOR" || r === "ADMIN") {
+    if (r === "ADMIN") {
+      nav("/admin", { replace: true });
+    } else if (r === "EDUCATOR") {
       nav("/educator", { replace: true });
     } else if (r === "STUDENT") {
       nav("/student", { replace: true });
@@ -127,8 +129,14 @@ export default function Login() {
           ? [data.tenantSlug]
           : [];
 
-      // ---- educator / admin: always redirect to /educator ----
-      if (roleDb === "EDUCATOR" || roleDb === "ADMIN") {
+      if (roleDb === "ADMIN") {
+        toast.success("Welcome back!");
+        await refreshProfile();
+        nav("/admin", { replace: true });
+        return;
+      }
+
+      if (roleDb === "EDUCATOR") {
         toast.success("Welcome back!");
         await refreshProfile();
         nav("/educator", { replace: true });
