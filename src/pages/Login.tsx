@@ -157,11 +157,10 @@ export default function Login() {
         }
 
         // --- Single Session Logic for Students ---
-        // Write to Firestore first, then localStorage — avoids the race where
-        // onSnapshot fires before the Firestore write and sees a mismatch.
+        // Set localStorage FIRST so onSnapshot never sees a local/remote mismatch.
         const sid = generateSessionId();
-        await syncSessionWithFirestore(cred.user.uid, sid);
         setLocalSessionId(sid);
+        await syncSessionWithFirestore(cred.user.uid, sid);
 
         toast.success("Welcome back!");
         await refreshProfile();

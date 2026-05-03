@@ -11,6 +11,7 @@ import { getAdminRoutes } from "@app/routes/adminRoutes";
 import { getEducatorRoutes } from "@app/routes/educatorRoutes";
 import { getSharedPublicRoutes, getMainDomainPublicRoutes, getTenantDomainPublicRoutes, getAdminRedirectRoute } from "@app/routes/publicRoutes";
 import { getStudentRoutes } from "@app/routes/studentRoutes";
+import Login from "@/pages/Login";
 
 export default function AppRoutes() {
   const { isTenantDomain } = useTenant();
@@ -19,6 +20,9 @@ export default function AppRoutes() {
     <Routes>
       {getSharedPublicRoutes()}
       {getStudentRoutes()}
+
+      <Route path="/admin/login" element={<Login />} />
+      {getAdminRoutes(getAdminRedirectRoute())}
 
       {isTenantDomain ? (
         <>
@@ -30,7 +34,6 @@ export default function AppRoutes() {
       ) : (
         <>
           {getMainDomainPublicRoutes()}
-          {getAdminRoutes(getAdminRedirectRoute())}
           {getEducatorRoutes()}
         </>
       )}
