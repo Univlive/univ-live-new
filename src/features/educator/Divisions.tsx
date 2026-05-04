@@ -253,7 +253,7 @@ export default function Divisions() {
   }
 
   async function deleteBranch(b: Branch) {
-    if (!confirm(`Delete branch "${b.name}"? All courses and batches under it will also be removed.`)) return;
+    if (!confirm(`Delete branch "${b.name}"? All programs and batches under it will also be removed.`)) return;
     await deleteDoc(doc(db, "educators", educatorId, "branches", b.id));
     toast.success("Branch deleted");
   }
@@ -292,15 +292,15 @@ export default function Divisions() {
         await addDoc(ref, { name: courseName, subjectId: courseSubjectId, createdAt: Timestamp.now() });
       }
       setCourseDialog(false);
-      toast.success(editingCourse ? "Course updated" : "Course created");
+      toast.success(editingCourse ? "Program updated" : "Program created");
     } catch { toast.error("Save failed"); }
     finally { setBusy(false); }
   }
 
   async function deleteCourse(c: Course) {
-    if (!confirm(`Delete course "${c.name}"?`)) return;
+    if (!confirm(`Delete program "${c.name}"?`)) return;
     await deleteDoc(doc(db, "educators", educatorId, "branches", c.branchId, "courses", c.id));
-    toast.success("Course deleted");
+    toast.success("Program deleted");
   }
 
   // ── Batch CRUD ───────────────────────────────────────────────────────────
@@ -392,7 +392,7 @@ export default function Divisions() {
         <div className="w-full overflow-x-auto">
         <TabsList className="inline-flex min-w-max">
           <TabsTrigger value="branches">Branches ({branches.length}/{maxBranches})</TabsTrigger>
-          <TabsTrigger value="courses">Courses ({courses.length})</TabsTrigger>
+          <TabsTrigger value="courses">Programs ({courses.length})</TabsTrigger>
           <TabsTrigger value="batches">Batches ({batches.length})</TabsTrigger>
           <TabsTrigger value="learners" className="flex items-center gap-1">
             <Users className="h-3 w-3" />Learners
@@ -416,7 +416,7 @@ export default function Divisions() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm text-muted-foreground mb-3">
-                    {coursesForBranch(b.id).length} course(s)
+                    {coursesForBranch(b.id).length} program(s)
                   </p>
                   <div className="flex gap-2">
                     <Button size="sm" variant="outline" onClick={() => openEditBranch(b)}>
@@ -439,7 +439,7 @@ export default function Divisions() {
         <TabsContent value="courses" className="space-y-4">
           <div className="flex justify-end">
             <Button onClick={openCreateCourse} disabled={branches.length === 0}>
-              <Plus className="h-4 w-4 mr-2" />Add Course
+              <Plus className="h-4 w-4 mr-2" />Add Program
             </Button>
           </div>
           <Card>
@@ -448,9 +448,9 @@ export default function Divisions() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Course</TableHead>
+                    <TableHead>Program</TableHead>
                     <TableHead>Branch</TableHead>
-                    <TableHead>Subject</TableHead>
+                    <TableHead>Course</TableHead>
                     <TableHead>Batches</TableHead>
                     <TableHead className="w-24">Actions</TableHead>
                   </TableRow>
@@ -477,7 +477,7 @@ export default function Divisions() {
                   {courses.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                        No courses yet. Create a branch first.
+                        No programs yet. Create a branch first.
                       </TableCell>
                     </TableRow>
                   )}
@@ -503,7 +503,7 @@ export default function Divisions() {
                   <TableRow>
                     <TableHead>Batch</TableHead>
                     <TableHead>Branch</TableHead>
-                    <TableHead>Course</TableHead>
+                    <TableHead>Program</TableHead>
                     <TableHead>Plan</TableHead>
                     <TableHead>Seats</TableHead>
                     <TableHead>Dates</TableHead>
@@ -579,9 +579,9 @@ export default function Divisions() {
             )}
             {lBranchId && courses.filter((c) => c.branchId === lBranchId).length !== 1 && (
               <div className="space-y-1 min-w-[160px]">
-                <p className="text-xs font-medium text-muted-foreground">Course</p>
+                <p className="text-xs font-medium text-muted-foreground">Program</p>
                 <Select value={lCourseId} onValueChange={(v) => { setLCourseId(v); setLBatchId(""); }}>
-                  <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select course" /></SelectTrigger>
+                  <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select program" /></SelectTrigger>
                   <SelectContent>
                     {courses.filter((c) => c.branchId === lBranchId).map((c) => (
                       <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
@@ -685,13 +685,13 @@ export default function Divisions() {
         </DialogContent>
       </Dialog>
 
-      {/* Course Dialog */}
+      {/* Program Dialog */}
       <Dialog open={courseDialog} onOpenChange={setCourseDialog}>
         <DialogContent className="max-w-[95vw] sm:max-w-lg">
-          <DialogHeader><DialogTitle>{editingCourse ? "Edit Course" : "New Course"}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingCourse ? "Edit Program" : "New Program"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1">
-              <Label>Course Name</Label>
+              <Label>Program Name</Label>
               <Input value={courseName} onChange={(e) => setCourseName(e.target.value)} placeholder="e.g. JEE Mains 2026" />
             </div>
             <div className="space-y-1">
@@ -704,9 +704,9 @@ export default function Divisions() {
               </Select>
             </div>
             <div className="space-y-1">
-              <Label>Subject</Label>
+              <Label>Course</Label>
               <Select value={courseSubjectId} onValueChange={setCourseSubjectId}>
-                <SelectTrigger><SelectValue placeholder="Select subject" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Select course" /></SelectTrigger>
                 <SelectContent>
                   {allowedSubjects.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
                 </SelectContent>
@@ -741,9 +741,9 @@ export default function Divisions() {
               </Select>
             </div>
             <div className="space-y-1">
-              <Label>Course</Label>
+              <Label>Program</Label>
               <Select value={batchCourseId} onValueChange={setBatchCourseId}>
-                <SelectTrigger><SelectValue placeholder="Select course" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Select program" /></SelectTrigger>
                 <SelectContent>
                   {courses.filter((c) => c.branchId === batchBranchId).map((c) => (
                     <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>

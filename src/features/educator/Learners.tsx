@@ -8,6 +8,7 @@ import {
   collection, doc, getDocs, onSnapshot, orderBy, query, updateDoc, writeBatch,
 } from "firebase/firestore";
 import { db, auth } from "@shared/lib/firebase";
+import { useAccessibleCourses } from "@shared/hooks/useAccessibleCourses";
 import { Button } from "@shared/ui/button";
 import { Input } from "@shared/ui/input";
 import { Label } from "@shared/ui/label";
@@ -100,6 +101,11 @@ export default function Learners() {
   const [assignCourse, setAssignCourse] = useState("");
   const [assignBatch, setAssignBatch] = useState("");
   const [assigning, setAssigning] = useState(false);
+
+  // Global course + subject selection for invite
+  const { courses: globalCourses, subjects: globalSubjects } = useAccessibleCourses(educatorId);
+  const [selGlobalCourse, setSelGlobalCourse] = useState("");
+  const [selSubjectIds, setSelSubjectIds] = useState<string[]>([]);
 
   // Invite link
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -301,14 +307,22 @@ export default function Learners() {
   }
 
   async function generateInviteLink() {
-    if (!selBranch || !selCourse || !selBatch) { toast.error("Select branch, course and batch"); return; }
+    if (!selBranch || !selCourse || !selBatch) { toast.error("Select branch, program and batch"); return; }
     if (availableSeats <= 0) { toast.error("No available seats in this batch"); return; }
+    const globalCourse = globalCourses.find((c) => c.id === selGlobalCourse);
     setGeneratingLink(true);
     try {
       const data = await apiFetch("/api/invites/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ branch_id: selBranch, course_id: selCourse, batch_id: selBatch }),
+        body: JSON.stringify({
+          branch_id: selBranch,
+          course_id: selCourse,
+          batch_id: selBatch,
+          global_course_id: selGlobalCourse,
+          global_course_name: globalCourse?.name ?? "",
+          subject_ids: selSubjectIds,
+        }),
       });
       setInviteUrl(`${window.location.origin}/join/${data.token}`);
     } catch (e: any) {
@@ -324,7 +338,7 @@ export default function Learners() {
   }
 
   function downloadTemplate() {
-    const csv = "name,email,branch_name,course_name,batch_name\nJohn Doe,john@example.com,Branch Name,Course Name,Batch Name\n";
+    const csv = "name,email,branch_name,program_name,batch_name\nJohn Doe,john@example.com,Branch Name,Program Name,Batch Name\n";
     const blob = new Blob([csv], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -420,9 +434,9 @@ export default function Learners() {
                   </Select>
                 </div>
                 <div className="space-y-1">
-                  <Label>Course</Label>
+                  <Label>Program</Label>
                   <Select value={selCourse} onValueChange={(v) => { setSelCourse(v); setSelBatch(""); setInviteUrl(""); }} disabled={!selBranch}>
-                    <SelectTrigger><SelectValue placeholder="Select course" /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Select program" /></SelectTrigger>
                     <SelectContent>
                       {courses.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                     </SelectContent>
@@ -442,6 +456,47 @@ export default function Learners() {
                   </Select>
                 </div>
               </div>
+
+              {globalCourses.length > 0 && (
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label>Course</Label>
+                    <Select value={selGlobalCourse} onValueChange={(v) => { setSelGlobalCourse(v); setSelSubjectIds([]); setInviteUrl(""); }}>
+                      <SelectTrigger><SelectValue placeholder="Select course (JEE / NEET…)" /></SelectTrigger>
+                      <SelectContent>
+                        {globalCourses.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {selGlobalCourse && (
+                    <div className="space-y-1">
+                      <Label>Subjects</Label>
+                      <div className="flex flex-wrap gap-1.5 border rounded-md px-3 py-2 min-h-[40px]">
+                        {globalSubjects
+                          .filter((s) => s.courseId === selGlobalCourse)
+                          .map((s) => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() =>
+                                setSelSubjectIds((prev) =>
+                                  prev.includes(s.id) ? prev.filter((x) => x !== s.id) : [...prev, s.id]
+                                )
+                              }
+                              className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                                selSubjectIds.includes(s.id)
+                                  ? "bg-primary text-primary-foreground border-primary"
+                                  : "bg-muted text-muted-foreground border-border hover:border-primary"
+                              }`}
+                            >
+                              {s.name}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {selectedBatch && (
                 availableSeats > 0 ? (
@@ -488,7 +543,7 @@ export default function Learners() {
         {bulkOpen && (
           <CardContent className="space-y-4 pt-0">
               <p className="text-sm text-muted-foreground">
-                Upload a CSV with columns: <code className="bg-muted px-1 rounded text-xs">name, email, branch_name, course_name, batch_name</code>
+                Upload a CSV with columns: <code className="bg-muted px-1 rounded text-xs">name, email, branch_name, program_name, batch_name</code>
               </p>
               <div className="flex gap-2 flex-wrap">
                 <Button variant="outline" size="sm" onClick={downloadTemplate}>

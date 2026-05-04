@@ -4,9 +4,10 @@ import { Button } from "@shared/ui/button";
 import { Input } from "@shared/ui/input";
 import { Label } from "@shared/ui/label";
 import { Textarea } from "@shared/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@shared/ui/select";
 import { Plus, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
-import { addDoc, collection, serverTimestamp, updateDoc, doc } from "firebase/firestore";
+import { addDoc, collection, getDocs, serverTimestamp, updateDoc, doc } from "firebase/firestore";
 import { db } from "@shared/lib/firebase";
 import FloatingInput from "@shared/ui/FloatingInput";
 import { TopicMultiSelect } from "@shared/ui/topic-multi-select";
@@ -52,6 +53,9 @@ type Section = {
   durationMinutes?: number | null;
   difficultyLevel?: number;
   topics?: string[];
+  subject?: string;
+  tags?: string[];
+  format?: string;
   markingScheme?: {
     correct: number;
     incorrect: number;
@@ -68,6 +72,11 @@ type CreateTemplateModalProps = {
 export default function CreateTemplateModal({ open, onOpenChange, templateToEdit }: CreateTemplateModalProps) {
   const [loading, setLoading] = useState(false);
   const isEdit = !!templateToEdit;
+
+  const [allCourses, setAllCourses] = useState<{ id: string; name: string }[]>([]);
+  const [allSubjects, setAllSubjects] = useState<{ id: string; name: string; courseId: string }[]>([]);
+  const [courseId, setCourseId] = useState(templateToEdit?.courseId || "");
+  const [courseName, setCourseName] = useState(templateToEdit?.courseName || "");
 
   const [title, setTitle] = useState(templateToEdit?.title || "");
   const [description, setDescription] = useState(templateToEdit?.description || "");
@@ -98,9 +107,29 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
 
   const computedDifficultyLevel = useMemo(() => getAverageDifficulty(sections, 0.5), [sections]);
 
+  // Load courses and subjects once on first open
+  useEffect(() => {
+    if (!open) return;
+    Promise.all([
+      getDocs(collection(db, "courses")),
+      getDocs(collection(db, "subjects")),
+    ]).then(([courseSnap, subjectSnap]) => {
+      setAllCourses(
+        courseSnap.docs
+          .filter((d) => d.data()?.isActive !== false)
+          .map((d) => ({ id: d.id, name: d.data().name as string }))
+      );
+      setAllSubjects(
+        subjectSnap.docs.map((d) => ({ id: d.id, name: d.data().name as string, courseId: d.data().courseId as string }))
+      );
+    });
+  }, [open]);
+
   // Sync state when templateToEdit changes (Edit mode)
   useEffect(() => {
     if (!open) return;
+    setCourseId(templateToEdit?.courseId || "");
+    setCourseName(templateToEdit?.courseName || "");
     setTitle(templateToEdit?.title || "");
     setDescription(templateToEdit?.description || "");
     setSubject(templateToEdit?.subject || "");
@@ -121,8 +150,11 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
           attemptlimit: s.attemptlimit ?? 0,
           difficultyLevel: clampDifficulty(s?.difficultyLevel ?? normalizeLegacyDifficulty(s?.difficulty ?? s?.level ?? baseDifficulty)),
           topics: Array.isArray(s?.topics) ? s.topics.map(String) : [],
+          subject: s?.subject || "",
+          tags: Array.isArray(s?.tags) ? s.tags : [],
+          format: s?.format || "",
         }))
-        : [{ id: "sec_1", name: "Section 1", questionsCount: 0, attemptlimit: 0, difficultyLevel: baseDifficulty, topics: [] }]
+        : [{ id: "sec_1", name: "Section 1", questionsCount: 0, attemptlimit: 0, difficultyLevel: baseDifficulty, topics: [], subject: "", tags: [], format: "" }]
     );
   }, [open, templateToEdit]);
 
@@ -136,6 +168,9 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
         attemptlimit: 0,
         difficultyLevel: computedDifficultyLevel,
         topics: [],
+        subject: "",
+        tags: [],
+        format: "",
       },
     ]);
   };
@@ -152,6 +187,9 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
     difficultyLevel: number;
     topics: string[];
     markingScheme: Section["markingScheme"];
+    subject: string;
+    tags: string[];
+    format: string;
   }) => {
     const newSections = [...sections];
     newSections[index] = {
@@ -163,6 +201,9 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
       difficultyLevel: clampDifficulty(payload.difficultyLevel),
       topics: payload.topics || [],
       markingScheme: payload.markingScheme,
+      subject: payload.subject || "",
+      tags: payload.tags || [],
+      format: payload.format || "",
     };
     setSections(newSections);
   };
@@ -185,6 +226,8 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
         title: title.trim(),
         description: description.trim(),
         subject: subject.trim(),
+        courseId: courseId || null,
+        courseName: courseName || null,
         level: getDifficultyLabel(computedDifficultyLevel),
         difficultyLevel: computedDifficultyLevel,
         durationMinutes: Number(durationMinutes) || 0,
@@ -210,6 +253,9 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
             durationMinutes: s.durationMinutes ? Number(s.durationMinutes) : null,
             difficultyLevel: clampDifficulty(s.difficultyLevel),
             topics: Array.isArray(s.topics) ? s.topics : [],
+            subject: s.subject || "",
+            tags: Array.isArray(s.tags) ? s.tags : [],
+            format: s.format || "",
             markingScheme: s.markingScheme ? {
               correct: Number(s.markingScheme.correct),
               incorrect: Number(s.markingScheme.incorrect),
@@ -259,6 +305,17 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
               <Label>Title *</Label>
               <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. JEE Mains Mock" />
             </div>
+            {allCourses.length > 0 && (
+              <div className="space-y-2">
+                <Label>Course (JEE / NEET)</Label>
+                <Select value={courseId} onValueChange={(v) => { setCourseId(v); setCourseName(allCourses.find(c => c.id === v)?.name ?? ""); }}>
+                  <SelectTrigger><SelectValue placeholder="Select course" /></SelectTrigger>
+                  <SelectContent>
+                    {allCourses.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Subject (Optional)</Label>
               <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. Physics" />
@@ -336,15 +393,19 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
 
             {/* This is Section List */}
             {sections.map((sec,index)=>{
-              return <SectionCard 
-                key={index} 
-                sectionId={sec.id} 
-                sectionName={sec.name} 
-                questionCount={sec.questionsCount} 
+              return <SectionCard
+                key={index}
+                sectionId={sec.id}
+                sectionName={sec.name}
+                questionCount={sec.questionsCount}
                 attemptLimit={sec.attemptlimit}
                 durationMinutes={sec.durationMinutes}
                 sectionDifficulty={sec.difficultyLevel}
                 sectionTopics={sec.topics}
+                sectionSubject={sec.subject}
+                sectionTags={sec.tags}
+                sectionFormat={sec.format}
+                availableSubjects={allSubjects}
                 markingScheme={sec.markingScheme}
                 defaultMarkingScheme={markingScheme}
                 onEdit={(payload) => handleSectionEdit(index, payload)}

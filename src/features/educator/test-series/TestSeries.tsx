@@ -225,6 +225,9 @@ export default function TestSeries() {
   const [educatorTemplates, setEducatorTemplates] = useState<any[]>([]);
   const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
 
+  // Auto-import state
+  const [autoFillTestId, setAutoFillTestId] = useState<string | null>(null);
+
   // Schedule state
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [testToSchedule, setTestToSchedule] = useState<any>(null);
@@ -405,6 +408,109 @@ export default function TestSeries() {
     } catch (e) {
       console.error(e);
       toast.error("Failed to move test");
+    }
+  };
+
+  const handleAutoFill = async (test: any) => {
+    if (!currentUser) return;
+    const sections: any[] = test.sections || [];
+    if (!sections.length) { toast.error("No sections configured"); return; }
+    const hasConfig = sections.some(s => s.questionsCount > 0);
+    if (!hasConfig) { toast.error("Set question counts on sections first"); return; }
+
+    setAutoFillTestId(test.id);
+    try {
+      // Educator's allowed subjects
+      const eduSnap = await getDoc(doc(db, "educators", currentUser.uid));
+      const allowedSubjectIds: string[] = eduSnap.data()?.allowedSubjectIds ?? [];
+
+      // Load own question bank
+      const ownSnap = await getDocs(collection(db, "educators", currentUser.uid, "question_bank"));
+      const ownQs = ownSnap.docs.map(d => ({ id: d.id, _source: "educator", ...d.data() }));
+
+      // Load admin questions (filter by allowed subjects)
+      const adminSnap = await getDocs(collection(db, "question_bank"));
+      const adminQs = adminSnap.docs
+        .map(d => ({ id: d.id, _source: "admin", ...d.data() }))
+        .filter((q: any) => allowedSubjectIds.length === 0 || allowedSubjectIds.includes(q.subjectId));
+
+      const allQs: any[] = [...ownQs, ...adminQs];
+
+      // Questions already in this test
+      const existingSnap = await getDocs(collection(db, "educators", currentUser.uid, "my_tests", test.id, "questions"));
+      const usedIds = new Set(existingSnap.docs.map(d => d.id));
+      let order = existingSnap.docs.length;
+
+      const CHUNK = 490;
+      let batch = writeBatch(db);
+      let ops = 0;
+      let totalAdded = 0;
+
+      for (const section of sections) {
+        const needed = Number(section.questionsCount) || 0;
+        if (!needed) continue;
+
+        let pool = allQs.filter((q: any) => {
+          if (usedIds.has(q.id)) return false;
+          if (section.subject && (q.subject || "")) {
+            if ((q.subject as string).toLowerCase() !== section.subject.toLowerCase()) return false;
+          }
+          if (section.format && (q.questionType || q.format)) {
+            const qFormat = q.questionType || q.format;
+            if (qFormat !== section.format) return false;
+          }
+          if (section.topics?.length && q.topic) {
+            if (!(section.topics as string[]).includes(q.topic)) return false;
+          }
+          if (section.tags?.length) {
+            const qTags: string[] = q.tags || [];
+            if (!(section.tags as string[]).some((t: string) => qTags.includes(t))) return false;
+          }
+          if (section.difficultyLevel != null && q.difficultyLevel != null) {
+            if (Math.abs(Number(q.difficultyLevel) - Number(section.difficultyLevel)) > 0.25) return false;
+          }
+          return true;
+        });
+
+        // Shuffle and pick
+        pool = pool.sort(() => Math.random() - 0.5).slice(0, needed);
+
+        for (const q of pool) {
+          const qRef = doc(collection(db, "educators", currentUser.uid, "my_tests", test.id, "questions"));
+          const qData: any = { ...q, questionOrder: order++, sectionName: section.name, addedAt: serverTimestamp() };
+          delete qData.id;
+          delete qData._source;
+          batch.set(qRef, qData);
+          usedIds.add(q.id);
+          ops++;
+          totalAdded++;
+
+          if (ops >= CHUNK) {
+            await batch.commit();
+            batch = writeBatch(db);
+            ops = 0;
+          }
+        }
+      }
+
+      if (ops > 0 || totalAdded > 0) {
+        batch.update(doc(db, "educators", currentUser.uid, "my_tests", test.id), {
+          questionsCount: order,
+          updatedAt: serverTimestamp(),
+        });
+        await batch.commit();
+      }
+
+      if (totalAdded === 0) {
+        toast.warning("No matching questions found. Check section subject/format/topic filters.");
+      } else {
+        toast.success(`Auto-filled ${totalAdded} question${totalAdded > 1 ? "s" : ""}`);
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error("Auto-fill failed");
+    } finally {
+      setAutoFillTestId(null);
     }
   };
 
@@ -1137,6 +1243,22 @@ export default function TestSeries() {
                                         >
                                           <Edit className="mr-2 h-3 w-3" /> {isAdminLinked ? "View Questions" : "Manage Questions"}
                                         </Button>
+                                        {!isAdminLinked && (test.sections || []).length > 0 && (
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="rounded-xl"
+                                            disabled={autoFillTestId === test.id}
+                                            onClick={() => handleAutoFill(test)}
+                                          >
+                                            {autoFillTestId === test.id ? (
+                                              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                                            ) : (
+                                              <FileUp className="mr-2 h-3 w-3" />
+                                            )}
+                                            Auto-fill from Bank
+                                          </Button>
+                                        )}
                                       </div>
                                     </CardContent>
                                   </Card>

@@ -7,10 +7,12 @@ import { Textarea } from "@shared/ui/textarea";
 import { Plus, Loader2, Save, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@shared/ui/select";
 import { db } from "@shared/lib/firebase";
 import { useAuth } from "@app/providers/AuthProvider";
 import { TopicMultiSelect } from "@shared/ui/topic-multi-select";
 import SectionCard from "@features/admin/components/SectionCard";
+import { useAccessibleCourses } from "@shared/hooks/useAccessibleCourses";
 
 function getDifficultyLabel(level: number): string {
   if (level <= 0.3) return "Easy";
@@ -43,6 +45,9 @@ type Section = {
   durationMinutes?: number | null;
   difficultyLevel?: number;
   topics?: string[];
+  subject?: string;
+  tags?: string[];
+  format?: string;
   markingScheme?: {
     correct: number;
     incorrect: number;
@@ -64,9 +69,13 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
   const setOpen = controlledOnOpenChange || setInternalOpen;
 
+  const { courses: accessibleCourses, subjects: accessibleSubjects } = useAccessibleCourses(currentUser?.uid ?? "");
+
   const [label, setLabel] = useState("");
   const [description, setDescription] = useState("");
   const [subject, setSubject] = useState("");
+  const [courseId, setCourseId] = useState("");
+  const [courseName, setCourseName] = useState("");
   const [durationMinutes, setDurationMinutes] = useState<string>("60");
   const [syllabusTags, setSyllabusTags] = useState<string[]>([]);
 
@@ -108,6 +117,9 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
     difficultyLevel: number;
     topics: string[];
     markingScheme: Section["markingScheme"];
+    subject: string;
+    tags: string[];
+    format: string;
   }) => {
     const newSections = [...sections];
     newSections[index] = {
@@ -119,6 +131,9 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
       difficultyLevel: clampDifficulty(payload.difficultyLevel),
       topics: payload.topics || [],
       markingScheme: payload.markingScheme,
+      subject: payload.subject || "",
+      tags: payload.tags || [],
+      format: payload.format || "",
     };
     setSections(newSections);
   };
@@ -144,6 +159,8 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
         label: label.trim(),
         description: description.trim(),
         subject: subject.trim(),
+        courseId: courseId || null,
+        courseName: courseName || null,
         level: getDifficultyLabel(averagedDifficultyLevel),
         difficultyLevel: averagedDifficultyLevel,
         durationMinutes: Number(durationMinutes) || 0,
@@ -167,6 +184,9 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
             durationMinutes: s.durationMinutes ? Number(s.durationMinutes) : null,
             difficultyLevel: clampDifficulty(s.difficultyLevel),
             topics: Array.isArray(s.topics) ? s.topics : [],
+            subject: s.subject || "",
+            tags: Array.isArray(s.tags) ? s.tags : [],
+            format: s.format || "",
             markingScheme: s.markingScheme ? {
               correct: Number(s.markingScheme.correct),
               incorrect: Number(s.markingScheme.incorrect),
@@ -184,9 +204,11 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
       setLabel("");
       setDescription("");
       setSubject("");
+      setCourseId("");
+      setCourseName("");
       setDurationMinutes("60");
       setSyllabusTags([]);
-      setSections([{ id: "sec_1", name: "Section 1", questionsCount: 0, attemptlimit: null, difficultyLevel: 0.5, topics: [] }]);
+      setSections([{ id: "sec_1", name: "Section 1", questionsCount: 0, attemptlimit: null, difficultyLevel: 0.5, topics: [], subject: "", tags: [], format: "" }]);
 
       setOpen(false);
     } catch (error) {
@@ -222,6 +244,25 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
           </div>
 
           <div className="grid grid-cols-1 gap-4">
+            {accessibleCourses.length > 0 && (
+              <div className="space-y-2">
+                <Label>Course</Label>
+                <Select
+                  value={courseId}
+                  onValueChange={(v) => {
+                    setCourseId(v);
+                    setCourseName(accessibleCourses.find((c) => c.id === v)?.name ?? "");
+                  }}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select course (JEE / NEET…)" /></SelectTrigger>
+                  <SelectContent>
+                    {accessibleCourses.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Subject (Optional)</Label>
               <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. Physics" />
@@ -280,6 +321,10 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
                 durationMinutes={sec.durationMinutes ?? undefined}
                 sectionDifficulty={sec.difficultyLevel}
                 sectionTopics={sec.topics}
+                sectionSubject={sec.subject}
+                sectionTags={sec.tags}
+                sectionFormat={sec.format}
+                availableSubjects={accessibleSubjects}
                 markingScheme={sec.markingScheme}
                 defaultMarkingScheme={markingScheme}
                 onEdit={(payload) => handleSectionEdit(index, payload)}

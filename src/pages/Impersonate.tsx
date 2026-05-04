@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { signInWithCustomToken } from "firebase/auth";
+import { browserSessionPersistence, setPersistence, signInWithCustomToken } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@shared/lib/firebase";
 import { Loader2 } from "lucide-react";
@@ -23,7 +23,8 @@ export default function Impersonate() {
 
     if (Date.now() > parsed.expires) { setError("Token expired. Try again from the admin panel."); return; }
 
-    signInWithCustomToken(auth, parsed.token)
+    setPersistence(auth, browserSessionPersistence)
+      .then(() => signInWithCustomToken(auth, parsed.token))
       .then(async (cred) => {
         sessionStorage.setItem("imp_session", JSON.stringify({ name: parsed.name, uid: cred.user.uid }));
         const snap = await getDoc(doc(db, "users", cred.user.uid));

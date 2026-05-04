@@ -25,6 +25,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -489,6 +490,8 @@ export default function QuestionBank({ scope = "admin", educatorUid }: QuestionB
   const [subjects, setSubjects] = useState<{ id: string; name: string }[]>([]);
   // Admin questions visible in educator scope
   const [adminItems, setAdminItems] = useState<QBQuestion[]>([]);
+  // Educator's allowed subject IDs (for filtering admin questions)
+  const [allowedSubjectIds, setAllowedSubjectIds] = useState<string[] | null>(null);
 
   // CSV import
   const [csvOpen, setCsvOpen] = useState(false);
@@ -571,12 +574,17 @@ export default function QuestionBank({ scope = "admin", educatorUid }: QuestionB
     return () => unsub();
   }, [questionBankCollection]);
 
-  // Load subjects list for CSV subject matching
+  // Load subjects list for CSV subject matching + educator allowedSubjectIds
   useEffect(() => {
     getDocs(query(collection(db, "subjects"), orderBy("name"))).then((snap) => {
       setSubjects(snap.docs.map((d) => ({ id: d.id, name: d.data().name as string })));
     });
-  }, []);
+    if (isEducatorScope && educatorUid) {
+      getDoc(doc(db, "educators", educatorUid)).then((snap) => {
+        setAllowedSubjectIds(snap.exists() ? (snap.data()?.allowedSubjectIds ?? []) : []);
+      });
+    }
+  }, [isEducatorScope, educatorUid]);
 
   // Educator scope: also subscribe to admin /question_bank so educators can browse admin questions
   useEffect(() => {
@@ -599,10 +607,14 @@ export default function QuestionBank({ scope = "admin", educatorUid }: QuestionB
   }, [isEducatorScope]);
 
   // Merge own questions with admin questions (educator scope only)
+  // Admin questions are filtered to educator's allowed subjects only
   const allItems = useMemo(() => {
     if (!isEducatorScope) return items;
-    return [...items, ...adminItems];
-  }, [items, adminItems, isEducatorScope]);
+    const visibleAdminItems = allowedSubjectIds === null
+      ? []
+      : adminItems.filter((q) => q.subjectId && allowedSubjectIds.includes(q.subjectId));
+    return [...items, ...visibleAdminItems];
+  }, [items, adminItems, isEducatorScope, allowedSubjectIds]);
 
   const courses = useMemo(() => {
     const s = new Set<string>();
