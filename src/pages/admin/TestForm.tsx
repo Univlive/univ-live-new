@@ -76,6 +76,8 @@ const SUBJECTS = [
   "Geography",
   "Political Science",
   "Economics",
+  "Psychology",
+  "Sociology",
 ];
 
 export default function TestForm() {
