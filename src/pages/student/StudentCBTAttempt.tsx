@@ -192,7 +192,14 @@ export default function StudentCBTAttempt() {
   const [timerStartSeconds, setTimerStartSeconds] = useState(0);
 
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
+  // Ref kept in sync with selectedAnswer so save handlers always read the latest
+  // value even if called before React re-renders after an option tap on mobile.
+  const selectedAnswerRef = useRef<string | null>(null);
   const [mobilePaletteOpen, setMobilePaletteOpen] = useState(false);
+
+  // Scroll-tap detection: track touch start position so we can ignore option
+  // clicks that were really scroll gestures on mobile.
+  const touchStartY = useRef<number | null>(null);
 
   // Proctoring state
   const [exitCount, setExitCount] = useState(0);
@@ -561,7 +568,9 @@ export default function StudentCBTAttempt() {
     const q = questions[currentIndex];
     if (q) {
       if (q.sectionId) setCurrentSectionId(q.sectionId);
-      setSelectedAnswer(responses[q.id]?.answer || null);
+      const saved = responses[q.id]?.answer ?? null;
+      selectedAnswerRef.current = saved;
+      setSelectedAnswer(saved);
     }
   }, [questions, currentIndex, responses]);
 
@@ -680,13 +689,15 @@ export default function StudentCBTAttempt() {
 
   const handleSelectOption = (answer: string) => {
     if (!currentQuestion || !isStarted) return;
+    selectedAnswerRef.current = answer; // keep ref in sync immediately (before re-render)
     setSelectedAnswer(answer);
   };
 
   const handleSaveAndNext = () => {
     if (!currentQuestion || !attemptId || !isStarted) return;
-    
-    const answer = selectedAnswer;
+
+    // Read from ref to get the latest selection even if React hasn't re-rendered yet
+    const answer = selectedAnswerRef.current;
     const hasAnswer = answer !== null && answer !== undefined && String(answer).trim() !== "";
     setResponses((prev) => ({
       ...prev,
@@ -712,8 +723,8 @@ export default function StudentCBTAttempt() {
 
   const handleSaveAndMarkForReview = () => {
     if (!currentQuestion || !attemptId || !isStarted) return;
-    
-    const answer = selectedAnswer;
+
+    const answer = selectedAnswerRef.current;
     const hasAnswer = answer !== null && answer !== undefined && String(answer).trim() !== "";
     setResponses((prev) => ({
       ...prev,
@@ -1270,6 +1281,15 @@ export default function StudentCBTAttempt() {
                     return (
                       <label
                         key={option.id}
+                        onTouchStart={(e) => { touchStartY.current = e.touches[0].clientY; }}
+                        onClick={(e) => {
+                          // If the user scrolled more than 8px, ignore this tap — it was a scroll gesture
+                          if (touchStartY.current !== null && Math.abs(e.clientY - touchStartY.current) > 8) {
+                            e.preventDefault();
+                            return;
+                          }
+                          touchStartY.current = null;
+                        }}
                         style={{
                           display: "flex",
                           alignItems: "flex-start",
@@ -1281,6 +1301,7 @@ export default function StudentCBTAttempt() {
                           border: isSelected ? "1px solid #93c5fd" : "1px solid transparent",
                           marginBottom: 4,
                           transition: "background 0.15s",
+                          touchAction: "manipulation",
                         }}
                       >
                         <input
