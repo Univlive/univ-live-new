@@ -6,6 +6,8 @@ export default function ImpersonationBanner() {
 
   function returnToAdmin() {
     sessionStorage.removeItem("imp_session");
+    // Signal AuthProvider to switch back to primary auth before we navigate/close
+    window.dispatchEvent(new Event("imp_session_changed"));
     if (window.opener && !window.opener.closed) {
       try { window.opener.focus(); } catch {}
     }

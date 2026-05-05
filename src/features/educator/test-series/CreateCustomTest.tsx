@@ -101,6 +101,8 @@ type CreateCustomTestProps = {
     templates: TemplateOption[];
     bankTests: FullTemplateData[];
     educatorTemplates: FullTemplateData[];
+    accessibleCourses?: { id: string; name: string }[];
+    accessibleSubjects?: { id: string; name: string; courseId: string }[];
     onCreateTemplate?: () => void;
 };
 
@@ -119,10 +121,14 @@ const CreateCustomTest = ({
     templates,
     bankTests,
     educatorTemplates,
+    accessibleCourses = [],
+    accessibleSubjects = [],
     onCreateTemplate,
 }: CreateCustomTestProps) => {
     const [formTitle, setFormTitle] = useState("");
     const [formDescription, setFormDescription] = useState("");
+    const [formCourseId, setFormCourseId] = useState("");
+    const [formCourseName, setFormCourseName] = useState("");
     const [formSubject, setFormSubject] = useState("");
     const [formDuration, setFormDuration] = useState("60");
     const [formSections, setFormSections] = useState<any[]>([]);
@@ -141,6 +147,8 @@ const CreateCustomTest = ({
         if (createOpen) {
             setFormTitle("");
             setFormDescription("");
+            setFormCourseId("");
+            setFormCourseName("");
             setFormSubject("");
             setFormDuration("60");
             setFormSections([]);
@@ -171,6 +179,10 @@ const CreateCustomTest = ({
         }
         const baseDifficulty = normalizeLegacyDifficulty(resolvedTemplate.difficultyLevel ?? resolvedTemplate.level);
         setFormDescription(String(resolvedTemplate.description || ""));
+        if ((resolvedTemplate as any).courseId) {
+            setFormCourseId(String((resolvedTemplate as any).courseId));
+            setFormCourseName(String((resolvedTemplate as any).courseName || ""));
+        }
         setFormSubject(String(resolvedTemplate.subject || ""));
         setFormDuration(String(safeNum(resolvedTemplate.durationMinutes ?? resolvedTemplate.duration, 60)));
         setFormSections(
@@ -198,6 +210,16 @@ const CreateCustomTest = ({
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
 
+        if (!formCourseId) {
+            toast.error("Course is required");
+            return;
+        }
+
+        if (!formSubject.trim()) {
+            toast.error("Subject is required");
+            return;
+        }
+
         // Validation: if sections exist, every section must have questionsCount > 0
         if (formSections.length > 0) {
             const emptySections = formSections.filter(s => (Number(s.questionsCount) || 0) <= 0);
@@ -212,6 +234,8 @@ const CreateCustomTest = ({
         const values: Record<string, any> = {
             title: formTitle.trim(),
             description: formDescription.trim(),
+            courseId: formCourseId,
+            courseName: formCourseName,
             subject: formSubject.trim(),
             level: getDifficultyLabel(averagedDifficultyLevel),
             difficultyLevel: averagedDifficultyLevel,
@@ -414,9 +438,38 @@ const CreateCustomTest = ({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {accessibleCourses.length > 0 && (
+                        <div className="space-y-2">
+                            <Label>Course *</Label>
+                            <Select value={formCourseId} onValueChange={(v) => {
+                                setFormCourseId(v);
+                                setFormCourseName(accessibleCourses.find(c => c.id === v)?.name ?? "");
+                                setFormSubject("");
+                            }}>
+                                <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select course" /></SelectTrigger>
+                                <SelectContent>
+                                    {accessibleCourses.map((c) => (
+                                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    )}
                     <div className="space-y-2">
-                        <Label>Subject (Optional)</Label>
-                        <Input value={formSubject} onChange={(e) => setFormSubject(e.target.value)} className="rounded-xl" placeholder="e.g. Maths" />
+                        <Label>Subject *</Label>
+                        {formCourseId && accessibleSubjects.filter(s => s.courseId === formCourseId).length > 0 ? (
+                            <Select value={formSubject} onValueChange={setFormSubject}>
+                                <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select subject" /></SelectTrigger>
+                                <SelectContent>
+                                    {accessibleSubjects
+                                        .filter(s => s.courseId === formCourseId)
+                                        .map((s) => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)
+                                    }
+                                </SelectContent>
+                            </Select>
+                        ) : (
+                            <Input value={formSubject} onChange={(e) => setFormSubject(e.target.value)} className="rounded-xl" placeholder="e.g. Maths" />
+                        )}
                     </div>
                     <div className="space-y-2">
                         <Label>Test Difficulty (avg of sections)</Label>

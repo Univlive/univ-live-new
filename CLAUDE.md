@@ -37,6 +37,8 @@ Multi-tenant SaaS platform for coaching institutes. Built with React + TypeScrip
 | `src/shared/lib/studentRegistration.ts` | POST `/api/tenant/register-student` on login |
 | `src/shared/lib/firebase.ts` | Firebase client init |
 | `src/shared/services/` | Auth service, tenant service |
+| `src/shared/ui/MultiSelect.tsx` | Generic multi-select dropdown (options prop, no Firestore fetch) |
+| `src/shared/hooks/useAccessibleCourses.ts` | Educator-scoped courses+subjects from allowedSubjectIds |
 | `src/features/educator/` | All educator portal pages + components |
 | `src/features/student/` | All student portal pages + components + types |
 | `src/features/admin/` | All admin panel pages + components |
@@ -113,6 +115,15 @@ Multi-tenant SaaS platform for coaching institutes. Built with React + TypeScrip
 - Vercel functions use `FIREBASE_SERVICE_ACCOUNT_JSON` (base64 or raw JSON), `RAZORPAY_*`, `GEMINI_API_KEY`, `DISCORD_WEBHOOK_URL`
 - `ADMIN_MAX_FILE_SIZE_MB` — max upload size for admin content (default 100)
 - `EDUCATOR_MAX_FILE_SIZE_MB` — max upload size for educator content (default 20)
+
+## Filter System (Question Bank / Templates / Test Bank)
+- **Cascade**: Course (single) → Subject (multi) → Topic (multi, QB only) → Tags (multi, QB only)
+- **Courses**: `courses` collection `{id, name, isActive}` — admin sees all; educator sees only those derived from their `allowedSubjectIds` via `useAccessibleCourses`
+- **Subjects**: `subjects` collection `{id, name, courseId}` — filtered by selected course; educator only sees allowed subjects
+- **Topics/Tags**: free-text fields on questions (`topic`, `topics[]`, `tags[]`) — derived dynamically from filtered question pool
+- **CSV import validation**: validates `course` and `subject` column values against Firestore before writing; throws with list of invalid rows + valid options
+- **SectionCard (template editor)**: topics/tags per-section driven by question bank data passed from `CreateTemplateModal`
+- **Educator bankTests**: pre-filtered in TestSeries to only show templates whose `courseId` is in educator's accessible courses
 
 ## Dev Commands
 ```bash

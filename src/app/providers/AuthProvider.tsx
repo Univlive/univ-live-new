@@ -3,6 +3,7 @@ import type { User } from "firebase/auth";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { auth, db } from "@shared/lib/firebase";
+import { impAuth } from "@shared/lib/firebase-impersonation";
 import { getLocalSessionId, clearLocalSessionId } from "@shared/lib/session";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -77,12 +78,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [isImpersonating, setIsImpersonating] = useState(() => !!sessionStorage.getItem("imp_session"));
 
+  // Listen for impersonation session changes dispatched by Impersonate.tsx and ImpersonationBanner
   useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, (u) => {
+    const handler = () => setIsImpersonating(!!sessionStorage.getItem("imp_session"));
+    window.addEventListener("imp_session_changed", handler);
+    return () => window.removeEventListener("imp_session_changed", handler);
+  }, []);
+
+  // Subscribe to the correct auth instance based on impersonation state
+  useEffect(() => {
+    const activeAuth = isImpersonating ? impAuth : auth;
+    const unsubAuth = onAuthStateChanged(activeAuth, (u) => {
       setFirebaseUser(u);
       setAuthLoading(false);
-      // Immediately invalidate cache to fetch new user data
       if (u) {
         queryClient.invalidateQueries({ queryKey: ["userProfile", u.uid] });
       } else {
@@ -91,22 +101,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => unsubAuth();
-  }, [queryClient]);
+  }, [queryClient, isImpersonating]);
 
   const { data: profile = null, isLoading: profileLoading, refetch } = useQuery({
     queryKey: ["userProfile", firebaseUser?.uid],
     queryFn: () => loadProfile(firebaseUser!.uid),
     enabled: !!firebaseUser?.uid,
-    staleTime: 60 * 1000, 
+    staleTime: 60 * 1000,
   });
 
   const refreshProfile = async () => {
     await refetch();
   };
 
-  // --- Session Enforcement for Students ---
+  // Session enforcement for students — skip during impersonation
   useEffect(() => {
-    if (!firebaseUser || !profile || profile.role !== "STUDENT") return;
+    if (!firebaseUser || !profile || profile.role !== "STUDENT" || isImpersonating) return;
 
     const userRef = doc(db, "users", firebaseUser.uid);
     const unsubSnap = onSnapshot(userRef, (doc) => {
@@ -115,8 +125,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const firestoreSid = data.currentSessionId;
       const localSid = getLocalSessionId();
 
-      // If Firestore has a session ID and it doesn't match our local one,
-      // it means the user logged in from another device.
       if (firestoreSid && localSid && firestoreSid !== localSid) {
         toast.error("You have been logged out because you logged in from another device.");
         clearLocalSessionId();
@@ -125,7 +133,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => unsubSnap();
-  }, [firebaseUser, profile]);
+  }, [firebaseUser, profile, isImpersonating]);
 
 
   const value = useMemo<AuthContextValue>(() => {
@@ -148,4 +156,3 @@ export function useAuth() {
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
 }
-

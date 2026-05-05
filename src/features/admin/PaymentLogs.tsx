@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { auth } from "@shared/lib/firebase";
 import { toast } from "sonner";
 import { Button } from "@shared/ui/button";
 import { Input } from "@shared/ui/input";
 import { Card, CardContent } from "@shared/ui/card";
+import { Paginator } from "@shared/ui/Paginator";
 import {
   Table,
   TableBody,
@@ -51,38 +52,43 @@ function fmtAmount(amount: number) {
   return `₹${amount.toLocaleString("en-IN", { minimumFractionDigits: 0 })}`;
 }
 
+const PAGE_SIZE = 25;
+
 export default function PaymentLogs() {
   const [logs, setLogs] = useState<PaymentLog[]>([]);
-  const [filtered, setFiltered] = useState<PaymentLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   async function load() {
     setLoading(true);
     try {
       const data = await fetchLogs();
       setLogs(data);
-      setFiltered(data);
     } catch (e: any) { toast.error(e.message || "Failed to load"); }
     finally { setLoading(false); }
   }
 
   useEffect(() => { load(); }, []);
 
-  useEffect(() => {
+  const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    setFiltered(
-      q
-        ? logs.filter(
-            (l) =>
-              l.educator_id.toLowerCase().includes(q) ||
-              l.cashfree_order_id.toLowerCase().includes(q) ||
-              l.status.toLowerCase().includes(q) ||
-              (l.coupon_code || "").toLowerCase().includes(q)
-          )
-        : logs
-    );
+    return q
+      ? logs.filter(
+          (l) =>
+            l.educator_id.toLowerCase().includes(q) ||
+            l.cashfree_order_id.toLowerCase().includes(q) ||
+            l.status.toLowerCase().includes(q) ||
+            (l.coupon_code || "").toLowerCase().includes(q)
+        )
+      : logs;
   }, [search, logs]);
+
+  // Reset page when search changes
+  useEffect(() => { setPage(1); }, [search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="space-y-6">
@@ -125,7 +131,7 @@ export default function PaymentLogs() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((l) => (
+                {paginated.map((l) => (
                   <TableRow key={l.id}>
                     <TableCell className="font-mono text-xs">{l.cashfree_order_id}</TableCell>
                     <TableCell className="text-xs">{l.educator_id}</TableCell>
@@ -151,6 +157,11 @@ export default function PaymentLogs() {
           )}
         </CardContent>
       </Card>
+
+      <div className="flex items-center justify-between text-sm text-muted-foreground">
+        <span>Showing {filtered.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}</span>
+        <Paginator page={page} totalPages={totalPages} onPageChange={setPage} />
+      </div>
     </div>
   );
 }

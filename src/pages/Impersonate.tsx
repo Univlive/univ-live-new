@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { browserSessionPersistence, setPersistence, signInWithCustomToken } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
-import { auth, db } from "@shared/lib/firebase";
+import { impAuth, impDb } from "@shared/lib/firebase-impersonation";
 import { Loader2 } from "lucide-react";
 
 export default function Impersonate() {
@@ -23,11 +23,13 @@ export default function Impersonate() {
 
     if (Date.now() > parsed.expires) { setError("Token expired. Try again from the admin panel."); return; }
 
-    setPersistence(auth, browserSessionPersistence)
-      .then(() => signInWithCustomToken(auth, parsed.token))
+    setPersistence(impAuth, browserSessionPersistence)
+      .then(() => signInWithCustomToken(impAuth, parsed.token))
       .then(async (cred) => {
         sessionStorage.setItem("imp_session", JSON.stringify({ name: parsed.name, uid: cred.user.uid }));
-        const snap = await getDoc(doc(db, "users", cred.user.uid));
+        // Signal AuthProvider to switch from primary auth to impAuth
+        window.dispatchEvent(new Event("imp_session_changed"));
+        const snap = await getDoc(doc(impDb, "users", cred.user.uid));
         const role = snap.exists() ? (snap.data().role as string || "") : "";
         if (role === "EDUCATOR") navigate("/educator", { replace: true });
         else if (role === "STUDENT") navigate("/student", { replace: true });

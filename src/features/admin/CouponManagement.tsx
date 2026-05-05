@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@app/providers/AuthProvider";
 import { auth } from "@shared/lib/firebase";
 import { toast } from "sonner";
@@ -15,6 +15,7 @@ import {
 } from "@shared/ui/table";
 import { Badge } from "@shared/ui/badge";
 import { Loader2, Plus, Pencil, Trash2 } from "lucide-react";
+import { Paginator } from "@shared/ui/Paginator";
 import {
   Dialog,
   DialogContent,
@@ -66,6 +67,8 @@ const emptyForm = {
   max_uses: "",
 };
 
+const PAGE_SIZE = 20;
+
 export default function CouponManagement() {
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,6 +76,8 @@ export default function CouponManagement() {
   const [editing, setEditing] = useState<Coupon | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [busy, setBusy] = useState(false);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   async function load() {
     try {
@@ -83,6 +88,16 @@ export default function CouponManagement() {
   }
 
   useEffect(() => { load(); }, []);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return q ? coupons.filter(c => c.code.toLowerCase().includes(q)) : coupons;
+  }, [coupons, search]);
+
+  useEffect(() => { setPage(1); }, [search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   function openCreate() {
     setEditing(null);
@@ -157,6 +172,15 @@ export default function CouponManagement() {
         <Button onClick={openCreate}><Plus className="h-4 w-4 mr-2" />New Coupon</Button>
       </div>
 
+      <div className="flex gap-3">
+        <Input
+          placeholder="Search coupon code..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="max-w-xs"
+        />
+      </div>
+
       <Card>
         <CardContent className="p-0 overflow-x-auto">
           <Table>
@@ -173,7 +197,7 @@ export default function CouponManagement() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {coupons.map((c) => (
+              {paginated.map((c) => (
                 <TableRow key={c.id}>
                   <TableCell className="font-mono font-medium">{c.code}</TableCell>
                   <TableCell>{c.discount_percent}%</TableCell>
@@ -200,13 +224,18 @@ export default function CouponManagement() {
                   </TableCell>
                 </TableRow>
               ))}
-              {coupons.length === 0 && (
-                <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No coupons yet.</TableCell></TableRow>
+              {filtered.length === 0 && (
+                <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No coupons found.</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      <div className="flex items-center justify-between text-sm text-muted-foreground">
+        <span>{filtered.length} coupon{filtered.length !== 1 ? "s" : ""}</span>
+        <Paginator page={page} totalPages={totalPages} onPageChange={setPage} />
+      </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md">

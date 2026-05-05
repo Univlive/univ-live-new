@@ -146,6 +146,16 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
       return;
     }
 
+    if (!courseId) {
+      toast.error("Course is required");
+      return;
+    }
+
+    if (!subject.trim()) {
+      toast.error("Subject is required");
+      return;
+    }
+
     if (sections.length === 0) {
       toast.error("At least one section is required");
       return;
@@ -264,7 +274,7 @@ export default function CreateEducatorTemplate({ open: controlledOpen, onOpenCha
               </div>
             )}
             <div className="space-y-2">
-              <Label>Subject (Optional)</Label>
+              <Label>Subject *</Label>
               <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. Physics" />
             </div>
           </div>

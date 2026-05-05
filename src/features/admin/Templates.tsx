@@ -18,6 +18,7 @@ import {
 	deleteDoc,
 	doc,
 	getDoc,
+	getDocs,
 	onSnapshot,
 	orderBy,
 	query,
@@ -32,6 +33,8 @@ import { Button } from "@shared/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@shared/ui/card";
 import { Input } from "@shared/ui/input";
 import { Badge } from "@shared/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@shared/ui/select";
+import { MultiSelect } from "@shared/ui/MultiSelect";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -50,6 +53,8 @@ type AdminTemplate = {
 	title: string;
 	description?: string;
 	subject: string;
+	courseId?: string;
+	courseName?: string;
 	level?: string;
 	difficultyLevel?: number;
 	durationMinutes: number;
@@ -89,13 +94,36 @@ export default function Templates() {
 	const [templates, setTemplates] = useState<AdminTemplate[]>([]);
 
 	const [search, setSearch] = useState("");
-	const [subject, setSubject] = useState("All");
+	const [courseFilter, setCourseFilter] = useState("all");
+	const [subjectFilters, setSubjectFilters] = useState<string[]>([]);
 	const [status, setStatus] = useState<TemplateStatus>("all");
+	const [allCourses, setAllCourses] = useState<{ id: string; name: string }[]>([]);
+	const [allSubjects, setAllSubjects] = useState<{ id: string; name: string; courseId: string }[]>([]);
 
 	const [modalOpen, setModalOpen] = useState(false);
 	const [templateToEdit, setTemplateToEdit] = useState<any | null>(null);
 
 	const isAdmin = profile?.role === "ADMIN";
+
+	useEffect(() => {
+		Promise.all([
+			getDocs(collection(db, "courses")),
+			getDocs(collection(db, "subjects")),
+		]).then(([courseSnap, subjectSnap]) => {
+			setAllCourses(
+				courseSnap.docs
+					.filter((d) => d.data()?.isActive !== false)
+					.map((d) => ({ id: d.id, name: d.data().name as string }))
+			);
+			setAllSubjects(
+				subjectSnap.docs.map((d) => ({
+					id: d.id,
+					name: d.data().name as string,
+					courseId: d.data().courseId as string,
+				}))
+			);
+		});
+	}, []);
 
 	useEffect(() => {
 		if (authLoading) return;
@@ -120,7 +148,9 @@ export default function Templates() {
 							id: docSnap.id,
 							title: String(data?.title || "Untitled Template"),
 							description: data?.description ? String(data.description) : "",
-							subject: String(data?.subject || "General"),
+							subject: String(data?.subject || ""),
+							courseId: data?.courseId || "",
+							courseName: data?.courseName || "",
 							level: data?.level ? String(data.level) : undefined,
 							difficultyLevel: typeof data?.difficultyLevel === 'number' ? data.difficultyLevel : undefined,
 							durationMinutes: safeNum(data?.durationMinutes ?? data?.duration, 60),
@@ -156,11 +186,10 @@ export default function Templates() {
 		return () => unsub();
 	}, [authLoading, isAdmin]);
 
-	const subjects = useMemo(() => {
-		const set = new Set<string>(["All"]);
-		templates.forEach((item) => item.subject && set.add(item.subject));
-		return Array.from(set);
-	}, [templates]);
+	const subjectOptions = useMemo(() => {
+		const pool = courseFilter === "all" ? allSubjects : allSubjects.filter((s) => s.courseId === courseFilter);
+		return pool.map((s) => s.name).sort();
+	}, [allSubjects, courseFilter]);
 
 	const filtered = useMemo(() => {
 		const q = search.trim().toLowerCase();
@@ -170,14 +199,15 @@ export default function Templates() {
 				item.title.toLowerCase().includes(q) ||
 				String(item.description || "").toLowerCase().includes(q);
 
-			const matchesSubject = subject === "All" || item.subject === subject;
+			const matchesCourse = courseFilter === "all" || item.courseId === courseFilter;
+			const matchesSubject = subjectFilters.length === 0 || subjectFilters.includes(item.subject);
 
 			const matchesStatus =
 				status === "all" || (status === "published" ? item.isPublished : !item.isPublished);
 
-			return matchesSearch && matchesSubject && matchesStatus;
+			return matchesSearch && matchesCourse && matchesSubject && matchesStatus;
 		});
-	}, [templates, search, subject, status]);
+	}, [templates, search, courseFilter, subjectFilters, status]);
 
 	const stats = useMemo(() => {
 		const total = templates.length;
@@ -334,8 +364,8 @@ export default function Templates() {
 
 			<Card className="card-soft border-0">
 				<CardContent className="p-4">
-					<div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
-						<div className="relative lg:col-span-2">
+					<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+						<div className="relative">
 							<Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
 							<Input
 								value={search}
@@ -345,25 +375,30 @@ export default function Templates() {
 							/>
 						</div>
 
-						<select
-							value={subject}
-							onChange={(e) => setSubject(e.target.value)}
-							className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-						>
-							{subjects.map((item) => (
-								<option key={item} value={item}>{item}</option>
-							))}
-						</select>
+						<Select value={courseFilter} onValueChange={(v) => { setCourseFilter(v); setSubjectFilters([]); }}>
+							<SelectTrigger><SelectValue placeholder="All Courses" /></SelectTrigger>
+							<SelectContent>
+								<SelectItem value="all">All Courses</SelectItem>
+								{allCourses.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+							</SelectContent>
+						</Select>
 
-						<select
-							value={status}
-							onChange={(e) => setStatus(e.target.value as TemplateStatus)}
-							className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-						>
-							<option value="all">All Status</option>
-							<option value="published">Published</option>
-							<option value="draft">Draft</option>
-						</select>
+						<MultiSelect
+							options={subjectOptions}
+							selected={subjectFilters}
+							onChange={setSubjectFilters}
+							placeholder="All Subjects"
+							disabled={subjectOptions.length === 0}
+						/>
+
+						<Select value={status} onValueChange={(v) => setStatus(v as TemplateStatus)}>
+							<SelectTrigger><SelectValue placeholder="All Status" /></SelectTrigger>
+							<SelectContent>
+								<SelectItem value="all">All Status</SelectItem>
+								<SelectItem value="published">Published</SelectItem>
+								<SelectItem value="draft">Draft</SelectItem>
+							</SelectContent>
+						</Select>
 					</div>
 				</CardContent>
 			</Card>
@@ -427,7 +462,8 @@ export default function Templates() {
 								{/* <p className="text-sm text-muted-foreground line-clamp-2 min-h-[40px]">{item.description || "No description"}</p> */}
 
 								<div className="flex flex-wrap gap-2">
-									<Badge variant="secondary" className="rounded-full">{item.subject}</Badge>
+									{item.courseName && <Badge className="rounded-full bg-primary/10 text-primary border-primary/20">{item.courseName}</Badge>}
+									{item.subject && <Badge variant="secondary" className="rounded-full">{item.subject}</Badge>}
 									{item.level ? <Badge variant="outline" className="rounded-full">{item.level}</Badge> : null}
 									{item.isPublished ? (
 										<Badge className="rounded-full bg-green-100 text-green-700">Published</Badge>

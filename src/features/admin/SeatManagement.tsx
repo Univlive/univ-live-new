@@ -387,9 +387,9 @@ export default function SeatManagement() {
         newSeatLimit: Math.max(0, Math.floor(newSeatLimit || 0)),
         transactionId: transactionId.trim(),
         note: updateNote.trim(),
-        ...(updatePlanId ? { planId: updatePlanId } : {}),
+        ...(updatePlanId && updatePlanId !== "none" ? { planId: updatePlanId } : {}),
       });
-      toast.success(updatePlanId ? "Seats updated and plan features applied" : "Seats updated");
+      toast.success(updatePlanId && updatePlanId !== "none" ? "Seats updated and plan features applied" : "Seats updated");
       setUpdateOpen(false);
     } catch (e: any) {
       toast.error(e.message || "Failed to update seats");
@@ -970,13 +970,13 @@ export default function SeatManagement() {
                   <SelectValue placeholder="No plan — keep existing features" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">No plan — keep existing features</SelectItem>
+                  <SelectItem value="none">No plan — keep existing features</SelectItem>
                   {allPlans.map((p) => (
                     <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              {updatePlanId && (() => {
+              {updatePlanId && updatePlanId !== "none" && (() => {
                 const plan = allPlans.find((p) => p.id === updatePlanId);
                 const fd = plan?.featureDefaults;
                 if (!fd) return null;

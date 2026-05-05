@@ -66,6 +66,7 @@ import CreateCustomTest from "./CreateCustomTest";
 import CreateEducatorTemplate from "./CreateEducatorTemplate";
 import NewFolderButton from "./NewFolder";
 import ScheduleTest from "./ScheduleTest";
+import { useAccessibleCourses } from "@shared/hooks/useAccessibleCourses";
 
 // Firebase
 import { onAuthStateChanged } from "firebase/auth";
@@ -227,6 +228,11 @@ export default function TestSeries() {
 
   // Auto-import state
   const [autoFillTestId, setAutoFillTestId] = useState<string | null>(null);
+
+  // Course/subject filters
+  const { courses: accessibleCourses, subjects: accessibleSubjects } = useAccessibleCourses(currentUser?.uid ?? "");
+  const [courseFilter, setCourseFilter] = useState("all");
+  const [subjectFilter, setSubjectFilter] = useState("all");
 
   // Schedule state
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -452,15 +458,17 @@ export default function TestSeries() {
 
         let pool = allQs.filter((q: any) => {
           if (usedIds.has(q.id)) return false;
-          if (section.subject && (q.subject || "")) {
-            if ((q.subject as string).toLowerCase() !== section.subject.toLowerCase()) return false;
+          if (section.subject) {
+            const qSubject = q.subjectName || q.subject || "";
+            if (!qSubject || qSubject.toLowerCase() !== section.subject.toLowerCase()) return false;
           }
           if (section.format && (q.questionType || q.format)) {
             const qFormat = q.questionType || q.format;
             if (qFormat !== section.format) return false;
           }
-          if (section.topics?.length && q.topic) {
-            if (!(section.topics as string[]).includes(q.topic)) return false;
+          if (section.topics?.length) {
+            const qTopics: string[] = [...(q.topics || []), ...(q.topic ? [q.topic] : [])];
+            if (!qTopics.length || !(section.topics as string[]).some(t => qTopics.includes(t))) return false;
           }
           if (section.tags?.length) {
             const qTags: string[] = q.tags || [];
@@ -577,6 +585,8 @@ export default function TestSeries() {
         const batches: string[] = t.targetBatches || [];
         if (!batches.includes(batchFilter)) return false;
       }
+      if (courseFilter !== "all" && t.courseId !== courseFilter) return false;
+      if (subjectFilter !== "all" && t.subject !== subjectFilter) return false;
       return true;
     });
 
@@ -611,14 +621,25 @@ export default function TestSeries() {
     });
 
     return groups;
-  }, [myTests, folders, search]);
+  }, [myTests, folders, search, courseFilter, subjectFilter, batchFilter]);
+
+  // Pre-filter bankTests to only courses educator has access to
+  const visibleBankTests = useMemo(() => {
+    if (accessibleCourses.length === 0) return bankTests;
+    const accessibleCourseIds = new Set(accessibleCourses.map((c) => c.id));
+    return bankTests.filter((t: any) => !t.courseId || accessibleCourseIds.has(t.courseId));
+  }, [bankTests, accessibleCourses]);
 
   const groupedBankTests = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const filtered = bankTests.filter((t) => {
-      if (!q) return true;
-      const hay = `${t.title || ""} ${t.description || ""} ${t.subject || ""} ${t.level || ""}`.toLowerCase();
-      return hay.includes(q);
+    const filtered = visibleBankTests.filter((t) => {
+      if (q) {
+        const hay = `${t.title || ""} ${t.description || ""} ${t.subject || ""} ${t.level || ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (courseFilter !== "all" && t.courseId !== courseFilter) return false;
+      if (subjectFilter !== "all" && t.subject !== subjectFilter) return false;
+      return true;
     });
 
     const groups: Record<string, { name: string; type: "subject" | "uncategorized", tests: any[] }> = {};
@@ -641,7 +662,15 @@ export default function TestSeries() {
     });
 
     return groups;
-  }, [bankTests, search]);
+  }, [visibleBankTests, search, courseFilter, subjectFilter]);
+
+  // Subjects available for current course filter (for filter dropdowns)
+  const filterSubjectOptions = useMemo(() => {
+    const subjectsForCourse = courseFilter === "all"
+      ? accessibleSubjects
+      : accessibleSubjects.filter(s => s.courseId === courseFilter);
+    return subjectsForCourse;
+  }, [accessibleSubjects, courseFilter]);
 
   const templateOptions = useMemo(
     () => [
@@ -881,6 +910,8 @@ export default function TestSeries() {
     const payload: any = {
       title: String(values.title || ""),
       description: String(values.description || ""),
+      courseId: values.courseId || "",
+      courseName: values.courseName || "",
       subject: String(values.subject || ""),
       level: String(values.level || "General"),
       difficultyLevel: values.difficultyLevel ?? 0.5,
@@ -955,6 +986,8 @@ export default function TestSeries() {
     templates: templateOptions,
     bankTests,
     educatorTemplates,
+    accessibleCourses,
+    accessibleSubjects,
     onCreateTemplate: () => {
       setCreateOpen(false);
       setCreateTemplateOpen(true);
@@ -1045,6 +1078,41 @@ export default function TestSeries() {
 
         </div>
       </div>
+
+      {accessibleCourses.length > 0 && (
+        <div className="flex flex-wrap gap-3 items-center">
+          <Select value={courseFilter} onValueChange={(v) => { setCourseFilter(v); setSubjectFilter("all"); }}>
+            <SelectTrigger className="w-[180px] rounded-xl h-9 text-sm">
+              <SelectValue placeholder="All Courses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Courses</SelectItem>
+              {accessibleCourses.map((c) => (
+                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={subjectFilter} onValueChange={setSubjectFilter} disabled={filterSubjectOptions.length === 0}>
+            <SelectTrigger className="w-[180px] rounded-xl h-9 text-sm">
+              <SelectValue placeholder="All Subjects" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Subjects</SelectItem>
+              {filterSubjectOptions.map((s) => (
+                <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {(courseFilter !== "all" || subjectFilter !== "all") && (
+            <button
+              onClick={() => { setCourseFilter("all"); setSubjectFilter("all"); }}
+              className="text-xs text-muted-foreground hover:text-foreground underline"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+      )}
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
         <div className="w-full flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">

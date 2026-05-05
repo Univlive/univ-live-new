@@ -1,4 +1,4 @@
-import { useState, KeyboardEvent } from "react";
+import { useState } from "react";
 import { Card } from "@shared/ui/card";
 import { Edit, Trash2, X } from "lucide-react";
 import { Badge } from "@shared/ui/badge";
@@ -10,6 +10,7 @@ import { Slider } from "@shared/ui/slider";
 import { Switch } from "@shared/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@shared/ui/select";
 import { TopicMultiSelect } from "@shared/ui/topic-multi-select";
+import { MultiSelect } from "@shared/ui/MultiSelect";
 
 type MarkingScheme = {
   correct: number;
@@ -35,7 +36,10 @@ type SectionCardProps = {
   sectionSubject?: string;
   sectionTags?: string[];
   sectionFormat?: string;
-  availableSubjects?: { id: string; name: string }[];
+  availableTopics?: string[];
+  availableTagOptions?: string[];
+  showSubjectPicker?: boolean;
+  courseSubjects?: { id: string; name: string }[];
   defaultMarkingScheme?: {
     correct: number;
     incorrect: number;
@@ -74,7 +78,7 @@ function clampDifficulty(level?: number) {
     return Math.min(1, Math.max(0, Number(level)));
 }
 
-const SectionCard = ({ sectionId, sectionName, questionCount, attemptLimit, durationMinutes, sectionDifficulty, sectionTopics, sectionSubject, sectionTags, sectionFormat, availableSubjects, defaultMarkingScheme, markingScheme, onEdit, onRemove }: SectionCardProps
+const SectionCard = ({ sectionId, sectionName, questionCount, attemptLimit, durationMinutes, sectionDifficulty, sectionTopics, sectionSubject, sectionTags, sectionFormat, availableTopics, availableTagOptions, showSubjectPicker, courseSubjects, defaultMarkingScheme, markingScheme, onEdit, onRemove }: SectionCardProps
 ) => {
         const [editOpen, setEditOpen] = useState(false);
         const [draftName, setDraftName] = useState(sectionName);
@@ -91,7 +95,6 @@ const SectionCard = ({ sectionId, sectionName, questionCount, attemptLimit, dura
         const [draftTopics, setDraftTopics] = useState<string[]>(sectionTopics || []);
         const [draftSubject, setDraftSubject] = useState(sectionSubject || "");
         const [draftTags, setDraftTags] = useState<string[]>(sectionTags || []);
-        const [draftTagInput, setDraftTagInput] = useState("");
         const [draftFormat, setDraftFormat] = useState(sectionFormat || "");
         const [draftMarkingEnabled, setDraftMarkingEnabled] = useState(!!markingScheme);
         const fallbackScheme = defaultMarkingScheme || { correct: 4, incorrect: -1, unanswered: 0 };
@@ -110,7 +113,6 @@ const SectionCard = ({ sectionId, sectionName, questionCount, attemptLimit, dura
                 setDraftTopics(sectionTopics || []);
                 setDraftSubject(sectionSubject || "");
                 setDraftTags(sectionTags || []);
-                setDraftTagInput("");
                 setDraftFormat(sectionFormat || "");
                 setDraftMarkingEnabled(!!markingScheme);
                 setDraftMarkingScheme({
@@ -119,19 +121,6 @@ const SectionCard = ({ sectionId, sectionName, questionCount, attemptLimit, dura
                         unanswered: markingScheme?.unanswered ?? fallbackScheme.unanswered,
                 });
                 setEditOpen(true);
-        };
-
-        const addTag = (raw: string) => {
-          const tag = raw.trim();
-          if (tag && !draftTags.includes(tag)) setDraftTags(prev => [...prev, tag]);
-          setDraftTagInput("");
-        };
-
-        const handleTagKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-          if (e.key === "Enter" || e.key === ",") {
-            e.preventDefault();
-            addTag(draftTagInput);
-          }
         };
 
     const onRemoveConfirmation = () => {
@@ -219,7 +208,7 @@ const SectionCard = ({ sectionId, sectionName, questionCount, attemptLimit, dura
                 </div>
             </div>
             <Dialog open={editOpen} onOpenChange={setEditOpen}>
-                <DialogContent className="max-w-2xl">
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>Edit Section</DialogTitle>
                         <DialogDescription>
@@ -287,59 +276,64 @@ const SectionCard = ({ sectionId, sectionName, questionCount, attemptLimit, dura
                                 selectedTopics={draftTopics}
                                 setSelectedTopics={setDraftTopics}
                                 placeholder="Search and select topics for this section..."
+                                availableTopics={availableTopics}
                             />
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-2">
-                                <Label>Subject</Label>
-                                {availableSubjects && availableSubjects.length > 0 ? (
-                                    <Select value={draftSubject} onValueChange={setDraftSubject}>
-                                        <SelectTrigger><SelectValue placeholder="Any subject" /></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="">Any subject</SelectItem>
-                                            {availableSubjects.map((s) => (
-                                                <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                ) : (
-                                    <Input value={draftSubject} onChange={(e) => setDraftSubject(e.target.value)} placeholder="e.g. Physics" />
-                                )}
-                            </div>
-                            <div className="space-y-2">
                                 <Label>Question Format</Label>
-                                <Select value={draftFormat} onValueChange={setDraftFormat}>
+                                <Select
+                                    value={draftFormat || "__any__"}
+                                    onValueChange={(v) => setDraftFormat(v === "__any__" ? "" : v)}
+                                >
                                     <SelectTrigger><SelectValue placeholder="Any format" /></SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="">Any format</SelectItem>
+                                        <SelectItem value="__any__">Any format</SelectItem>
                                         {QUESTION_FORMATS.map((f) => (
                                             <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
                             </div>
+                            {showSubjectPicker && courseSubjects && courseSubjects.length > 0 && (
+                                <div className="space-y-2">
+                                    <Label>Subject</Label>
+                                    <Select value={draftSubject || "__any__"} onValueChange={(v) => setDraftSubject(v === "__any__" ? "" : v)}>
+                                        <SelectTrigger><SelectValue placeholder="Select subject" /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="__any__">Any subject</SelectItem>
+                                            {courseSubjects.map(s => (
+                                                <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
                         </div>
 
                         <div className="space-y-2">
                             <Label>Tags</Label>
-                            <div className="flex flex-wrap gap-1 mb-1">
-                                {draftTags.map((tag) => (
-                                    <Badge key={tag} variant="secondary" className="gap-1">
-                                        {tag}
-                                        <button onClick={() => setDraftTags(prev => prev.filter(t => t !== tag))}>
-                                            <X className="h-3 w-3" />
-                                        </button>
-                                    </Badge>
-                                ))}
-                            </div>
-                            <Input
-                                value={draftTagInput}
-                                onChange={(e) => setDraftTagInput(e.target.value)}
-                                onKeyDown={handleTagKeyDown}
-                                onBlur={() => draftTagInput.trim() && addTag(draftTagInput)}
-                                placeholder="Type a tag and press Enter or comma"
-                            />
+                            {availableTagOptions && availableTagOptions.length > 0 ? (
+                                <MultiSelect
+                                    options={availableTagOptions}
+                                    selected={draftTags}
+                                    onChange={setDraftTags}
+                                    placeholder="Select tags..."
+                                />
+                            ) : (
+                                <div className="flex flex-wrap gap-1">
+                                    {draftTags.map((tag) => (
+                                        <Badge key={tag} variant="secondary" className="gap-1">
+                                            {tag}
+                                            <button onClick={() => setDraftTags(prev => prev.filter(t => t !== tag))}>
+                                                <X className="h-3 w-3" />
+                                            </button>
+                                        </Badge>
+                                    ))}
+                                    <span className="text-xs text-muted-foreground">No tags in question bank yet.</span>
+                                </div>
+                            )}
                         </div>
 
                         <div className="space-y-3 rounded-xl border p-3">

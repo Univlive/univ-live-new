@@ -50,6 +50,8 @@ import {
 
 import EmptyState from "@features/admin/components/EmptyState";
 import { toast } from "@shared/hooks/use-toast";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@shared/ui/select";
+import { MultiSelect } from "@shared/ui/MultiSelect";
 
 type StatusFilter = "all" | "published" | "draft";
 
@@ -103,11 +105,35 @@ export default function TestBank() {
   const [tests, setTests] = useState<TestSeries[]>([]);
 
   const [search, setSearch] = useState("");
-  const [subject, setSubject] = useState<string>("All");
+  const [courseFilter, setCourseFilter] = useState("all");
+  const [subjectFilters, setSubjectFilters] = useState<string[]>([]);
   const [status, setStatus] = useState<StatusFilter>("all");
+  const [allCourses, setAllCourses] = useState<{ id: string; name: string }[]>([]);
+  const [allSubjects, setAllSubjects] = useState<{ id: string; name: string; courseId: string }[]>([]);
 
   // 🔐 Admin guard (minimal)
   const isAdmin = profile?.role === "ADMIN";
+
+  // Load courses and subjects for filter cascading
+  useEffect(() => {
+    Promise.all([
+      getDocs(collection(db, "courses")),
+      getDocs(collection(db, "subjects")),
+    ]).then(([courseSnap, subjectSnap]) => {
+      setAllCourses(
+        courseSnap.docs
+          .filter((d) => d.data()?.isActive !== false)
+          .map((d) => ({ id: d.id, name: d.data().name as string }))
+      );
+      setAllSubjects(
+        subjectSnap.docs.map((d) => ({
+          id: d.id,
+          name: d.data().name as string,
+          courseId: d.data().courseId as string,
+        }))
+      );
+    });
+  }, []);
 
   // Realtime load tests
   useEffect(() => {
@@ -173,11 +199,10 @@ export default function TestBank() {
     return () => unsub();
   }, [authLoading, isAdmin]);
 
-  const subjects = useMemo(() => {
-    const set = new Set<string>(["All"]);
-    tests.forEach((t) => t.subject && set.add(t.subject));
-    return Array.from(set);
-  }, [tests]);
+  const subjectOptions = useMemo(() => {
+    const pool = courseFilter === "all" ? allSubjects : allSubjects.filter((s) => s.courseId === courseFilter);
+    return pool.map((s) => s.name).sort();
+  }, [allSubjects, courseFilter]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -188,15 +213,20 @@ export default function TestBank() {
         t.title.toLowerCase().includes(q) ||
         (t.description || "").toLowerCase().includes(q);
 
-      const matchesSubject = subject === "All" || t.subject === subject;
+      if (courseFilter !== "all") {
+        const namesInCourse = allSubjects.filter((s) => s.courseId === courseFilter).map((s) => s.name);
+        if (!namesInCourse.includes(t.subject)) return false;
+      }
+
+      if (subjectFilters.length > 0 && !subjectFilters.includes(t.subject)) return false;
 
       const matchesStatus =
         status === "all" ||
         (status === "published" ? t.isPublished : !t.isPublished);
 
-      return matchesSearch && matchesSubject && matchesStatus;
+      return matchesSearch && matchesStatus;
     });
-  }, [tests, search, subject, status]);
+  }, [tests, search, courseFilter, subjectFilters, allSubjects, status]);
 
   const stats = useMemo(() => {
     const total = tests.length;
@@ -407,7 +437,7 @@ export default function TestBank() {
 
       {/* Filters */}
       <Card className="card-soft border-0">
-        <CardContent className="p-4">
+        <CardContent className="p-4 space-y-3">
           <div className="flex flex-col lg:flex-row gap-3 lg:items-center">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -419,17 +449,26 @@ export default function TestBank() {
               />
             </div>
 
-            <div className="flex gap-2 overflow-x-auto">
-              {subjects.map((s) => (
-                <Badge
-                  key={s}
-                  variant={subject === s ? "default" : "secondary"}
-                  className="cursor-pointer rounded-full whitespace-nowrap"
-                  onClick={() => setSubject(s)}
-                >
-                  {s}
-                </Badge>
-              ))}
+            <Select value={courseFilter} onValueChange={(v) => { setCourseFilter(v); setSubjectFilters([]); }}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="All Courses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Courses</SelectItem>
+                {allCourses.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <div className="w-[220px]">
+              <MultiSelect
+                options={subjectOptions}
+                selected={subjectFilters}
+                onChange={setSubjectFilters}
+                placeholder="All Subjects"
+                disabled={subjectOptions.length === 0}
+              />
             </div>
 
             <div className="flex gap-2">

@@ -10,10 +10,13 @@ import {
   Plus,
   BarChart3,
   Radio,
+  CreditCard,
 } from "lucide-react";
 import {
   collection,
   doc,
+  getDoc,
+  getDocs,
   onSnapshot,
   query,
   where,
@@ -44,6 +47,8 @@ type EducatorProfileDoc = {
   coachingName?: string;
   seatLimit?: number;
   tenantSlug?: string;
+  lastPlanId?: string;
+  allowedCourseIds?: string[];
 };
 
 const LIVE_STATUSES = ["in-progress", "inprogress", "running", "started"];
@@ -81,6 +86,9 @@ export default function EducatorDashboard() {
   const [tests, setTests] = useState<any[]>([]);
   const [attempts, setAttempts] = useState<AttemptDoc[]>([]);
   const [accessCodes, setAccessCodes] = useState<AccessCodeDoc[]>([]);
+  const [usedSeats, setUsedSeats] = useState(0);
+  const [planName, setPlanName] = useState<string | null>(null);
+  const [allowedCourseNames, setAllowedCourseNames] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
 
@@ -90,7 +98,7 @@ export default function EducatorDashboard() {
     let doneCount = 0;
     const markDone = () => {
       doneCount++;
-      if (doneCount >= 5) setLoaded(true);
+      if (doneCount >= 6) setLoaded(true);
     };
 
     const u1 = onSnapshot(
@@ -123,8 +131,33 @@ export default function EducatorDashboard() {
       () => { setAccessCodes([]); markDone(); }
     );
 
-    return () => { u1(); u2(); u3(); u4(); u5(); };
+    const u6 = onSnapshot(
+      query(collection(db, "educators", educatorId, "billingSeats"), where("status", "==", "active")),
+      (snap) => { setUsedSeats(snap.size); markDone(); },
+      () => { setUsedSeats(0); markDone(); }
+    );
+
+    return () => { u1(); u2(); u3(); u4(); u5(); u6(); };
   }, [educatorId]);
+
+  useEffect(() => {
+    const lastPlanId = educatorDoc?.lastPlanId;
+    if (!lastPlanId) { setPlanName(null); return; }
+    getDoc(doc(db, "plans", lastPlanId)).then((snap) => {
+      setPlanName(snap.exists() ? ((snap.data() as any)?.name || lastPlanId) : lastPlanId);
+    }).catch(() => setPlanName(lastPlanId));
+  }, [educatorDoc?.lastPlanId]);
+
+  useEffect(() => {
+    const ids = educatorDoc?.allowedCourseIds;
+    if (!ids || ids.length === 0) { setAllowedCourseNames([]); return; }
+    getDocs(collection(db, "courses")).then((snap) => {
+      const names = snap.docs
+        .filter((d) => ids.includes(d.id))
+        .map((d) => (d.data() as any).name || d.id);
+      setAllowedCourseNames(names);
+    }).catch(() => setAllowedCourseNames([]));
+  }, [educatorDoc?.allowedCourseIds]);
 
   const liveTests = useMemo(
     () => attempts.filter((a) => LIVE_STATUSES.includes(String(a.status || "").toLowerCase())).length,
@@ -145,6 +178,9 @@ export default function EducatorDashboard() {
     () => accessCodes.filter(accessCodeActive).length,
     [accessCodes]
   );
+
+  const seatLimit = Math.max(0, Number(educatorDoc?.seatLimit || 0));
+  const vacantSeats = Math.max(0, seatLimit - usedSeats);
 
   const coachingName = String(
     educatorDoc?.coachingName ||
@@ -250,6 +286,50 @@ export default function EducatorDashboard() {
           delay={0.15}
         />
       </div>
+
+      {/* Seats & Plan */}
+      <Card className="border-border/50">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <CreditCard className="h-4 w-4 text-muted-foreground" />
+            Seats &amp; Plan
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
+            <div>
+              <p className="text-xs text-muted-foreground">Active Plan</p>
+              <p className="font-semibold mt-0.5">{planName || "No plan"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Total Seats</p>
+              <p className="font-semibold mt-0.5">{seatLimit}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Enrolled</p>
+              <p className="font-semibold mt-0.5">{usedSeats}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Vacant</p>
+              <p className={`font-semibold mt-0.5 ${vacantSeats === 0 ? "text-destructive" : "text-green-500"}`}>
+                {vacantSeats}
+              </p>
+            </div>
+          </div>
+          {allowedCourseNames.length > 0 && (
+            <div className="mt-5 pt-4 border-t border-border/50">
+              <p className="text-xs text-muted-foreground mb-2">Allowed Courses</p>
+              <div className="flex flex-wrap gap-1.5">
+                {allowedCourseNames.map((name) => (
+                  <span key={name} className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium">
+                    {name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Quick Actions */}
       <Card className="border-border/50">

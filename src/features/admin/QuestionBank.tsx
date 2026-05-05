@@ -45,7 +45,6 @@ import { Input } from "@shared/ui/input";
 import { Label } from "@shared/ui/label";
 import { Badge } from "@shared/ui/badge";
 import { Separator } from "@shared/ui/separator";
-import { ScrollArea } from "@shared/ui/scroll-area";
 import { Checkbox } from "@shared/ui/checkbox";
 import {
   Dialog,
@@ -62,6 +61,9 @@ import {
   SelectValue,
 } from "@shared/ui/select";
 import { uploadToImageKit } from "@shared/lib/imagekitUpload";
+import { Paginator } from "@shared/ui/Paginator";
+import { MultiSelect } from "@shared/ui/MultiSelect";
+import { useAccessibleCourses } from "@shared/hooks/useAccessibleCourses";
 
 type Difficulty = "easy" | "medium" | "hard";
 
@@ -445,9 +447,19 @@ export default function QuestionBank({ scope = "admin", educatorUid }: QuestionB
 
   const [items, setItems] = useState<QBQuestion[]>([]);
   const [qSearch, setQSearch] = useState("");
-  const [fCourse, setFCourse] = useState<string>("all");
-  const [fTopic, setFTopic] = useState<string>("all");
+  const [fCourseId, setFCourseId] = useState<string>("all");
+  const [fSubjectIds, setFSubjectIds] = useState<string[]>([]);
+  const [fTopics, setFTopics] = useState<string[]>([]);
+  const [fTags, setFTags] = useState<string[]>([]);
   const [fDifficulty, setFDifficulty] = useState<string>("all");
+  const [qbPage, setQbPage] = useState(1);
+
+  // Courses and subjects from Firestore (admin scope) or hook (educator scope)
+  const [allCourses, setAllCourses] = useState<{ id: string; name: string }[]>([]);
+  const [allSubjects, setAllSubjects] = useState<{ id: string; name: string; courseId: string }[]>([]);
+  const { courses: accessibleCourses, subjects: accessibleSubjects } = useAccessibleCourses(
+    scope === "educator" && educatorUid ? educatorUid : ""
+  );
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -574,10 +586,24 @@ export default function QuestionBank({ scope = "admin", educatorUid }: QuestionB
     return () => unsub();
   }, [questionBankCollection]);
 
-  // Load subjects list for CSV subject matching + educator allowedSubjectIds
+  // Load courses, subjects (for filter cascading + CSV validation) + educator allowedSubjectIds
   useEffect(() => {
-    getDocs(query(collection(db, "subjects"), orderBy("name"))).then((snap) => {
-      setSubjects(snap.docs.map((d) => ({ id: d.id, name: d.data().name as string })));
+    Promise.all([
+      getDocs(collection(db, "courses")),
+      getDocs(query(collection(db, "subjects"), orderBy("name"))),
+    ]).then(([courseSnap, subjectSnap]) => {
+      setAllCourses(
+        courseSnap.docs
+          .filter((d) => d.data()?.isActive !== false)
+          .map((d) => ({ id: d.id, name: d.data().name as string }))
+      );
+      const subjectList = subjectSnap.docs.map((d) => ({
+        id: d.id,
+        name: d.data().name as string,
+        courseId: d.data().courseId as string,
+      }));
+      setAllSubjects(subjectList);
+      setSubjects(subjectList);
     });
     if (isEducatorScope && educatorUid) {
       getDoc(doc(db, "educators", educatorUid)).then((snap) => {
@@ -616,30 +642,68 @@ export default function QuestionBank({ scope = "admin", educatorUid }: QuestionB
     return [...items, ...visibleAdminItems];
   }, [items, adminItems, isEducatorScope, allowedSubjectIds]);
 
-  const courses = useMemo(() => {
-    const s = new Set<string>();
-    allItems.forEach((x) => x.course && s.add(x.course));
-    return Array.from(s).sort();
-  }, [allItems]);
+  // Course options: admin shows all, educator shows only accessible
+  const courseOptions = isEducatorScope ? accessibleCourses : allCourses;
 
-  const topics = useMemo(() => {
+  // Subject options for filter: cascade from selected course
+  const subjectOptions = useMemo(() => {
+    const pool = isEducatorScope ? accessibleSubjects : allSubjects;
+    return fCourseId === "all" ? pool : pool.filter((s) => s.courseId === fCourseId);
+  }, [allSubjects, accessibleSubjects, fCourseId, isEducatorScope]);
+
+  // Pre-filter by course + subject (for deriving topic/tag option lists)
+  const filteredByCourseSubject = useMemo(() => {
+    return allItems.filter((x) => {
+      if (fCourseId !== "all") {
+        const subIdsInCourse = allSubjects.filter((s) => s.courseId === fCourseId).map((s) => s.id);
+        const courseNameMatch = allCourses.find((c) => c.id === fCourseId)?.name === x.course;
+        if (!courseNameMatch && !(x.subjectId && subIdsInCourse.includes(x.subjectId))) return false;
+      }
+      if (fSubjectIds.length > 0 && (!x.subjectId || !fSubjectIds.includes(x.subjectId))) return false;
+      return true;
+    });
+  }, [allItems, fCourseId, fSubjectIds, allSubjects, allCourses]);
+
+  // Topic options: derived from questions matching course+subject selection
+  const topicOptions = useMemo(() => {
     const s = new Set<string>();
-    allItems.forEach((x) => x.topic && s.add(x.topic));
+    filteredByCourseSubject.forEach((x) => {
+      (x.topics || []).forEach((t) => t && s.add(t));
+      if (x.topic) s.add(x.topic);
+    });
     return Array.from(s).sort();
-  }, [allItems]);
+  }, [filteredByCourseSubject]);
+
+  // Tag options: derived from questions matching course+subject selection
+  const tagOptions = useMemo(() => {
+    const s = new Set<string>();
+    filteredByCourseSubject.forEach((x) => {
+      (x.tags || []).forEach((t) => t && s.add(t));
+    });
+    return Array.from(s).sort();
+  }, [filteredByCourseSubject]);
 
   const filtered = useMemo(() => {
     const needle = qSearch.trim().toLowerCase();
-    return allItems.filter((x) => {
-      if (fCourse !== "all" && (x.course || "") !== fCourse) return false;
-      if (fTopic !== "all" && (x.topic || "") !== fTopic) return false;
+    return filteredByCourseSubject.filter((x) => {
+      if (fTopics.length > 0) {
+        const qTopics = [...(x.topics || []), ...(x.topic ? [x.topic] : [])];
+        if (!fTopics.some((t) => qTopics.includes(t))) return false;
+      }
+      if (fTags.length > 0 && !fTags.some((tag) => (x.tags || []).includes(tag))) return false;
       if (fDifficulty !== "all" && (x.difficulty || "medium") !== fDifficulty) return false;
-
       if (!needle) return true;
       const hay = (x.searchText || x.question + " " + (x.options || []).join(" ")).toLowerCase();
       return hay.includes(needle);
     });
-  }, [allItems, qSearch, fCourse, fTopic, fDifficulty]);
+  }, [filteredByCourseSubject, qSearch, fTopics, fTags, fDifficulty]);
+
+  const QB_PAGE_SIZE = 20;
+  const qbTotalPages = Math.max(1, Math.ceil(filtered.length / QB_PAGE_SIZE));
+  const qbPagedItems = filtered.slice((qbPage - 1) * QB_PAGE_SIZE, qbPage * QB_PAGE_SIZE);
+
+  // Reset to page 1 on filter change
+  useEffect(() => { setQbPage(1); }, [qSearch, fCourseId, fSubjectIds, fTopics, fTags, fDifficulty]);
 
   const resetEditor = () => {
     setEditingId(null);
@@ -1043,6 +1107,27 @@ export default function QuestionBank({ scope = "admin", educatorUid }: QuestionB
 
       const rows = result.data;
       const total = rows.length;
+
+      // Validate course and subject values before any writes
+      const validationErrors: string[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        const courseVal = (rows[i].course || "").trim();
+        const subjectVal = (rows[i].subject || "").trim();
+        if (courseVal && !allCourses.some((c) => c.name.toLowerCase() === courseVal.toLowerCase())) {
+          validationErrors.push(`Row ${i + 2}: invalid course "${courseVal}"`);
+        }
+        if (subjectVal && !allSubjects.some((s) => s.name.toLowerCase() === subjectVal.toLowerCase())) {
+          validationErrors.push(`Row ${i + 2}: invalid subject "${subjectVal}"`);
+        }
+      }
+      if (validationErrors.length > 0) {
+        const preview = validationErrors.slice(0, 5).join("\n");
+        const more = validationErrors.length > 5 ? `\n...and ${validationErrors.length - 5} more` : "";
+        throw new Error(
+          `CSV validation failed:\n${preview}${more}\n\nValid courses: ${allCourses.map((c) => c.name).join(", ") || "none"}\nValid subjects: ${allSubjects.map((s) => s.name).join(", ") || "none"}`
+        );
+      }
+
       let done = 0;
       let errors = 0;
 
@@ -1217,7 +1302,7 @@ export default function QuestionBank({ scope = "admin", educatorUid }: QuestionB
       <Card>
         <CardHeader className="space-y-1">
           <CardTitle className="text-base">Search & Filters</CardTitle>
-          <CardDescription>Filter by course/topic/difficulty, then search inside question text.</CardDescription>
+          <CardDescription>Filter by course → subject → topic/tags, then search inside question text.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -1232,35 +1317,39 @@ export default function QuestionBank({ scope = "admin", educatorUid }: QuestionB
             </div>
 
             <div>
-              <Select value={fCourse} onValueChange={setFCourse}>
+              <Select
+                value={fCourseId}
+                onValueChange={(v) => {
+                  setFCourseId(v);
+                  setFSubjectIds([]);
+                  setFTopics([]);
+                  setFTags([]);
+                }}
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder="Course" />
+                  <SelectValue placeholder="All Courses" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All courses</SelectItem>
-                  {courses.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {s}
-                    </SelectItem>
+                  <SelectItem value="all">All Courses</SelectItem>
+                  {courseOptions.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
             <div>
-              <Select value={fTopic} onValueChange={setFTopic}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Topic" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All topics</SelectItem>
-                  {topics.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <MultiSelect
+                options={subjectOptions.map((s) => s.name)}
+                selected={fSubjectIds.map((id) => allSubjects.find((s) => s.id === id)?.name ?? id)}
+                onChange={(names) => {
+                  setFSubjectIds(names.map((n) => allSubjects.find((s) => s.name === n)?.id ?? n));
+                  setFTopics([]);
+                  setFTags([]);
+                }}
+                placeholder="All Subjects"
+                disabled={subjectOptions.length === 0}
+              />
             </div>
 
             <div>
@@ -1269,7 +1358,7 @@ export default function QuestionBank({ scope = "admin", educatorUid }: QuestionB
                   <SelectValue placeholder="Difficulty" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All levels</SelectItem>
+                  <SelectItem value="all">All Levels</SelectItem>
                   <SelectItem value="easy">Easy</SelectItem>
                   <SelectItem value="medium">Medium</SelectItem>
                   <SelectItem value="hard">Hard</SelectItem>
@@ -1278,19 +1367,38 @@ export default function QuestionBank({ scope = "admin", educatorUid }: QuestionB
             </div>
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <MultiSelect
+              options={topicOptions}
+              selected={fTopics}
+              onChange={setFTopics}
+              placeholder="All Topics"
+              disabled={topicOptions.length === 0}
+            />
+            <MultiSelect
+              options={tagOptions}
+              selected={fTags}
+              onChange={setFTags}
+              placeholder="All Tags"
+              disabled={tagOptions.length === 0}
+            />
+          </div>
+
           <Separator />
 
           <div className="flex items-center justify-between">
             <div className="text-sm text-muted-foreground">
-              Showing <span className="font-medium text-foreground">{filtered.length}</span> / {allItems.length}
+              Showing <span className="font-medium text-foreground">{filtered.length === 0 ? 0 : (qbPage - 1) * QB_PAGE_SIZE + 1}–{Math.min(qbPage * QB_PAGE_SIZE, filtered.length)}</span> of {filtered.length} {filtered.length !== allItems.length && `(${allItems.length} total)`}
             </div>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => {
                 setQSearch("");
-                setFCourse("all");
-                setFTopic("all");
+                setFCourseId("all");
+                setFSubjectIds([]);
+                setFTopics([]);
+                setFTags([]);
                 setFDifficulty("all");
               }}
             >
@@ -1298,9 +1406,8 @@ export default function QuestionBank({ scope = "admin", educatorUid }: QuestionB
             </Button>
           </div>
 
-          <ScrollArea className="h-[520px] pr-2">
-            <div className="space-y-3">
-              {filtered.map((q) => (
+          <div className="space-y-3">
+              {qbPagedItems.map((q) => (
                 <motion.div key={q.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
                   <div className="rounded-xl border bg-card p-4">
                     <div className="flex items-start justify-between gap-3">
@@ -1365,7 +1472,8 @@ export default function QuestionBank({ scope = "admin", educatorUid }: QuestionB
                 </div>
               )}
             </div>
-          </ScrollArea>
+
+          <Paginator page={qbPage} totalPages={qbTotalPages} onPageChange={setQbPage} />
         </CardContent>
       </Card>
 

@@ -75,8 +75,13 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
 
   const [allCourses, setAllCourses] = useState<{ id: string; name: string }[]>([]);
   const [allSubjects, setAllSubjects] = useState<{ id: string; name: string; courseId: string }[]>([]);
+  const [qbTopics, setQbTopics] = useState<string[]>([]);
+  const [qbTags, setQbTags] = useState<string[]>([]);
   const [courseId, setCourseId] = useState(templateToEdit?.courseId || "");
   const [courseName, setCourseName] = useState(templateToEdit?.courseName || "");
+  const [subjectMode, setSubjectMode] = useState<"single" | "section_wise">(
+    templateToEdit?.subjectMode || "single"
+  );
 
   const [title, setTitle] = useState(templateToEdit?.title || "");
   const [description, setDescription] = useState(templateToEdit?.description || "");
@@ -107,13 +112,14 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
 
   const computedDifficultyLevel = useMemo(() => getAverageDifficulty(sections, 0.5), [sections]);
 
-  // Load courses and subjects once on first open
+  // Load courses, subjects, and question bank topics/tags once on first open
   useEffect(() => {
     if (!open) return;
     Promise.all([
       getDocs(collection(db, "courses")),
       getDocs(collection(db, "subjects")),
-    ]).then(([courseSnap, subjectSnap]) => {
+      getDocs(collection(db, "question_bank")),
+    ]).then(([courseSnap, subjectSnap, qbSnap]) => {
       setAllCourses(
         courseSnap.docs
           .filter((d) => d.data()?.isActive !== false)
@@ -122,6 +128,16 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
       setAllSubjects(
         subjectSnap.docs.map((d) => ({ id: d.id, name: d.data().name as string, courseId: d.data().courseId as string }))
       );
+      const topics = new Set<string>();
+      const tags = new Set<string>();
+      qbSnap.docs.forEach((d) => {
+        const data = d.data() as any;
+        (data.topics || []).forEach((t: string) => t && topics.add(t));
+        if (data.topic) topics.add(data.topic);
+        (data.tags || []).forEach((t: string) => t && tags.add(t));
+      });
+      setQbTopics(Array.from(topics).sort());
+      setQbTags(Array.from(tags).sort());
     });
   }, [open]);
 
@@ -130,6 +146,7 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
     if (!open) return;
     setCourseId(templateToEdit?.courseId || "");
     setCourseName(templateToEdit?.courseName || "");
+    setSubjectMode(templateToEdit?.subjectMode || "single");
     setTitle(templateToEdit?.title || "");
     setDescription(templateToEdit?.description || "");
     setSubject(templateToEdit?.subject || "");
@@ -214,6 +231,16 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
       return;
     }
 
+    if (!courseId) {
+      toast.error("Course is required");
+      return;
+    }
+
+    if (subjectMode === "single" && !subject.trim()) {
+      toast.error("Subject is required");
+      return;
+    }
+
     if (sections.length === 0) {
       toast.error("At least one section is required");
       return;
@@ -225,7 +252,8 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
       const payload = {
         title: title.trim(),
         description: description.trim(),
-        subject: subject.trim(),
+        subject: subjectMode === "single" ? subject.trim() : "",
+        subjectMode,
         courseId: courseId || null,
         courseName: courseName || null,
         level: getDifficultyLabel(computedDifficultyLevel),
@@ -308,7 +336,14 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
             {allCourses.length > 0 && (
               <div className="space-y-2">
                 <Label>Course (JEE / NEET)</Label>
-                <Select value={courseId} onValueChange={(v) => { setCourseId(v); setCourseName(allCourses.find(c => c.id === v)?.name ?? ""); }}>
+                <Select
+                  value={courseId}
+                  onValueChange={(v) => {
+                    setCourseId(v);
+                    setCourseName(allCourses.find(c => c.id === v)?.name ?? "");
+                    setSubject("");
+                  }}
+                >
                   <SelectTrigger><SelectValue placeholder="Select course" /></SelectTrigger>
                   <SelectContent>
                     {allCourses.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
@@ -317,9 +352,48 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
               </div>
             )}
             <div className="space-y-2">
-              <Label>Subject (Optional)</Label>
-              <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. Physics" />
+              <Label>Subject Mode</Label>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant={subjectMode === "single" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setSubjectMode("single")}
+                >
+                  Single Subject
+                </Button>
+                <Button
+                  type="button"
+                  variant={subjectMode === "section_wise" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setSubjectMode("section_wise")}
+                >
+                  Section-wise
+                </Button>
+              </div>
             </div>
+            {subjectMode === "single" && (
+              <div className="space-y-2">
+                <Label>Subject *</Label>
+                {(() => {
+                  const subjectsForCourse = courseId
+                    ? allSubjects.filter(s => s.courseId === courseId)
+                    : allSubjects;
+                  return subjectsForCourse.length > 0 ? (
+                    <Select value={subject} onValueChange={setSubject}>
+                      <SelectTrigger><SelectValue placeholder="Select subject" /></SelectTrigger>
+                      <SelectContent>
+                        {subjectsForCourse.map(s => (
+                          <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. Physics" />
+                  );
+                })()}
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -392,7 +466,7 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
             {/* You can add Sections Here... This contains List of Sections added in the template */}
 
             {/* This is Section List */}
-            {sections.map((sec,index)=>{
+            {sections.map((sec, index) => {
               return <SectionCard
                 key={index}
                 sectionId={sec.id}
@@ -405,7 +479,10 @@ export default function CreateTemplateModal({ open, onOpenChange, templateToEdit
                 sectionSubject={sec.subject}
                 sectionTags={sec.tags}
                 sectionFormat={sec.format}
-                availableSubjects={allSubjects}
+                availableTopics={qbTopics}
+                availableTagOptions={qbTags}
+                showSubjectPicker={subjectMode === "section_wise"}
+                courseSubjects={allSubjects.filter(s => s.courseId === courseId)}
                 markingScheme={sec.markingScheme}
                 defaultMarkingScheme={markingScheme}
                 onEdit={(payload) => handleSectionEdit(index, payload)}
