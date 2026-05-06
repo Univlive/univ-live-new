@@ -106,20 +106,23 @@ export function useAIStream(): UseAIStreamReturn {
                 break;
               }
 
-              try {
-                const event: AIStreamEvent = JSON.parse(jsonStr);
+              let event: AIStreamEvent | null = null;
 
-                if (event.type === "progress" && event.message) {
-                  setProgress(event.message);
-                } else if (event.type === "complete" && event.data) {
-                  finalData = event.data;
-                  setData(event.data);
-                  setProgress(null);
-                } else if (event.type === "error" && event.error) {
-                  throw new Error(event.error);
-                }
+              try {
+                event = JSON.parse(jsonStr) as AIStreamEvent;
               } catch (parseError) {
                 console.error("Failed to parse stream event:", parseError);
+                continue;
+              }
+
+              if (event.type === "progress" && event.message) {
+                setProgress(event.message);
+              } else if (event.type === "complete" && event.data) {
+                finalData = event.data;
+                setData(event.data);
+                setProgress(null);
+              } else if (event.type === "error") {
+                throw new Error(event.error || "Unknown error from API");
               }
             }
           }

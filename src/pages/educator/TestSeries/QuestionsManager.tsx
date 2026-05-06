@@ -1130,6 +1130,31 @@ const QuestionsManager = ({
         void updateQuestionPublishState(editingId, next, previous, false);
     }
 
+    const GENERIC_AI_IMPORT_ERROR =
+        "Something went wrong while processing your request. Please try again.";
+
+    function getAiImportUserMessage(error: unknown) {
+        const rawMessage = error instanceof Error ? error.message : String(error || "");
+        if (!rawMessage) return GENERIC_AI_IMPORT_ERROR;
+
+        const lower = rawMessage.toLowerCase();
+
+        if (lower.includes("cancelled")) return "PDF import cancelled by user";
+        if (rawMessage.includes("Please try again") || rawMessage.includes("contact support")) {
+            return rawMessage;
+        }
+        if (lower.includes("too many requests") || lower.includes("rate limit") || lower.includes("429")) {
+            return "Too many requests. Please wait a moment and try again.";
+        }
+        if (lower.includes("timeout")) return "The operation took too long. Please try again.";
+        if (lower.includes("network")) return "Network error. Please check your connection and try again.";
+        if (lower.includes("invalid request")) {
+            return "Invalid request. Please check your input and try again.";
+        }
+
+        return GENERIC_AI_IMPORT_ERROR;
+    }
+
     // Upload pdf starts here....
     async function handlePdfSelected(file: File | null) {
         if (readOnly) {
@@ -1191,9 +1216,9 @@ const QuestionsManager = ({
             toast.success("AI import preview is ready");
         } catch (error) {
             console.error(error);
-            const errorMsg = error instanceof Error ? error.message : "Failed to import PDF with AI";
+            const errorMsg = getAiImportUserMessage(error);
             // Don't show error toast if it was cancelled
-            if (!errorMsg.includes("cancelled")) {
+            if (!errorMsg.toLowerCase().includes("cancelled")) {
                 toast.error(errorMsg);
             }
             setImportPreviewOpen(false);

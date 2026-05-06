@@ -1,5 +1,8 @@
 import { aiFeatureFlags, getAiFeatureDisabledMessage } from "@/lib/aiFeatureFlags";
 
+const GENERIC_AI_IMPORT_ERROR =
+  "Something went wrong while processing your request. Please try again.";
+
 export type AiImportStatus = "ready" | "partial" | "rejected";
 
 export type AiImportPreviewItem = {
@@ -315,6 +318,7 @@ export async function importQuestionsFromPdf(
   const MAX_PAGE_RETRIES = 2;
   const pageRetryCounts = new Map<number, number>();
   const failedPages: number[] = [];
+  let lastFailureMessage: string | null = null;
 
   // Helper to add delay between requests
   const delayMs = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -400,32 +404,36 @@ export async function importQuestionsFromPdf(
                 break;
               }
 
+              let event: { type?: string; data?: unknown; error?: string } | null = null;
+
               try {
-                const event = JSON.parse(jsonStr);
-                if (event.type === "complete" && event.data) {
-                  pageData = event.data as AiImportResponse;
-                  pageQuestionsDetected = pageData.items?.length ?? 0;
-                  
-                  // Report: Questions detected
-                  if (pageQuestionsDetected > 0) {
-                    cumulativeDetected += pageQuestionsDetected;
-                    onPageProgress?.({
-                      pageNumber: pageNum,
-                      totalPages: numPages,
-                      status: "detected",
-                      message: `Detected ${pageQuestionsDetected} question${pageQuestionsDetected !== 1 ? "s" : ""}`,
-                      pageQuestionsDetected,
-                      pageQuestionsAccepted: 0,
-                      cumulativeDetected,
-                      cumulativeAccepted,
-                    });
-                  }
-                } else if (event.type === "error") {
-                  hasError = true;
-                  throw new Error(event.error || "Unknown error from API");
-                }
+                event = JSON.parse(jsonStr) as { type?: string; data?: unknown; error?: string };
               } catch (parseErr) {
                 console.error("Failed to parse stream event:", parseErr);
+                continue;
+              }
+
+              if (event.type === "complete" && event.data) {
+                pageData = event.data as AiImportResponse;
+                pageQuestionsDetected = pageData.items?.length ?? 0;
+                
+                // Report: Questions detected
+                if (pageQuestionsDetected > 0) {
+                  cumulativeDetected += pageQuestionsDetected;
+                  onPageProgress?.({
+                    pageNumber: pageNum,
+                    totalPages: numPages,
+                    status: "detected",
+                    message: `Detected ${pageQuestionsDetected} question${pageQuestionsDetected !== 1 ? "s" : ""}`,
+                    pageQuestionsDetected,
+                    pageQuestionsAccepted: 0,
+                    cumulativeDetected,
+                    cumulativeAccepted,
+                  });
+                }
+              } else if (event.type === "error") {
+                hasError = true;
+                throw new Error(event.error || "Unknown error from API");
               }
             }
           }
@@ -438,15 +446,20 @@ export async function importQuestionsFromPdf(
           throw new Error("Failed to process page");
         }
 
-        if (!pageData || !res.ok) {
+        if (!res.ok) {
           throw new Error(`API error: ${res.status}`);
+        }
+
+        if (!pageData) {
+          throw new Error("AI service returned an empty response. Please try again.");
         }
       } else {
         // Fallback for non-streaming response (e.g., JSON)
         pageData = (await res.json().catch(() => ({}))) as AiImportResponse;
 
         if (!res.ok) {
-          throw new Error(`API error: ${res.status}`);
+          const errorBody = pageData as unknown as { error?: string; message?: string };
+          throw new Error(errorBody?.error || errorBody?.message || `API error: ${res.status}`);
         }
 
         pageQuestionsDetected = pageData.items?.length ?? 0;
@@ -533,6 +546,7 @@ export async function importQuestionsFromPdf(
 
       // Check if it's a rate limit error (429 or "Too many requests")
       const errorMsg = pageErr instanceof Error ? pageErr.message : String(pageErr);
+      lastFailureMessage = errorMsg || lastFailureMessage;
       const isRateLimit = 
         errorMsg.includes("Too many requests") || 
         errorMsg.includes("429") ||
@@ -599,6 +613,12 @@ export async function importQuestionsFromPdf(
     if (retryCurrentPage) {
       pageNum -= 1;
     }
+  }
+
+  if (failedPages.length > 0) {
+    const message = lastFailureMessage || GENERIC_AI_IMPORT_ERROR;
+    console.error(`[importQuestionsFromPdf] Failed pages: ${failedPages.join(", ")}`);
+    throw new Error(message);
   }
 
   const reconciledItems = reconcileTrailingAnswerKey(allItems);
