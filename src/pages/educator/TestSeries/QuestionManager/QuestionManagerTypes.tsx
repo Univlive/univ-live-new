@@ -1,3 +1,5 @@
+import type { QuestionType } from "@/lib/questionTypes";
+
 export type Difficulty = "easy" | "medium" | "hard";
 
 export type TestSection = {
@@ -48,6 +50,13 @@ export type TestQuestion = {
     // Section support
     sectionId?: string;
 
+    // Question type support
+    questionType?: QuestionType;
+    referenceAnswer?: string;
+    referenceKeywords?: string[];
+    referenceAnswerFileUrl?: string;
+    evaluationInstructions?: string;
+
     createdAt?: any;
     updatedAt?: any;
 };
@@ -82,6 +91,11 @@ export type EditorDraftSnapshot = {
     marks: string;
     negativeMarks: string;
     active: boolean;
+    questionType: QuestionType;
+    referenceAnswer: string;
+    referenceKeywords: string;
+    referenceAnswerFileUrl: string;
+    evaluationInstructions: string;
 };
 
 export type PendingEditorAction =

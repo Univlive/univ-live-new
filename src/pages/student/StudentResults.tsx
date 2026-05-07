@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Trophy, Target, Clock, TrendingUp, Eye, Loader2 } from "lucide-react";
+import { ArrowLeft, Trophy, Target, Clock, TrendingUp, Eye, Loader2, BrainCircuit } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,13 @@ type AttemptResponse = {
   markedForReview: boolean;
   visited: boolean;
   answered: boolean;
+  aiEvaluation?: {
+    score: number;
+    maxScore: number;
+    confidence: number;
+    feedback: string;
+    evaluatedAt?: number;
+  };
 };
 
 type AttemptDoc = {
@@ -48,11 +55,16 @@ type AttemptDoc = {
   // optional (if you add later)
   rank?: number;
   totalParticipants?: number;
+
+  // Subjective evaluation metadata
+  hasSubjectiveQuestions?: boolean;
+  subjectiveEvaluatedCount?: number;
 };
 
 type QuestionDoc = {
   sectionId?: string;
   type?: "mcq" | "integer";
+  questionType?: string; // "MCQ" | "SHORT_ANSWER" | "UPLOAD"
   text?: string;
   options?: string[];
   correctOptionIndex?: number;
@@ -62,6 +74,8 @@ type QuestionDoc = {
   negativeMarks?: number;
   marks?: number;
   questionOrder?: number;
+  referenceAnswer?: string;
+  referenceKeywords?: string[];
 };
 
 type TestDoc = {
@@ -143,6 +157,19 @@ function computeFromQuestionsAndResponses(
     if (!isAnswered(userAnswer)) continue;
 
     const type = d.type === "integer" ? "integer" : "mcq";
+    const qType = (d.questionType || "").toUpperCase();
+    const isSubjective = qType === "SHORT_ANSWER" || qType === "UPLOAD";
+
+    if (isSubjective) {
+      const aiScore = responses[q.id]?.aiEvaluation?.score;
+      if (Number.isFinite(Number(aiScore))) {
+        const safeScore = safeNumber(aiScore, 0);
+        score += safeScore;
+        perSection[sectionId].score += safeScore;
+      }
+      continue;
+    }
+
     let isCorrect = false;
 
     if (type === "integer") {
@@ -198,6 +225,7 @@ export default function StudentResults() {
   
   // Store questions for AI analysis
   const [questionsData, setQuestionsData] = useState<{ id: string; data: QuestionDoc }[]>([]);
+  const [sectionNameMap, setSectionNameMap] = useState<Record<string, string>>({});
 
   const rank = attempt?.rank ?? 0;
   const totalParticipants = attempt?.totalParticipants ?? 0;
@@ -397,6 +425,7 @@ export default function StudentResults() {
         });
 
         setSectionScores(derived.sectionScores);
+        setSectionNameMap(sectionNameById);
 
         setComputedScore(typeof a.score === "number" ? a.score : derived.score);
         setComputedMaxScore(typeof a.maxScore === "number" ? a.maxScore : derived.maxScore);
@@ -511,6 +540,122 @@ export default function StudentResults() {
           )}
         </CardContent>
       </Card>
+
+      {/* Subjective Score Breakdown (if test had subjective questions) */}
+      {attempt.hasSubjectiveQuestions && attempt.responses && (() => {
+        if (!questionsData.length) return null;
+
+        const responsesMap = attempt.responses || {};
+        const sectionOrder = Array.from(
+          new Set(
+            questionsData.map((q) => String(q.data.sectionId || "main"))
+          )
+        );
+
+        const sections = sectionOrder
+          .map((sectionId) => {
+            let indexInSection = 0;
+            const items = questionsData
+              .filter((q) => String(q.data.sectionId || "main") === sectionId)
+              .map((q) => {
+                const resp = responsesMap[q.id];
+                if (!resp?.aiEvaluation) return null;
+
+                indexInSection += 1;
+                const questionType = String(q.data.questionType || "").toUpperCase();
+
+                return {
+                  qId: q.id,
+                  index: indexInSection,
+                  questionText: String(q.data.question || q.data.text || `Question ${indexInSection}`),
+                  questionType,
+                  score: resp.aiEvaluation.score,
+                  maxScore: resp.aiEvaluation.maxScore,
+                  confidence: resp.aiEvaluation.confidence,
+                  feedback: resp.aiEvaluation.feedback,
+                };
+              })
+              .filter(Boolean) as Array<{
+                qId: string;
+                index: number;
+                questionText: string;
+                questionType: string;
+                score: number;
+                maxScore: number;
+                confidence: number;
+                feedback: string;
+              }>;
+
+            return {
+              sectionId,
+              sectionName: sectionNameMap[sectionId] || sectionId,
+              items,
+            };
+          })
+          .filter((section) => section.items.length > 0);
+
+        if (!sections.length) return null;
+
+        const allItems = sections.flatMap((section) => section.items);
+        const totalSubjScore = allItems.reduce((s, e) => s + e.score, 0);
+        const totalSubjMax = allItems.reduce((s, e) => s + e.maxScore, 0);
+
+        return (
+          <Card className="card-soft border-0">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <BrainCircuit className="h-5 w-5 text-purple-600" />
+                AI-Evaluated Answers
+                <span className="ml-auto text-base font-semibold text-purple-600">
+                  {totalSubjScore.toFixed(1)}/{totalSubjMax}
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {sections.map((section) => (
+                <div key={section.sectionId} className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold">{section.sectionName}</p>
+                    <span className="text-xs text-muted-foreground">
+                      {section.items.length} evaluated
+                    </span>
+                  </div>
+                  <div className="space-y-3">
+                    {section.items.map((entry) => (
+                      <div key={entry.qId} className="rounded-xl border p-4 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold">Q{entry.index}</span>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-purple-100 text-purple-700">
+                              {entry.questionType === "UPLOAD" ? "Upload" : "Short Answer"}
+                            </span>
+                          </div>
+                          <span className={`text-sm font-bold ${
+                            entry.score >= entry.maxScore * 0.7 ? "text-green-600" :
+                            entry.score >= entry.maxScore * 0.4 ? "text-yellow-600" :
+                            "text-red-500"
+                          }`}>
+                            {entry.score.toFixed(1)}/{entry.maxScore}
+                          </span>
+                        </div>
+                        <Progress value={entry.maxScore ? (entry.score / entry.maxScore) * 100 : 0} className="h-1.5" />
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          {entry.feedback}
+                        </p>
+                        {entry.confidence < 0.6 && (
+                          <p className="text-[10px] text-amber-600">
+                            ⚠ Low confidence evaluation — may require manual review
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* AI Review */}
       {isAiPerformanceAnalysisEnabled ? (

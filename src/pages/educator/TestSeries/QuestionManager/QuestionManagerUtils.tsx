@@ -3,6 +3,7 @@ import type {
   TestQuestion,
   EditorDraftSnapshot,
 } from "./QuestionManagerTypes";
+import { normalizeQuestionType } from "@/lib/questionTypes";
 
 export const IMG_TAG_REGEX = /<img[^>]+src\s*=\s*["']([^"']+)["'][^>]*\/?>/gi;
 
@@ -22,6 +23,11 @@ export function buildSnapshotFromQuestion(question?: TestQuestion): EditorDraftS
             marks: "",
             negativeMarks: "",
             active: true,
+            questionType: "MCQ",
+            referenceAnswer: "",
+            referenceKeywords: "",
+            referenceAnswerFileUrl: "",
+            evaluationInstructions: "",
         };
     }
 
@@ -38,6 +44,11 @@ export function buildSnapshotFromQuestion(question?: TestQuestion): EditorDraftS
         marks: question.marks != null ? String(question.marks) : "",
         negativeMarks: question.negativeMarks != null ? String(question.negativeMarks) : "",
         active: isQuestionPublished(question.isActive),
+        questionType: normalizeQuestionType(question.questionType),
+        referenceAnswer: question.referenceAnswer || "",
+        referenceKeywords: Array.isArray(question.referenceKeywords) ? question.referenceKeywords.join(", ") : "",
+        referenceAnswerFileUrl: question.referenceAnswerFileUrl || "",
+        evaluationInstructions: question.evaluationInstructions || "",
     };
 }
 
@@ -50,6 +61,11 @@ export function areSnapshotsEqual(a: EditorDraftSnapshot, b: EditorDraftSnapshot
     if (a.marks !== b.marks) return false;
     if (a.negativeMarks !== b.negativeMarks) return false;
     if (a.active !== b.active) return false;
+    if (a.questionType !== b.questionType) return false;
+    if (a.referenceAnswer !== b.referenceAnswer) return false;
+    if (a.referenceKeywords !== b.referenceKeywords) return false;
+    if (a.referenceAnswerFileUrl !== b.referenceAnswerFileUrl) return false;
+    if (a.evaluationInstructions !== b.evaluationInstructions) return false;
     if (a.options.length !== b.options.length) return false;
     for (let i = 0; i < a.options.length; i += 1) {
         if (a.options[i] !== b.options[i]) return false;

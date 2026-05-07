@@ -64,6 +64,7 @@ import {
 import { aiFeatureFlags, getAiFeatureDisabledMessage } from "@/lib/aiFeatureFlags";
 import { HtmlView } from "@/lib/safeHtml";
 import { uploadToImageKit } from "@/lib/imagekitUpload";
+import { type QuestionType, normalizeQuestionType, getQuestionTypeConfig, getQuestionTypeShortLabel } from "@/lib/questionTypes";
 
 // Firebase
 import {
@@ -124,8 +125,14 @@ type TestQuestion = {
     topic?: string; // legacy
     chapter?: string;
     examTags?: string[];
-    questionType?: string;
+    questionType?: QuestionType;
     language?: string[];
+
+    // Subjective question fields
+    referenceAnswer?: string;
+    referenceKeywords?: string[];
+    referenceAnswerFileUrl?: string;
+    evaluationInstructions?: string;
 
     marks?: number; // positive marks
     negativeMarks?: number;
@@ -181,6 +188,11 @@ type EditorDraftSnapshot = {
     marks: string;
     negativeMarks: string;
     active: boolean;
+    questionType: QuestionType;
+    referenceAnswer: string;
+    referenceKeywords: string;
+    referenceAnswerFileUrl: string;
+    evaluationInstructions: string;
 };
 
 type PendingEditorAction =
@@ -211,6 +223,11 @@ function buildSnapshotFromQuestion(question?: TestQuestion): EditorDraftSnapshot
             marks: "",
             negativeMarks: "",
             active: true,
+            questionType: "MCQ",
+            referenceAnswer: "",
+            referenceKeywords: "",
+            referenceAnswerFileUrl: "",
+            evaluationInstructions: "",
         };
     }
 
@@ -227,6 +244,11 @@ function buildSnapshotFromQuestion(question?: TestQuestion): EditorDraftSnapshot
         marks: question.marks != null ? String(question.marks) : "",
         negativeMarks: question.negativeMarks != null ? String(question.negativeMarks) : "",
         active: isQuestionPublished(question.isActive),
+        questionType: normalizeQuestionType(question.questionType),
+        referenceAnswer: question.referenceAnswer || "",
+        referenceKeywords: Array.isArray(question.referenceKeywords) ? question.referenceKeywords.join(", ") : "",
+        referenceAnswerFileUrl: question.referenceAnswerFileUrl || "",
+        evaluationInstructions: question.evaluationInstructions || "",
     };
 }
 
@@ -239,6 +261,11 @@ function areSnapshotsEqual(a: EditorDraftSnapshot, b: EditorDraftSnapshot) {
     if (a.marks !== b.marks) return false;
     if (a.negativeMarks !== b.negativeMarks) return false;
     if (a.active !== b.active) return false;
+    if (a.questionType !== b.questionType) return false;
+    if (a.referenceAnswer !== b.referenceAnswer) return false;
+    if (a.referenceKeywords !== b.referenceKeywords) return false;
+    if (a.referenceAnswerFileUrl !== b.referenceAnswerFileUrl) return false;
+    if (a.evaluationInstructions !== b.evaluationInstructions) return false;
     if (a.options.length !== b.options.length) return false;
     for (let i = 0; i < a.options.length; i += 1) {
         if (a.options[i] !== b.options[i]) return false;
@@ -686,6 +713,11 @@ const QuestionsManager = ({
     const [formMarks, setFormMarks] = useState("");
     const [formNegMarks, setFormNegMarks] = useState("");
     const [formActive, setFormActive] = useState(true);
+    const [formQuestionType, setFormQuestionType] = useState<QuestionType>("MCQ");
+    const [formReferenceAnswer, setFormReferenceAnswer] = useState("");
+    const [formReferenceKeywords, setFormReferenceKeywords] = useState("");
+    const [formReferenceAnswerFileUrl, setFormReferenceAnswerFileUrl] = useState("");
+    const [formEvaluationInstructions, setFormEvaluationInstructions] = useState("");
     const [editorSnapshot, setEditorSnapshot] = useState<EditorDraftSnapshot | null>(null);
     const [unsavedConfirmOpen, setUnsavedConfirmOpen] = useState(false);
     const [pendingEditorAction, setPendingEditorAction] = useState<PendingEditorAction | null>(null);
@@ -889,8 +921,13 @@ const QuestionsManager = ({
             marks: formMarks,
             negativeMarks: formNegMarks,
             active: !!formActive,
+            questionType: formQuestionType,
+            referenceAnswer: formReferenceAnswer,
+            referenceKeywords: formReferenceKeywords,
+            referenceAnswerFileUrl: formReferenceAnswerFileUrl,
+            evaluationInstructions: formEvaluationInstructions,
         }),
-        [formQuestion, formOptions, formCorrect, formDifficulty, formSubject, formTopic, formMarks, formNegMarks, formActive]
+        [formQuestion, formOptions, formCorrect, formDifficulty, formSubject, formTopic, formMarks, formNegMarks, formActive, formQuestionType, formReferenceAnswer, formReferenceKeywords, formReferenceAnswerFileUrl, formEvaluationInstructions]
     );
 
     const hasUnsavedQuestionChanges = useMemo(() => {
@@ -1172,6 +1209,11 @@ const QuestionsManager = ({
         setFormMarks("");
         setFormNegMarks("");
         setFormActive(true);
+        setFormQuestionType("MCQ");
+        setFormReferenceAnswer("");
+        setFormReferenceKeywords("");
+        setFormReferenceAnswerFileUrl("");
+        setFormEvaluationInstructions("");
         setEditorSnapshot(null);
     }
 
@@ -1213,6 +1255,11 @@ const QuestionsManager = ({
         setFormMarks(q.marks != null ? String(q.marks) : "");
         setFormNegMarks(q.negativeMarks != null ? String(q.negativeMarks) : "");
         setFormActive(isQuestionPublished(q.isActive));
+        setFormQuestionType(normalizeQuestionType(q.questionType));
+        setFormReferenceAnswer(q.referenceAnswer || "");
+        setFormReferenceKeywords(Array.isArray(q.referenceKeywords) ? q.referenceKeywords.join(", ") : "");
+        setFormReferenceAnswerFileUrl(q.referenceAnswerFileUrl || "");
+        setFormEvaluationInstructions(q.evaluationInstructions || "");
         setEditorSnapshot(buildSnapshotFromQuestion(q));
         setEditorOpen(true);
     }
@@ -1502,17 +1549,29 @@ const QuestionsManager = ({
         const trimmedQuestion = formQuestion.trim();
         const normalizedOptions = formOptions.slice(0, 6).map((value) => value ?? "");
         const nonEmptyOptions = normalizedOptions.filter((value) => value.trim() !== "");
+        const qType = formQuestionType || "MCQ";
+        const typeConfig = getQuestionTypeConfig(qType);
 
         if (!trimmedQuestion) {
             toast.error("Question is required");
             return false;
         }
-        if (nonEmptyOptions.length < 2) {
-            toast.error("At least two options are required");
-            return false;
+
+        // MCQ-specific validation
+        if (typeConfig.supportsOptions) {
+            if (nonEmptyOptions.length < 2) {
+                toast.error("At least two options are required");
+                return false;
+            }
+            if (!normalizedOptions[formCorrect] || normalizedOptions[formCorrect].trim() === "") {
+                toast.error("Correct option cannot be empty");
+                return false;
+            }
         }
-        if (!normalizedOptions[formCorrect] || normalizedOptions[formCorrect].trim() === "") {
-            toast.error("Correct option cannot be empty");
+
+        // Subjective validation
+        if (typeConfig.requiresReferenceAnswer && !formReferenceAnswer.trim()) {
+            toast.error("Reference answer is required for this question type");
             return false;
         }
 
@@ -1537,8 +1596,9 @@ const QuestionsManager = ({
 
         const payload: any = {
             question: formQuestion,
-            options: normalizedOptions,
-            correctOption: Number(formCorrect) || 0,
+            questionType: qType,
+            options: typeConfig.supportsOptions ? normalizedOptions : [],
+            correctOption: typeConfig.supportsCorrectOption ? (Number(formCorrect) || 0) : null,
             explanation: "",
             difficulty: formDifficulty || "medium",
             sectionId: targetSectionId,
@@ -1546,12 +1606,17 @@ const QuestionsManager = ({
             topic: formTopic || "",
             isActive: !!formActive,
             updatedAt: serverTimestamp(),
+            // Subjective fields
+            referenceAnswer: formReferenceAnswer || "",
+            referenceKeywords: formReferenceKeywords.trim() ? formReferenceKeywords.split(",").map((k: string) => k.trim()).filter(Boolean) : [],
+            referenceAnswerFileUrl: formReferenceAnswerFileUrl || "",
+            evaluationInstructions: formEvaluationInstructions || "",
         };
 
         if (formMarks.trim() !== "") payload.marks = Number(formMarks);
         else payload.marks = null;
 
-        if (formNegMarks.trim() !== "") payload.negativeMarks = Number(formNegMarks);
+        if (typeConfig.supportsNegativeMarks && formNegMarks.trim() !== "") payload.negativeMarks = Number(formNegMarks);
         else payload.negativeMarks = null;
 
         setSaving(true);
@@ -1940,11 +2005,15 @@ const QuestionsManager = ({
             data?.correctOption ?? data?.correctOptionIndex ?? data?.correctOptionIndex ?? 0
         );
 
-        // Always normalize to +5 marks and -1 negative marks
-        const marks = 5;
-        const negativeMarks = -1;
+        const marks = Number.isFinite(Number(data?.marks ?? data?.positiveMarks))
+            ? Number(data?.marks ?? data?.positiveMarks)
+            : 5;
+        const negativeMarks = Number.isFinite(Number(data?.negativeMarks))
+            ? Number(data?.negativeMarks)
+            : -1;
 
         const difficulty = (data?.difficulty as Difficulty) || "medium";
+        const questionType = normalizeQuestionType(data?.questionType);
 
         return {
             id,
@@ -1954,12 +2023,17 @@ const QuestionsManager = ({
             correctOption: Number.isFinite(correctOption) ? correctOption : 0,
             explanation: data?.explanation ? String(data.explanation) : "",
             difficulty,
+            questionType,
             subject: data?.subject ? String(data.subject) : "",
             topic: data?.topic ? String(data.topic) : "",
             sectionId: data?.sectionId ? String(data.sectionId) : "",
             marks: marks,
             negativeMarks: negativeMarks,
             isActive: isQuestionPublished(data?.isActive),
+            referenceAnswer: data?.referenceAnswer ? String(data.referenceAnswer) : "",
+            referenceKeywords: Array.isArray(data?.referenceKeywords) ? data.referenceKeywords : [],
+            referenceAnswerFileUrl: data?.referenceAnswerFileUrl ? String(data.referenceAnswerFileUrl) : "",
+            evaluationInstructions: data?.evaluationInstructions ? String(data.evaluationInstructions) : "",
             createdAt: data?.createdAt,
             updatedAt: data?.updatedAt,
         };

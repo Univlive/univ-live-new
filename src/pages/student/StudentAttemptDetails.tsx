@@ -89,10 +89,8 @@ function mapQuestion(id: string, data: any): AttemptQuestion {
   );
   const correctIndex = parsedCorrectIndex ?? 0;
 
-  // Always normalize to +5 marks and -1 negative marks
-  const positive = 5;
-
-  const negative = 1;
+  const positive = safeNumber((data as any).marks ?? data.positiveMarks, 5);
+  const negative = Math.abs(safeNumber(data.negativeMarks, 1));
 
   return {
     id,

@@ -4,18 +4,19 @@ import { Switch } from "@/components/ui/switch";
 import "react-image-crop/dist/ReactCrop.css";
 import { HtmlView } from "@/lib/safeHtml";
 import {
-  formatNegativeMarksDisplay,
+    formatNegativeMarksDisplay,
 } from "@/lib/aiQuestionImport";
 
 import {
-  isQuestionPublished,
-  hasPreviewContent,
+    isQuestionPublished,
+    hasPreviewContent,
 } from "./QuestionManager/QuestionManagerUtils";
 
-import { Trash2, GripVertical,Plus,Edit } from "lucide-react";
+import { Trash2, GripVertical, Plus, Edit } from "lucide-react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { TestQuestion } from "./QuestionManager/QuestionManagerTypes";
+import { getQuestionTypeShortLabel, normalizeQuestionType } from "@/lib/questionTypes";
 
 
 function getPublishStatusLabel(isActive?: boolean) {
@@ -36,7 +37,7 @@ type SortableQuestionListItemProps = {
     onToggleActive: (q: TestQuestion, next: boolean) => void;
 };
 
-const SortableQuestionListItem =({
+const SortableQuestionListItem = ({
     q,
     displayOrder,
     dragDisabled,
@@ -159,6 +160,20 @@ const SortableQuestionListItem =({
                                 <Badge variant="secondary" className="text-[10px] rounded-full">
                                     {(q.difficulty || "medium").toUpperCase()}
                                 </Badge>
+
+                                {q.questionType && q.questionType !== "MCQ" ? (
+                                    <Badge
+                                        variant="outline"
+                                        className={`text-[10px] rounded-full ${normalizeQuestionType(q.questionType) === "SHORT_ANSWER"
+                                                ? "border-blue-400 text-blue-600 bg-blue-50"
+                                                : normalizeQuestionType(q.questionType) === "UPLOAD"
+                                                    ? "border-purple-400 text-purple-600 bg-purple-50"
+                                                    : ""
+                                            }`}
+                                    >
+                                        {getQuestionTypeShortLabel(normalizeQuestionType(q.questionType))}
+                                    </Badge>
+                                ) : null}
 
                                 <Badge variant="outline" className="text-[10px] rounded-full">
                                     +{q.marks ?? "-"} / {formatNegativeMarksDisplay(q.negativeMarks)}

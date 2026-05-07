@@ -1,7 +1,7 @@
 // src/lib/imagekitUpload.ts
 import { auth } from "@/lib/firebase";
 
-export type ImageKitScope = "question-bank" | "website";
+export type ImageKitScope = "question-bank" | "website" | "student";
 
 type ImageKitAuthParams = {
   token: string;
