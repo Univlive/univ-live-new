@@ -115,6 +115,14 @@ export default function Login() {
       const data: any = snap.exists() ? snap.data() : {};
 
       const roleDb = String(data?.role || "STUDENT").toUpperCase();
+      const statusDb = String(data?.status || "active").toLowerCase();
+      
+      if (statusDb === "suspended") {
+        toast.error("Your account has been suspended. Please contact support.");
+        await auth.signOut();
+        return;
+      }
+
       const enrolledTenants: string[] = Array.isArray(data?.enrolledTenants)
         ? data.enrolledTenants
         : typeof data?.tenantSlug === "string"
