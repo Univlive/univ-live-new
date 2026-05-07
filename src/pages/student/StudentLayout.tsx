@@ -9,6 +9,7 @@ import {
   Trophy,
   BarChart3,
   MessageSquare,
+  LifeBuoy,
   Settings,
   LogOut,
   Menu,
@@ -179,15 +180,9 @@ export default function StudentLayout() {
       { icon: FileText, label: "Tests", href: "/student/tests" },
       { icon: History, label: "My Attempts", href: "/student/attempts" },
       { icon: Trophy, label: "Rankings", href: "/student/rankings" },
-      {
-        icon: MessageSquare,
-        label: "Messages",
-        href: "/student/messages",
-        badge: unreadThreadsCount > 0 ? unreadThreadsCount : undefined,
-      },
       { icon: Settings, label: "Settings", href: "/student/settings" },
     ],
-    [unreadThreadsCount]
+    []
   );
 
   const isActive = (href: string) => {
@@ -388,6 +383,14 @@ export default function StudentLayout() {
                   <Link to="/student/settings">
                     <Settings className="h-4 w-4 mr-2" />
                     Settings
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to="/student/messages" className="flex items-center justify-between w-full">
+                    <div className="flex items-center">
+                      <LifeBuoy className="h-4 w-4 mr-2" />
+                      Help
+                    </div>
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
