@@ -235,7 +235,7 @@ export default function Billing() {
         coupon_code: couponValid ? couponCode.trim() : null,
         educator_name: profile?.displayName || profile?.fullName || "Educator",
         educator_email: profile?.email || firebaseUser?.email || "",
-        educator_phone: "9999999999",  // TODO: pull from educator profile
+        educator_phone: profile?.phone || "",
         return_url: `${window.location.origin}/educator/billing?payment=success`,
       };
 

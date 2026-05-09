@@ -243,7 +243,7 @@ export default function EducatorLayout() {
 
                     <Link
                       to={item.href}
-                      onClick={() => setSidebarOpen(false)}
+                      onClick={() => { setSidebarOpen(false); if (hasChildren && !sidebarCollapsed) toggleExpanded(item.href); }}
                       className={cn(
                         "flex-1 flex items-center gap-3 px-3 py-2.5 text-sm font-medium transition-colors relative z-10",
                         sidebarCollapsed && "lg:justify-center lg:px-2",

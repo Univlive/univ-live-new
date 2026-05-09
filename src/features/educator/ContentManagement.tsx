@@ -127,15 +127,6 @@ export default function ContentManagement() {
   const { features, loading: featuresLoading } = useEducatorFeatures(educatorId);
   const { activeTypes } = useContentTypes();
 
-  if (!featuresLoading && !features.contentLibrary) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center p-8">
-        <Lock className="h-12 w-12 text-muted-foreground" />
-        <h2 className="text-xl font-semibold">Content Library not included in your plan</h2>
-        <p className="text-muted-foreground max-w-sm">Upgrade your plan to upload and manage books, notes, and course content. Contact your admin to enable this feature.</p>
-      </div>
-    );
-  }
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -144,20 +135,16 @@ export default function ContentManagement() {
   const [loading, setLoading] = useState(true);
   const [uploadLimitMB, setUploadLimitMB] = useState(20);
 
-  // Selected course
   const [selectedBranchId, setSelectedBranchId] = useState("");
   const [selectedCourseId, setSelectedCourseId] = useState("");
 
-  // Content for selected course
   const [content, setContent] = useState<ContentItem[]>([]);
   const [contentLoading, setContentLoading] = useState(false);
 
-  // Admin library modal
   const [adminItems, setAdminItems] = useState<AdminLibraryItem[]>([]);
   const [importOpen, setImportOpen] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
 
-  // Upload own content modal
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [title, setTitle] = useState("");
@@ -225,6 +212,16 @@ export default function ContentManagement() {
     );
     return () => unsub();
   }, [educatorId, selectedBranchId, selectedCourseId]);
+
+  if (!featuresLoading && !features.contentLibrary) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center p-8">
+        <Lock className="h-12 w-12 text-muted-foreground" />
+        <h2 className="text-xl font-semibold">Content Library not included in your plan</h2>
+        <p className="text-muted-foreground max-w-sm">Upgrade your plan to upload and manage books, notes, and course content. Contact your admin to enable this feature.</p>
+      </div>
+    );
+  }
 
   async function openImport() {
     const libSnap = await getDocs(query(collection(db, "admin_library"), orderBy("createdAt", "desc")));

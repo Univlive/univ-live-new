@@ -20,10 +20,14 @@ export type AppUserProfile = {
   email?: string;
   photoURL?: string;
   fullName?: string;
+  phone?: string;
   currentSessionId?: string;
   branchId?: string;
   courseId?: string;
   batchId?: string;
+  globalCourseId?: string;
+  globalCourseName?: string;
+  subjectIds?: string[];
 };
 
 type AuthContextValue = {
@@ -64,6 +68,9 @@ async function loadProfile(uid: string): Promise<AppUserProfile | null> {
     branchId: typeof data.branchId === "string" ? data.branchId : undefined,
     courseId: typeof data.courseId === "string" ? data.courseId : undefined,
     batchId: typeof data.batchId === "string" ? data.batchId : undefined,
+    globalCourseId: typeof data.globalCourseId === "string" ? data.globalCourseId : undefined,
+    globalCourseName: typeof data.globalCourseName === "string" ? data.globalCourseName : undefined,
+    subjectIds: Array.isArray(data.subjectIds) ? data.subjectIds as string[] : undefined,
   };
 
   if (role === "EDUCATOR") {
@@ -74,6 +81,7 @@ async function loadProfile(uid: string): Promise<AppUserProfile | null> {
       profile.displayName = educatorData.displayName || profile.displayName;
       profile.fullName = educatorData.fullName;
       profile.photoURL = educatorData.photoURL;
+      profile.phone = typeof educatorData.phone === "string" ? educatorData.phone : undefined;
     }
   }
 

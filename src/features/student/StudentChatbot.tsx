@@ -27,16 +27,6 @@ export default function StudentChatbot() {
   const educatorId = profile?.educatorId;
   const { features, loading: featuresLoading } = useEducatorFeatures(educatorId);
 
-  if (!featuresLoading && !features.chatbot) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center p-8">
-        <Lock className="h-12 w-12 text-muted-foreground" />
-        <h2 className="text-xl font-semibold">AI Tutor not available</h2>
-        <p className="text-muted-foreground max-w-sm">The AI Doubt Chatbot is not included in your institute's current plan. Contact your educator or admin to enable it.</p>
-      </div>
-    );
-  }
-
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -70,6 +60,16 @@ export default function StudentChatbot() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  if (!featuresLoading && !features.chatbot) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center p-8">
+        <Lock className="h-12 w-12 text-muted-foreground" />
+        <h2 className="text-xl font-semibold">AI Tutor not available</h2>
+        <p className="text-muted-foreground max-w-sm">The AI Doubt Chatbot is not included in your institute's current plan. Contact your educator or admin to enable it.</p>
+      </div>
+    );
+  }
 
   async function sendMessage() {
     const text = input.trim();

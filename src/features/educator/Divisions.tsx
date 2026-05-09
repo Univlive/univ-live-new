@@ -113,6 +113,8 @@ export default function Divisions() {
   const [seatMap, setSeatMap] = useState<Record<string, boolean>>({});
   const [seatLimit, setSeatLimit] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Per-batch enrolled student count (computed from live students snapshot)
+  const [batchStudentCounts, setBatchStudentCounts] = useState<Record<string, number>>({});
 
   // Assign-batch dialog
   const [assignTarget, setAssignTarget] = useState<{ id: string; name?: string; branchId?: string; courseId?: string; batchId?: string } | null>(null);
@@ -142,6 +144,16 @@ export default function Divisions() {
       setSeatMap(map);
     });
 
+    // Count enrolled students per batch from live snapshot
+    const unsubStudents = onSnapshot(collection(db, "educators", educatorId, "students"), (snap) => {
+      const counts: Record<string, number> = {};
+      snap.docs.forEach((d) => {
+        const bid = String((d.data() as any)?.batchId || "");
+        if (bid) counts[bid] = (counts[bid] || 0) + 1;
+      });
+      setBatchStudentCounts(counts);
+    });
+
     // Load branches
     const branchUnsub = onSnapshot(
       collection(db, "educators", educatorId, "branches"),
@@ -163,7 +175,7 @@ export default function Divisions() {
     });
 
     setLoading(false);
-    return () => { branchUnsub(); unsubSeats(); };
+    return () => { branchUnsub(); unsubSeats(); unsubStudents(); };
   }, [educatorId]);
 
   // Load courses when branches change
@@ -597,8 +609,8 @@ export default function Divisions() {
                       <TableCell>{courses.find((c) => c.id === b.courseId)?.name}</TableCell>
                       <TableCell>{plans.find((p) => p.id === b.planId)?.name || b.planId}</TableCell>
                       <TableCell>
-                        <span className={b.usedSeats >= b.seatLimit && b.seatLimit > 0 ? "text-destructive font-medium" : ""}>
-                          {b.usedSeats}/{b.seatLimit}
+                        <span className={(batchStudentCounts[b.id] ?? 0) >= b.seatLimit && b.seatLimit > 0 ? "text-destructive font-medium" : ""}>
+                          {batchStudentCounts[b.id] ?? 0}/{b.seatLimit}
                         </span>
                       </TableCell>
                       <TableCell className="text-xs">
@@ -617,7 +629,7 @@ export default function Divisions() {
                             }}
                           >
                             <Users className="h-3 w-3 mr-1" />
-                            {b.usedSeats}
+                            {batchStudentCounts[b.id] ?? 0}
                           </Button>
                           <Button size="sm" variant="outline" onClick={() => openEditBatch(b)}>
                             <Pencil className="h-3 w-3" />
@@ -684,7 +696,7 @@ export default function Divisions() {
             )}
             {lBatchId && (
               <Badge variant="secondary" className="h-8 px-3 text-sm">
-                {learners.length} / {batches.find((b) => b.id === lBatchId)?.seatLimit ?? 0} seats
+                {batchStudentCounts[lBatchId] ?? 0} / {batches.find((b) => b.id === lBatchId)?.seatLimit ?? 0} seats
               </Badge>
             )}
           </div>

@@ -31,19 +31,39 @@ import { useAuth } from "@app/providers/AuthProvider";
 import NotificationBell from "@shared/components/NotificationBell";
 import AdminBroadcastModal from "./components/AdminBroadcastModal";
 
-const sidebarItems = [
-  { icon: LayoutDashboard, label: "Dashboard", path: "/admin" },
-  { icon: BarChart3, label: "Analytics", path: "/admin/analytics" },
-  { icon: BookOpen, label: "Test Bank", path: "/admin/tests" },
-  { icon: FileText, label: "Templates", path: "/admin/templates" },
-  { icon: Users, label: "Educators", path: "/admin/educators" },
-  { icon: Library, label: "Question Bank", path: "/admin/question-bank" },
-  { icon: Layers, label: "Plans", path: "/admin/plans" },
-  { icon: BookMarked, label: "Courses", path: "/admin/subjects" },
-  { icon: BookOpen, label: "Content Library", path: "/admin/content" },
-  { icon: LayoutList, label: "Content Types", path: "/admin/content-types" },
-  { icon: Tag, label: "Coupons", path: "/admin/coupons" },
-  { icon: Receipt, label: "Payment Logs", path: "/admin/payment-logs" },
+const sidebarGroups = [
+  {
+    label: null,
+    items: [
+      { icon: LayoutDashboard, label: "Dashboard", path: "/admin" },
+      { icon: BarChart3, label: "Analytics", path: "/admin/analytics" },
+      { icon: Users, label: "Educators", path: "/admin/educators" },
+      { icon: BookMarked, label: "Courses", path: "/admin/subjects" },
+    ],
+  },
+  {
+    label: "Tests",
+    items: [
+      { icon: BookOpen, label: "Test Bank", path: "/admin/tests" },
+      { icon: FileText, label: "Templates", path: "/admin/templates" },
+      { icon: Library, label: "Question Bank", path: "/admin/question-bank" },
+    ],
+  },
+  {
+    label: "Content",
+    items: [
+      { icon: BookOpen, label: "Content Library", path: "/admin/content" },
+      { icon: LayoutList, label: "Content Types", path: "/admin/content-types" },
+    ],
+  },
+  {
+    label: "Finance",
+    items: [
+      { icon: Layers, label: "Plans", path: "/admin/plans" },
+      { icon: Tag, label: "Coupons", path: "/admin/coupons" },
+      { icon: Receipt, label: "Payment Logs", path: "/admin/payment-logs" },
+    ],
+  },
 ];
 
 
@@ -125,31 +145,39 @@ export default function AdminLayout() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-        {sidebarItems.map((item) => {
-          const isActive =
-            location.pathname === item.path ||
-            (item.path !== "/admin" && location.pathname.startsWith(item.path + "/"));
-
-          return (
-            <Link
-              key={item.path}
-              to={item.path}
-              onClick={() => mobile && setMobileMenuOpen(false)}
-              className={cn(
-                "flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200",
-                collapsed && !mobile && "justify-center px-2",
-                isActive
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              )}
-              title={collapsed && !mobile ? item.label : undefined}
-            >
-              <item.icon className="h-5 w-5" />
-              {(!collapsed || mobile) && item.label}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 p-4 space-y-4 overflow-y-auto">
+        {sidebarGroups.map((group, gi) => (
+          <div key={gi} className="space-y-1">
+            {group.label && (!collapsed || mobile) && (
+              <p className="px-4 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+                {group.label}
+              </p>
+            )}
+            {group.items.map((item) => {
+              const isActive =
+                location.pathname === item.path ||
+                (item.path !== "/admin" && location.pathname.startsWith(item.path + "/"));
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  onClick={() => mobile && setMobileMenuOpen(false)}
+                  className={cn(
+                    "flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200",
+                    collapsed && !mobile && "justify-center px-2",
+                    isActive
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                  title={collapsed && !mobile ? item.label : undefined}
+                >
+                  <item.icon className="h-5 w-5 shrink-0" />
+                  {(!collapsed || mobile) && item.label}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       {/* Footer */}

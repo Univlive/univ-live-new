@@ -46,63 +46,24 @@ export default function TenantHomeTheme2() {
   const { tenant, loading } = useTenant();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F9FAFB] text-zinc-500">
-        <Loader2 className="h-6 w-6 animate-spin mr-3" />
-        <span className="font-medium">Loading your experience...</span>
-      </div>
-    );
-  }
-
-  if (!tenant) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F9FAFB]">
-        <div className="text-center px-6">
-          <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">Coaching not found</h2>
-          <p className="text-zinc-500 mt-3 text-lg">
-            This coaching website does not exist. Check the URL or contact support.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  const config = tenant.websiteConfig || {};
-
-
-  const coachingName = config.coachingName || tenant.coachingName || "Your Institute";
-  const tagline = config.tagline || tenant.tagline || "Learn smarter. Score higher.";
+  const config = tenant?.websiteConfig || {};
+  const coachingName = config.coachingName || (tenant as any)?.coachingName || "Your Institute";
+  const tagline = config.tagline || (tenant as any)?.tagline || "Learn smarter. Score higher.";
   const heroImage: string | undefined = config.heroImage;
   const logoUrl: string | undefined = config.logoUrl;
 
-  // Set dynamic favicon + page title for this educator's subdomain
   useFavicon(logoUrl, coachingName);
 
   const stats: StatItem[] = Array.isArray(config.stats) ? config.stats : [];
   const testimonials: TestimonialItem[] = Array.isArray(config.testimonials) ? config.testimonials : [];
-
   const faqs: FAQItem[] =
     Array.isArray(config.faqs) && config.faqs.length > 0
       ? config.faqs
       : [
-          {
-            question: "How do I access the test series after purchase?",
-            answer: "Once you purchase (or enroll if free), the test series appears in your student dashboard under 'My Tests'.",
-          },
-          {
-            question: "Can I access content on mobile?",
-            answer: "Yes. The platform is mobile-responsive and works smoothly on phones and tablets.",
-          },
-          {
-            question: "Do you provide performance analytics?",
-            answer: "Yes. Students get score insights and progress tracking inside the dashboard.",
-          },
-          {
-            question: "Is there any demo / preview available?",
-            answer: "Many educators provide free tests or previews. Check the Featured section or login to see what's included.",
-          },
+          { question: "How do I access the test series after purchase?", answer: "Once you purchase (or enroll if free), the test series appears in your student dashboard under 'My Tests'." },
+          { question: "Can I access content on mobile?", answer: "Yes. The platform is mobile-responsive and works smoothly on phones and tablets." },
+          { question: "Do you provide performance analytics?", answer: "Yes. Students get score insights and progress tracking inside the dashboard." },
+          { question: "Is there any demo / preview available?", answer: "Many educators provide free tests or previews. Check the Featured section or login to see what's included." },
         ];
 
   const socials: Record<string, string> = useMemo(() => {

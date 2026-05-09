@@ -42,9 +42,9 @@ Multi-tenant SaaS platform for coaching institutes. Built with React + TypeScrip
 | `src/features/educator/` | All educator portal pages + components |
 | `src/features/student/` | All student portal pages + components + types |
 | `src/features/admin/` | All admin panel pages + components |
-| `api/_lib/` | Shared Vercel function utils (Firebase admin, Razorpay, Gemini, Discord logging) |
+| `api/_lib/` | Shared Vercel function utils (Firebase admin, Gemini, Discord logging) |
 | `api/tenant/` | Tenant slug lookup, student registration |
-| `api/billing/` | Razorpay seat assign/revoke/update |
+| `api/billing/` | Seat assign/revoke (billing status only, not enrollment) |
 | `api/ai/` | AI performance analysis, question import |
 | `vite.config.ts` | Dev server + proxy config |
 | `vercel.json` | Vercel routing rules |
@@ -81,9 +81,14 @@ Multi-tenant SaaS platform for coaching institutes. Built with React + TypeScrip
 - `seatLimit: 0` — no seats until purchased
 
 ## Payments
-- Razorpay for seat purchases
-- Webhook at `api/razorpay/`
-- Billing managed in `api/billing/`
+- **Cashfree** via `monkey-king` FastAPI backend (replaced Razorpay)
+- Educator self-service: `POST /api/payment/initiate` → Cashfree checkout → `POST /api/payment/verify/{orderId}`
+- Admin payment link: `POST /api/payment/admin/create-payment-link`
+- Cashfree webhook: `POST /api/payment/webhook` (handled by monkey-king, not Vercel)
+- `api/razorpay/webhook.ts` — legacy Razorpay handler; kept for existing subscriptions only
+- `api/billing/update-quantity.ts` — returns 410 Gone (deprecated Razorpay subscription endpoint)
+- Seat billing status (active/inactive per student): `api/billing/assign-seat.ts`, `api/billing/revoke-seat.ts`
+- All amounts are in **rupees** (not paise)
 
 ## AI Features
 - Gemini-powered question import (`api/ai/import-questions`)
@@ -112,7 +117,8 @@ Multi-tenant SaaS platform for coaching institutes. Built with React + TypeScrip
 
 ## Environment Variables
 - `VITE_FIREBASE_*` — Firebase client config
-- Vercel functions use `FIREBASE_SERVICE_ACCOUNT_JSON` (base64 or raw JSON), `RAZORPAY_*`, `GEMINI_API_KEY`, `DISCORD_WEBHOOK_URL`
+- Vercel functions use `FIREBASE_SERVICE_ACCOUNT_JSON` (base64 or raw JSON), `GEMINI_API_KEY`, `DISCORD_WEBHOOK_URL`
+- `RAZORPAY_WEBHOOK_SECRET` — still needed for legacy Razorpay webhook handler
 - `ADMIN_MAX_FILE_SIZE_MB` — max upload size for admin content (default 100)
 - `EDUCATOR_MAX_FILE_SIZE_MB` — max upload size for educator content (default 20)
 

@@ -48,16 +48,6 @@ export default function DppGenerator() {
   const educatorUid = firebaseUser?.uid || "";
   const { features, loading: featuresLoading } = useEducatorFeatures(educatorUid);
 
-  if (!featuresLoading && !features.dpp) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center p-8">
-        <Lock className="h-12 w-12 text-muted-foreground" />
-        <h2 className="text-xl font-semibold">DPP Generator not included in your plan</h2>
-        <p className="text-muted-foreground max-w-sm">Upgrade your plan to generate AI-powered daily practice papers for your students. Contact your admin to enable this feature.</p>
-      </div>
-    );
-  }
-
   const [content, setContent] = useState<ContentItem[]>([]);
   const [loadingContent, setLoadingContent] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -138,6 +128,16 @@ export default function DppGenerator() {
         .finally(() => setLoadingUsage(false));
     });
   }, [firebaseUser, dpps.length]);
+
+  if (!featuresLoading && !features.dpp) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center p-8">
+        <Lock className="h-12 w-12 text-muted-foreground" />
+        <h2 className="text-xl font-semibold">DPP Generator not included in your plan</h2>
+        <p className="text-muted-foreground max-w-sm">Upgrade your plan to generate AI-powered daily practice papers for your students. Contact your admin to enable this feature.</p>
+      </div>
+    );
+  }
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {

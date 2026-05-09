@@ -25,6 +25,7 @@ import { db } from "@shared/lib/firebase";
 import {
   collection,
   doc,
+  documentId,
   getDoc,
   getDocs,
   limit,
@@ -33,6 +34,7 @@ import {
   where,
 } from "firebase/firestore";
 import { useQuery } from "@tanstack/react-query";
+import { BookOpen, GraduationCap, Users2 } from "lucide-react";
 
 type AttemptStatus = "in-progress" | "completed" | "expired";
 
@@ -224,6 +226,55 @@ export default function StudentDashboard() {
     staleTime: 2 * 60 * 1000,
   });
 
+  // Enrollment details (batch name, course/program name, subject names)
+  const { data: enrollment = null } = useQuery({
+    queryKey: ["studentEnrollment", firebaseUser?.uid, educatorId, profile?.batchId, profile?.courseId],
+    queryFn: async () => {
+      const { branchId, courseId, batchId, globalCourseName, subjectIds } = profile!;
+      const results: { batchName: string | null; courseName: string | null; subjectNames: string[] } = {
+        batchName: null,
+        courseName: globalCourseName || null,
+        subjectNames: [],
+      };
+
+      if (educatorId && branchId && courseId) {
+        // Fetch course name (fallback if globalCourseName is empty)
+        if (!results.courseName) {
+          try {
+            const courseSnap = await getDoc(
+              doc(db, "educators", educatorId, "branches", branchId, "courses", courseId)
+            );
+            if (courseSnap.exists()) results.courseName = String(courseSnap.data()?.name || "");
+          } catch { /* non-fatal */ }
+        }
+
+        // Fetch batch name
+        if (batchId) {
+          try {
+            const batchSnap = await getDoc(
+              doc(db, "educators", educatorId, "branches", branchId, "courses", courseId, "batches", batchId)
+            );
+            if (batchSnap.exists()) results.batchName = String(batchSnap.data()?.name || "");
+          } catch { /* non-fatal */ }
+        }
+      }
+
+      // Fetch subject names
+      const ids = (subjectIds || []).filter(Boolean);
+      if (ids.length > 0) {
+        try {
+          const q = query(collection(db, "subjects"), where(documentId(), "in", ids.slice(0, 10)));
+          const snap = await getDocs(q);
+          results.subjectNames = snap.docs.map((d) => String(d.data()?.name || "")).filter(Boolean);
+        } catch { /* non-fatal */ }
+      }
+
+      return results;
+    },
+    enabled: !!firebaseUser?.uid && !!profile?.branchId,
+    staleTime: 5 * 60 * 1000,
+  });
+
   // Leaderboard top 5
   const { data: leaderboard = [] } = useQuery<LeaderboardEntry[]>({
     queryKey: ["leaderboardPreview", educatorId],
@@ -346,6 +397,41 @@ export default function StudentDashboard() {
           </Button>
         </CardContent>
       </Card>
+
+      {/* Enrollment Details */}
+      {(enrollment?.batchName || enrollment?.courseName || (enrollment?.subjectNames?.length ?? 0) > 0) && (
+        <Card className="card-soft border-0 bg-muted/40">
+          <CardContent className="p-4">
+            <div className="flex flex-wrap gap-4 text-sm">
+              {enrollment?.courseName && (
+                <div className="flex items-center gap-2 min-w-0">
+                  <GraduationCap className="h-4 w-4 text-primary shrink-0" />
+                  <span className="text-muted-foreground shrink-0">Program:</span>
+                  <span className="font-medium truncate">{enrollment.courseName}</span>
+                </div>
+              )}
+              {enrollment?.batchName && (
+                <div className="flex items-center gap-2 min-w-0">
+                  <Users2 className="h-4 w-4 text-primary shrink-0" />
+                  <span className="text-muted-foreground shrink-0">Batch:</span>
+                  <span className="font-medium truncate">{enrollment.batchName}</span>
+                </div>
+              )}
+              {(enrollment?.subjectNames?.length ?? 0) > 0 && (
+                <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                  <BookOpen className="h-4 w-4 text-primary shrink-0" />
+                  <span className="text-muted-foreground shrink-0">Subjects:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {enrollment!.subjectNames.map((s) => (
+                      <Badge key={s} variant="secondary" className="text-xs rounded-full">{s}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Resume In-Progress Test — prominent */}
       {inProgressAttempt && (
