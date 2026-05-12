@@ -621,7 +621,7 @@ export default function LearnerDetails() {
                 <CardTitle className="text-base">Recent Attempts</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
                 {dive.recentAttempts.map((attempt) => (
                   <div key={attempt.id} className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between rounded-lg border p-3">
                     <div className="min-w-0">
