@@ -381,7 +381,6 @@ export default function LearnerDetails() {
 
     const recentAttempts = [...attempts]
       .sort((a, b) => toMillis(b.submittedAt || b.createdAt) - toMillis(a.submittedAt || a.createdAt))
-      .slice(0, 8)
       .map((a) => ({
         id: a.id,
         title: String(a.testTitle || a.testId || "Test"),
@@ -621,7 +620,8 @@ export default function LearnerDetails() {
               <CardHeader>
                 <CardTitle className="text-base">Recent Attempts</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent>
+                <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
                 {dive.recentAttempts.map((attempt) => (
                   <div key={attempt.id} className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between rounded-lg border p-3">
                     <div className="min-w-0">
@@ -638,6 +638,7 @@ export default function LearnerDetails() {
                 {dive.recentAttempts.length === 0 && (
                   <p className="text-sm text-muted-foreground">No attempts found for this learner.</p>
                 )}
+                </div>
               </CardContent>
             </Card>
 
